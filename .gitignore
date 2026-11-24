@@ -1,0 +1,12 @@
+# fetched or generated, never committed
+/vendor/
+/build/
+/dist/
+/.deps/
+/target/
+# agent notes stay local
+CLAUDE.md
+.claude/
+# console address and logs
+.env
+*.log

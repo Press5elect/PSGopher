@@ -1,0 +1,211 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index d7459cd..a74ba08 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -22,7 +22,6 @@ sha2 = "0.11"
+ tokio = {version = "1.46", features = ["rt-multi-thread", "fs", "process", "macros"] }
+ spin_sleep = "1.3"
+ encoding_rs = "0.8"
+-mimalloc = "0.1"
+ regex = "1.11"
+ tokio-tungstenite = { version = "0.30", features = ["rustls-tls-webpki-roots"], optional = true }
+ matchbox_socket = "0.15"
+@@ -40,7 +39,8 @@ quick-xml = { version = "0.42", optional = true }
+ obfstr = { version = "0.4", optional = true }
+ rustls = { version = "0.23", default-features = false }
+ 
+-[target.'cfg(not(target_os = "android"))'.dependencies]
++[target.'cfg(not(any(target_os = "android", target_vendor = "sie")))'.dependencies]
++mimalloc = "0.1"
+ slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "unstable-winit-030", "backend-winit", "renderer-femtovg-wgpu", "accessibility"], optional = true }
+ rfd = {version = "0.18", optional = true }
+ dirs = "7.0"
+@@ -48,6 +48,13 @@ open = { version = "5.3", optional = true }
+ sdl3-sys = { version = "0.7", features = ["build-from-source-static"] }
+ sdl3-ttf-sys = { version = "0.7", features = ["build-static-vendored", "no-sdlttf-harfbuzz", "no-sdlttf-plutosvg"] }
+ 
++# PS5 (PSGopher): SDL3's bindings only; the title links PSGopher's PS5 implementation of the
++# SDL3 and SDL3_ttf functions Gopher64 calls (ps5/sdl3), and there is no GUI.
++[target.'cfg(target_vendor = "sie")'.dependencies]
++dirs = "7.0"
++sdl3-sys = { version = "0.7", default-features = false, features = ["no-link"] }
++sdl3-ttf-sys = { version = "0.7", default-features = false, features = ["no-link", "no-sdlttf-harfbuzz", "no-sdlttf-plutosvg"] }
++
+ [target.'cfg(target_os = "android")'.dependencies]
+ slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "backend-android-activity-06", "accessibility"], optional = true }
+ jni = "0.22"
+diff --git a/build.rs b/build.rs
+index d4bd4a1..d7fb0e4 100644
+--- a/build.rs
++++ b/build.rs
+@@ -1,4 +1,22 @@
++// SDL3's and SDL3_ttf's headers: from the SDL that sdl3-sys built, or on the PS5 (PSGopher), where
++// SDL is not built, from PSGOPHER_SDL3_INCLUDE (the headers of the release the bindings are for).
++fn sdl_include(dep_out_dir: &str) -> std::path::PathBuf {
++    println!("cargo::rerun-if-env-changed=PSGOPHER_SDL3_INCLUDE");
++    if std::env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("sie") {
++        return std::path::PathBuf::from(
++            std::env::var("PSGOPHER_SDL3_INCLUDE").expect("PSGOPHER_SDL3_INCLUDE names SDL3's headers"),
++        );
++    }
++    std::path::PathBuf::from(std::env::var(dep_out_dir).unwrap()).join("include")
++}
++
+ fn main() {
++    // PSGopher: the PS5 target (vendor "sie") as a cfg of its own, declared so that
++    // #![deny(warnings)] does not trip over it.
++    println!("cargo::rustc-check-cfg=cfg(psgopher)");
++    if std::env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("sie") {
++        println!("cargo::rustc-cfg=psgopher");
++    }
+     println!("cargo::rerun-if-changed=parallel-rdp");
+     println!("cargo::rerun-if-changed=retroachievements");
+     println!("cargo::rerun-if-changed=src/compat");
+@@ -74,13 +92,8 @@ fn main() {
+         .include("parallel-rdp/parallel-rdp-standalone/vulkan")
+         .include("parallel-rdp/parallel-rdp-standalone/vulkan-headers/include")
+         .include("parallel-rdp/parallel-rdp-standalone/util")
+-        .include(
+-            std::path::PathBuf::from(std::env::var("DEP_SDL3_OUT_DIR").unwrap()).join("include"),
+-        )
+-        .include(
+-            std::path::PathBuf::from(std::env::var("DEP_SDL3_TTF_OUT_DIR").unwrap())
+-                .join("include"),
+-        );
++        .include(sdl_include("DEP_SDL3_OUT_DIR"))
++        .include(sdl_include("DEP_SDL3_TTF_OUT_DIR"));
+ 
+     let mut retroachievements_build = cc::Build::new();
+     retroachievements_build
+diff --git a/src/lib.rs b/src/lib.rs
+index 4e51a1b..35d03a2 100644
+--- a/src/lib.rs
++++ b/src/lib.rs
+@@ -3,6 +3,8 @@
+ mod cheats;
+ mod device;
+ mod netplay;
++#[cfg(psgopher)]
++mod psgopher;
+ mod retroachievements;
+ mod savestates;
+ mod ui;
+diff --git a/src/psgopher.rs b/src/psgopher.rs
+new file mode 100644
+index 0000000..be88cac
+--- /dev/null
++++ b/src/psgopher.rs
+@@ -0,0 +1,74 @@
++//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
++//!
++//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
++//! and calls `run`, which plays the game named in them. Added by PSGopher's ps5.patch.
++
++use clap::Parser;
++
++/// The title's data folder on the console, which FTP also reaches (PSGopher's D8).
++pub const DATA_ROOT: &str = "/data/psgopher";
++
++pub fn dirs() -> crate::ui::Dirs {
++    let root = std::path::Path::new(DATA_ROOT);
++    crate::ui::Dirs {
++        config_dir: root.join("config"),
++        data_dir: root.join("data"),
++        cache_dir: root.join("cache"),
++    }
++}
++
++/// First boot: every pad the console has at start goes to the port of its player, with the
++/// default profile, through Gopher64's own assignment (D7). Ports keep what the owner set later.
++fn assign_pads() {
++    crate::ui::sdl_init(sdl3_sys::init::SDL_INIT_GAMEPAD);
++    let pads = crate::ui::input::get_joysticks().len();
++    let mut config = crate::ui::config::Config::new();
++    for port in 1..=pads.min(4) {
++        if config.input.controller_assignment[port - 1].is_none() {
++            crate::ui::input::assign_controller(&mut config, (port - 1) as i32, port);
++            config.input.controller_enabled[port - 1] = true;
++        }
++    }
++    // (Config is written when it is dropped)
++}
++
++/// # Safety
++/// `argv` holds `argc` NUL-terminated strings, as C's `main` receives them.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_main(argc: i32, argv: *const *const std::ffi::c_char) -> i32 {
++    let args: Vec<String> = (0..argc.max(0) as usize)
++        .map(|i| {
++            unsafe { std::ffi::CStr::from_ptr(*argv.add(i)) }
++                .to_string_lossy()
++                .into_owned()
++        })
++        .collect();
++    // A panic must not unwind into C: it is reported and the title ends through the shell.
++    let result = std::panic::catch_unwind(move || {
++        let dirs = dirs();
++        for dir in [&dirs.config_dir, &dirs.cache_dir, &dirs.data_dir] {
++            let _ = std::fs::create_dir_all(dir);
++        }
++        assign_pads();
++        let (close_tx, handle) = crate::create_runtime();
++        let _guard = handle.enter();
++        let arg_count = args.len();
++        let result = match crate::Args::try_parse_from(args) {
++            Ok(args) => crate::run(args, arg_count),
++            Err(e) => Err(std::io::Error::other(e.to_string())),
++        };
++        let _ = close_tx.send(());
++        result
++    });
++    match result {
++        Ok(Ok(())) => 0,
++        Ok(Err(e)) => {
++            eprintln!("psgopher: {e}");
++            1
++        }
++        Err(_) => {
++            eprintln!("psgopher: the emulator panicked (above)");
++            101
++        }
++    }
++}
+diff --git a/src/ui.rs b/src/ui.rs
+index d23f148..e51f562 100644
+--- a/src/ui.rs
++++ b/src/ui.rs
+@@ -217,7 +217,11 @@ pub fn get_dirs() -> Dirs {
+     #[cfg(target_os = "android")]
+     return android::get_dirs();
+ 
+-    #[cfg(not(target_os = "android"))]
++    // PSGopher (PS5): the title's data folder, reachable over FTP; no $HOME, no current_exe
++    #[cfg(psgopher)]
++    return crate::psgopher::dirs();
++
++    #[cfg(not(any(target_os = "android", psgopher)))]
+     {
+         let exe_path = std::env::current_exe().unwrap();
+         let portable_dir = exe_path.parent();
+diff --git a/src/ui/config.rs b/src/ui/config.rs
+index ccced72..a9950e5 100644
+--- a/src/ui/config.rs
++++ b/src/ui/config.rs
+@@ -98,7 +98,7 @@ fn write_cheats(cheats: &Cheats) {
+     let dirs = ui::get_dirs();
+     let file_path = dirs.config_dir.join("cheats.json");
+     if let Ok(f) = std::fs::File::create(file_path)
+-        && let Err(e) = serde_json::to_writer_pretty(f, &cheats)
++        && let Err(e) = serde_json::to_writer_pretty(std::io::BufWriter::new(f), &cheats)
+     {
+         eprintln!("Error writing cheats: {}", e);
+     }
+@@ -133,7 +133,7 @@ fn write_config(config: &Config) {
+     let dirs = ui::get_dirs();
+     let file_path = dirs.config_dir.join("config.json");
+     if let Ok(f) = std::fs::File::create(file_path)
+-        && let Err(e) = serde_json::to_writer_pretty(f, &config)
++        && let Err(e) = serde_json::to_writer_pretty(std::io::BufWriter::new(f), &config)
+     {
+         eprintln!("Error writing config: {}", e);
+     }

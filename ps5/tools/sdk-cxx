@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# PSGopher - cc-rs's compiler for the PS5 target (ps5/tools/sdk-cc.sh)
+SDK_CC="${PSGOPHER_SDK:?}/bin/prospero-clang++" exec "$(dirname "$0")/sdk-cc.sh" "$@"
