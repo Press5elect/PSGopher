@@ -35,7 +35,7 @@ index d7459cd..a74ba08 100644
  slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "backend-android-activity-06", "accessibility"], optional = true }
  jni = "0.22"
 diff --git a/build.rs b/build.rs
-index d4bd4a1..d7fb0e4 100644
+index d4bd4a1..2b35144 100644
 --- a/build.rs
 +++ b/build.rs
 @@ -1,4 +1,22 @@
@@ -77,6 +77,72 @@ index d4bd4a1..d7fb0e4 100644
  
      let mut retroachievements_build = cc::Build::new();
      retroachievements_build
+@@ -129,6 +142,11 @@ fn main() {
+         panic!("unknown arch")
+     };
+ 
++    // PSGopher (PS5): parallel-rdp's interface reports to the benchmark mode
++    if std::env::var("CARGO_CFG_TARGET_VENDOR").as_deref() == Ok("sie") {
++        rdp_build.define("PSGOPHER", None);
++    }
++
+     volk_build.flag(opt_flag);
+     rdp_build.flag(opt_flag);
+     simd_build.flag(opt_flag);
+diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
+index b741e0d..e5dbf38 100644
+--- a/parallel-rdp/interface.cpp
++++ b/parallel-rdp/interface.cpp
+@@ -20,6 +20,17 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+ 
+ using namespace Vulkan;
+ 
++#ifdef PSGOPHER
++// PSGopher (PS5): the benchmark mode's counters (ps5/host/bench.c)
++extern "C" void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns);
++extern "C" void psgopher_bench_rdram_wait(uint64_t ns);
++static uint64_t psgopher_now_ns() {
++  struct timespec t;
++  clock_gettime(CLOCK_MONOTONIC, &t);
++  return uint64_t(t.tv_sec) * 1000000000u + uint64_t(t.tv_nsec);
++}
++#endif
++
+ #define DP_STATUS_XBUS_DMA 0x01
+ #define DP_STATUS_FREEZE 0x02
+ #define DP_STATUS_FLUSH 0x04
+@@ -870,9 +881,15 @@ void rdp_update_screen() {
+   void *android_pointer = SDL_GetPointerProperty(
+       props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
+   if (android_pointer && wsi_platform->is_surface_valid()) {
++#endif
++#ifdef PSGOPHER
++    const uint64_t present_begin = psgopher_now_ns();
+ #endif
+     wsi->end_frame();
+     wsi->begin_frame();
++#ifdef PSGOPHER
++    psgopher_bench_present(present_begin, psgopher_now_ns());
++#endif
+ #ifdef __ANDROID__
+   } else {
+     SDL_PumpEvents();
+@@ -904,9 +921,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+   if (stamp <= completed)
+     return;
+   // Signal the queued commands if they haven't been submitted yet.
++#ifdef PSGOPHER
++  const uint64_t wait_begin = psgopher_now_ns();
++#endif
+   if (stamp > processor->get_timeline_value())
+     processor->signal_timeline();
+   processor->wait_for_timeline(stamp);
++#ifdef PSGOPHER
++  psgopher_bench_rdram_wait(psgopher_now_ns() - wait_begin);
++#endif
+ }
+ 
+ size_t rdp_state_size() {
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..35d03a2 100644
 --- a/src/lib.rs
@@ -92,10 +158,10 @@ index 4e51a1b..35d03a2 100644
  mod ui;
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..be88cac
+index 0000000..f22fd07
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,74 @@
+@@ -0,0 +1,203 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -169,6 +235,135 @@ index 0000000..be88cac
 +            101
 +        }
 +    }
++}
++
++/// The console probe (`/data/psgopher/probe.txt`): what std, Tokio and the clocks do on the console,
++/// one `probe:` line each to klog (PS5_PERFORMANCE.md, "Timing facts to establish").
++#[unsafe(no_mangle)]
++pub extern "C" fn psgopher_probe() {
++    use std::time::{Duration, Instant};
++    let say = |what: &str, result: String| eprintln!("probe: {what}: {result}");
++
++    // std's Mutex and Condvar between two threads (FreeBSD's _umtx_op under both)
++    let pair = std::sync::Arc::new((std::sync::Mutex::new(0u32), std::sync::Condvar::new()));
++    let other = pair.clone();
++    let start = Instant::now();
++    let rounds = 10_000u32;
++    let spawned = std::thread::Builder::new()
++        .name("psgopher-probe".into())
++        .spawn(move || {
++            let (lock, cv) = &*other;
++            for i in 0..rounds {
++                let mut v = lock.lock().unwrap();
++                while *v != i * 2 + 1 {
++                    v = cv.wait(v).unwrap();
++                }
++                *v += 1;
++                cv.notify_one();
++            }
++        });
++    match spawned {
++        Ok(handle) => {
++            let (lock, cv) = &*pair;
++            for i in 0..rounds {
++                let mut v = lock.lock().unwrap();
++                while *v != i * 2 {
++                    v = cv.wait(v).unwrap();
++                }
++                *v += 1;
++                cv.notify_one();
++            }
++            let _ = handle.join();
++            say(
++                "mutex+condvar ping-pong",
++                format!("{rounds} rounds, {:.2} us a round", start.elapsed().as_secs_f64() * 1e6 / rounds as f64),
++            );
++        }
++        Err(e) => say("named thread", format!("FAILED {e}")),
++    }
++
++    // Instant::now: cost and the smallest step it shows
++    let n = 1_000_000;
++    let start = Instant::now();
++    let mut smallest = Duration::MAX;
++    let mut last = start;
++    for _ in 0..n {
++        let now = Instant::now();
++        let d = now - last;
++        if d > Duration::ZERO && d < smallest {
++            smallest = d;
++        }
++        last = now;
++    }
++    say(
++        "Instant::now",
++        format!("{:.1} ns a call, smallest step {} ns", start.elapsed().as_nanos() as f64 / n as f64, smallest.as_nanos()),
++    );
++
++    // sleeping 1 ms: std's (nanosleep) and spin_sleep's (Gopher64's speed limiter)
++    let histogram = |name: &str, sleep: &dyn Fn()| {
++        let mut taken: Vec<f64> = (0..200)
++            .map(|_| {
++                let t = Instant::now();
++                sleep();
++                t.elapsed().as_secs_f64() * 1e3
++            })
++            .collect();
++        taken.sort_by(|a, b| a.partial_cmp(b).unwrap());
++        say(
++            name,
++            format!("1 ms asked: min {:.3} median {:.3} p99 {:.3} max {:.3} ms", taken[0], taken[100], taken[198], taken[199]),
++        );
++    };
++    histogram("std::thread::sleep", &|| std::thread::sleep(Duration::from_millis(1)));
++    histogram("spin_sleep::sleep", &|| spin_sleep::sleep(Duration::from_millis(1)));
++
++    // randomness (rand's SysRng, through getrandom)
++    let mut bytes = [0u8; 32];
++    use rand::TryRng;
++    let ok = rand::rngs::SysRng.try_fill_bytes(&mut bytes).is_ok() && bytes.iter().any(|b| *b != 0);
++    say("SysRng", if ok { "32 bytes".into() } else { "FAILED".into() });
++
++    // a file: 4 MiB written in one write() and read back
++    let path = dirs().cache_dir.join("probe.bin");
++    let data: Vec<u8> = (0..4u32 << 20).map(|i| (i * 2654435761u32 >> 24) as u8).collect();
++    let t = Instant::now();
++    let written = std::fs::write(&path, &data);
++    let write_ms = t.elapsed().as_secs_f64() * 1e3;
++    let t = Instant::now();
++    let read = std::fs::read(&path);
++    let read_ms = t.elapsed().as_secs_f64() * 1e3;
++    say(
++        "file 4 MiB",
++        match (written, read) {
++            (Ok(()), Ok(back)) if back == data => format!("write {write_ms:.1} ms, read {read_ms:.1} ms, same bytes"),
++            (w, r) => format!("FAILED write {:?} read {:?}", w.err(), r.err().map(|e| e.to_string())),
++        },
++    );
++    let _ = std::fs::remove_file(&path);
++
++    // Tokio: a runtime, a file written by tokio::fs, a reply over a oneshot (Gopher64's saves)
++    let t = Instant::now();
++    let (close_tx, handle) = crate::create_runtime();
++    let (tx, rx) = tokio::sync::oneshot::channel();
++    let path = dirs().cache_dir.join("probe-tokio.bin");
++    handle.spawn(async move {
++        let r = tokio::fs::write(&path, b"psgopher").await;
++        let _ = std::fs::remove_file(&path);
++        let _ = tx.send(r.is_ok());
++    });
++    say(
++        "tokio::fs::write",
++        match rx.blocking_recv() {
++            Ok(true) => format!("ok in {:.1} ms (with the runtime's start)", t.elapsed().as_secs_f64() * 1e3),
++            other => format!("FAILED {other:?}"),
++        },
++    );
++    let _ = close_tx.send(());
++    say(
++        "available_parallelism",
++        format!("{:?}", std::thread::available_parallelism().map(|n| n.get())),
++    );
 +}
 diff --git a/src/ui.rs b/src/ui.rs
 index d23f148..e51f562 100644

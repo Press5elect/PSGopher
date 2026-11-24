@@ -31,7 +31,8 @@ rsync -a --delete "$registry/SDL/include/SDL3/" "$include/SDL3/"
 rsync -a --delete "$ttf_src/SDL_ttf/include/SDL3_ttf/" "$include/SDL3_ttf/"
 
 t=x86_64_sie_ps5
-flags="-fno-omit-frame-pointer -ffunction-sections -fdata-sections"
+# (ZSTD_TRACE=0: zstd-sys would leave weak tracing hooks undefined, which the native tool refuses)
+flags="-fno-omit-frame-pointer -ffunction-sections -fdata-sections -DZSTD_TRACE=0"
 export PSGOPHER_SDK="$sdk" "CC_$t=$root/ps5/tools/sdk-cc" "CXX_$t=$root/ps5/tools/sdk-cxx" \
     "AR_$t=$sdk/bin/llvm-ar" "RANLIB_$t=$sdk/bin/llvm-ranlib" \
     "CFLAGS_$t=$flags" "CXXFLAGS_$t=$flags" \

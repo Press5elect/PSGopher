@@ -87,16 +87,25 @@ state; none computes guest floating point.
 never started: the console's networking is unproven for titles (platform contract), and they are
 off unless configured or asked for on the command line.
 
-**D11. Instrumentation from the start.** A counters block (frames, emulated cycles, time in the
-emulation loop, in `rdp_check_rdram` waits, in present, audio underruns) written to klog once a
-second and to a file at exit, enabled by `/data/psgopher/benchmark.txt` (PS5_PERFORMANCE.md).
+**D11. Instrumentation from the start.** `ps5/host/bench.c`: presents and their spread, time
+blocked in present, the emulation thread's CPU time, `rdp_check_rdram` waits, audio underruns,
+one klog line a second and a CSV written once at the end, enabled by
+`/data/psgopher/benchmark.txt`; a probe of std, Tokio and the clocks by `probe.txt`
+(PS5_PERFORMANCE.md). Both are test files the launch reads, never defaults.
+
+**D12. Link.** PS5_Vulkan's recipe unchanged, with Crux2's `--no-dynamic-linker -z
+nodynamic-undefined-weak` (Mesa's weak entry points must not become imports), and PSGopher's own
+`--defsym` bindings kept local (`accept4`, `gai_strerror`, `realpath` to the platform layer;
+`getrandom`, `dl_iterate_phdr`, `pthread_setname_np`, `recvmmsg` to `ps5/host/rust_stubs.c`).
+The four in `rust_stubs.c` belong in the platform layer with host tests; they stay here until
+PS5_PayloadSDK takes them. zstd is built with `ZSTD_TRACE=0` (its weak hooks would be imports).
 
 ## Milestones
 
 | # | Deliverable | Proof |
 | --- | --- | --- |
 | M1 | Gopher64's library cross-compiles for the target | [here] done 2026-11-24 |
-| M2 | The title links through `radv-link.sh` and packages to `eboot.bin` with every import resolved | the link and the import check |
+| M2 | The title links through `radv-link.sh` and packages to `eboot.bin` with every import resolved | [here] done 2026-11-24: 351 imports, all from modules a title loads |
 | M3 | On the console: launch, klog, splash, display, pad detected, a tone through audio, shell exit | a console run (owner) |
 | M4 | A ROM boots and plays: video, audio, pad, saves | a console run per game (owner) |
 | M5 | Benchmark mode numbers per game, baseline recorded | console runs |

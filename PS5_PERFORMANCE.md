@@ -19,43 +19,53 @@ instrumentation, the baseline when it exists, and one entry per optimisation.
 
 ## Benchmark conditions
 
-Benchmark mode is on when `/data/psgopher/benchmark.txt` exists. Its lines:
+Benchmark mode is on when `/data/psgopher/benchmark.txt` exists (`ps5/host/main.cpp`). Its lines:
 
 | Line | Meaning |
 | --- | --- |
 | `rom <path>` | the ROM (overrides autostart) |
-| `seconds <n>` | run n seconds of emulated time, then exit through the shell |
-| `state <slot>` | load a savestate first (a fixed scene) |
-| `unlimited` | speed limiter off: measures the emulator's maximum speed |
-| `upscale <1,2,4,8>` | parallel-rdp's factor for this run |
+| `seconds <n>` | end the game n seconds (wall clock) after its video is up, through Gopher64's own exit event |
+| `unlimited` | speed limiter off (Gopher64's fast-forward event): the emulator's maximum speed |
+
+Not yet: a fixed starting scene (savestate slot) and the upscale factor per run; the upscale is
+set in `config/config.json` (`video.upscale`) for now.
 
 Fixed for every run: console model and firmware recorded in the log, video output mode, no other
 title running, the same build identity, the shader cache state stated (cold or warm).
 
 ## Instrumentation (D11)
 
-Counters, written as one `bench:` line a second to klog and as `/data/psgopher/bench-<time>.csv`:
+`ps5/host/bench.c`, fed by two hooks in parallel-rdp's interface (`PSGOPHER`) and by the SDL
+layer's audio counters. One `bench:` line a second to klog, and a row of
+`/data/psgopher/bench-<time>.csv`, written in one `write()` at the end:
 
-| Counter | Where |
+| Column | Meaning |
 | --- | --- |
-| frames presented, VIs, emulated CPU cycles | VI field event, COUNT |
-| emulation thread: wall time per second, CPU time per second | the run loop |
-| time in `rdp_check_rdram` waits (CPU waiting for GPU) | `interface.cpp` |
-| time in present (`end_frame`, FIFO wait) | `rdp_update_screen` |
-| time sleeping in the speed limiter | `vi::speed_limiter` |
-| audio: grains played, grains underrun, queued ms | `ps5/sdl3` audio stream |
-| frame time min/median/99th/max | present timestamps |
-| GPU time per frame | timestamp queries around RDP work and scanout (later step) |
+| `presents` | frames presented this second |
+| `frame_min/median/p99/max_ms` | present-to-present intervals |
+| `present_block_ms` | time the emulation thread spent in `end_frame` + `begin_frame` (FIFO wait, acquire) |
+| `emu_cpu_ms` | the emulation thread's CPU time this second (`CLOCK_THREAD_CPUTIME_ID`; -1 if the console lacks it) |
+| `rdram_wait_ms`, `rdram_waits` | the CPU waiting for the GPU before touching RDRAM the RDP has pending |
+| `audio_underrun_grains` | 256-frame grains the stream could not fill |
+| `audio_queued_ms` | input audio waiting at the second's end |
 
-The counters cost a clock read per event; anything per instruction is out.
+Emulation-thread wall time minus `emu_cpu_ms` minus `present_block_ms` is time it slept (the speed
+limiter) or was descheduled. The hooks cost two clock reads a frame and one per RDRAM wait.
+
+The probe (`/data/psgopher/probe.txt`, then the title exits) writes `probe:` lines: the
+monotonic clock's cost and resolution, whether `CLOCK_THREAD_CPUTIME_ID` works, the TSC rate
+against it, a std `Mutex`/`Condvar` ping-pong across two threads (FreeBSD's `_umtx_op`),
+`Instant::now`'s cost and step, `std::thread::sleep(1 ms)` and `spin_sleep::sleep(1 ms)`
+(200 each: min/median/p99/max), `SysRng`, a 4 MiB file written and read back, a Tokio file write,
+`available_parallelism`.
 
 ## Timing facts to establish on the console (none assumed)
 
 | Question | How | Status |
 | --- | --- | --- |
-| `CLOCK_MONOTONIC` resolution and call cost | 1e6 calls, `clock_getres` | [unknown] |
-| `nanosleep(1 ms)` real duration (spin_sleep's native part) | 1,000 sleeps, histogram | [unknown] |
-| Present cadence at 59.94 Hz | present timestamps | [unknown] |
+| `CLOCK_MONOTONIC` resolution and call cost | probe: 1e6 calls, `clock_getres` | [unknown] |
+| `sleep(1 ms)` real duration, std's and spin_sleep's | probe: 200 each | [unknown] |
+| Present cadence at 59.94 Hz | benchmark: frame intervals | [unknown] |
 | `sceAudioOutOutput` grain period | timestamps in the audio thread | [unknown] |
 | Core placement of the main thread | `ps5_pthread_getaffinity_np` | [unknown] |
 

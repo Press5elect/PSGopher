@@ -60,6 +60,24 @@ link stubs, 7 have none:
 | `getrandom` | `getrandom` crate (rand) | PSGopher: `ps5/host/rust_stubs.c`, over `arc4random_buf` (bound to the platform's) |
 | `dl_iterate_phdr` | std's backtraces | PSGopher: returns 0 (no symbols in a backtrace), as OGBox does |
 
+The link then found three more that resolve only to `libkernel_sys`, whose imports are null in a
+title, and two with no stub at all:
+
+| Name | Who asks | Resolution |
+| --- | --- | --- |
+| `pthread_setname_np` | std's thread names | PSGopher: forwards to FreeBSD's `pthread_set_name_np` (exported) |
+| `gai_strerror` | std's DNS errors | platform layer's `ps5_gai_strerror` |
+| `umask` | PSGopher's own `main` | removed: a title's kernel applies no mode mask (`ps5platform/libc.h`) |
+| `accept4` | std, mio | platform layer's `ps5_accept4` |
+| `recvmmsg` | quinn-udp (netplay) | PSGopher: one `recvmsg` per message |
+| `realpath` | std's `canonicalize` | platform layer's `ps5_realpath` (the console refuses `realpath` to titles) |
+| `ZSTD_trace_*` (weak) | zstd | zstd built with `ZSTD_TRACE=0` |
+
+All bound with `--defsym`, kept local (PS5_ARCHITECTURE.md D12). After that, all 351 imports of
+the linked title come from modules a title loads [here]. Still unproven until a console run calls
+them: `_umtx_op` (every contended std `Mutex`/`Condvar`), `kqueue`/`kevent` (Tokio; `kevent`
+has console evidence in PROBE.md), `sysctl`, `sigaltstack`. The probe exercises the first two.
+
 A stub existing at link time does not prove the console exports the function
 (`ps5-homebrew` runtime-surface rule): the title's import check (`check-imports`) runs at every link.
 
