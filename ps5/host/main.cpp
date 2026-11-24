@@ -194,6 +194,9 @@ static std::string choose_rom()
 int main()
 {
    platform_init("PSGopher");
+#ifdef PSGOPHER_BUILD
+   say("build: %s", PSGOPHER_BUILD);
+#endif
    /* (no umask: a title's kernel applies no file mode mask, PS5_PayloadSDK's ps5platform/libc.h) */
    for (const char *sub : {"", "/config", "/data", "/data/saves", "/data/states", "/cache", "/cache/radv", "/roms"})
       folder(std::string(ROOT) + sub);

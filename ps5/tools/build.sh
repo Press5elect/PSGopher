@@ -30,7 +30,9 @@ core="$root/build/core/x86_64-sie-ps5/release/libgopher64.a"
 work="$root/build/ps5"
 mkdir -p "$work/obj"
 cc() { PS5_PAYLOAD_SDK="$sdk" sh "$vulkan/tooling/prospero-clang18" "$@"; }
-common=(-O2 -g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter
+# the build's identity, first in the boot log: this repository's commit (+dirty) and Gopher64's pin
+identity="PSGopher $(git -C "$root" describe --always --dirty --abbrev=12), Gopher64 $(sed -n 's/^revision=//p' "$root/ps5/tools/fetch-gopher64.sh" | cut -c1-12), RADV $(sed -n 's/^revision: //p' "$vulkan/.deps/native/radv-release/PROVENANCE.txt" | cut -c1-11), built $(date -u +%Y-%m-%dT%H:%MZ)"
+common=(-DPSGOPHER_BUILD="\"$identity\"" -O2 -g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter
     -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$root/ps5/third_party/stb"
     -I"$vulkan/.deps/native/radv-release/include" -I"$sdk/target/include")
 cc -std=c11 "${common[@]}" -c "$root/ps5/host/platform.c" -o "$work/obj/platform.o"
