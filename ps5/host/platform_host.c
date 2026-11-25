@@ -132,3 +132,11 @@ void
 audio_stop(void)
 {
 }
+
+int
+platform_log_open(const char *path, const char *previous)
+{
+   (void)path;
+   (void)previous;
+   return -1;
+}

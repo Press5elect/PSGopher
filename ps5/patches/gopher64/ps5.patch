@@ -533,10 +533,10 @@ index 4e51a1b..35d03a2 100644
  mod ui;
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..99c992b
+index 0000000..fc91758
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,287 @@
+@@ -0,0 +1,338 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -655,6 +655,53 @@ index 0000000..99c992b
 +    .unwrap_or(false)
 +}
 +
++/// What went wrong last: Gopher64's error, or a panic's message and place, for the game list's
++/// notice (the boot log has it too, through descriptor 2).
++static LAST_ERROR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
++
++fn keep_error(text: String) {
++    if let Ok(mut last) = LAST_ERROR.lock() {
++        *last = text;
++    }
++}
++
++/// A panic's message and place are kept, then reported as Rust reports them.
++fn keep_panics() {
++    static ONCE: std::sync::Once = std::sync::Once::new();
++    ONCE.call_once(|| {
++        let report = std::panic::take_hook();
++        std::panic::set_hook(Box::new(move |info| {
++            let message = info
++                .payload()
++                .downcast_ref::<&str>()
++                .map(|s| s.to_string())
++                .or_else(|| info.payload().downcast_ref::<String>().cloned())
++                .unwrap_or_else(|| "a panic".into());
++            let place = info.location().map(|l| format!(" ({}:{})", l.file(), l.line())).unwrap_or_default();
++            keep_error(format!("{message}{place}"));
++            report(info);
++        }));
++    });
++}
++
++/// Copies the last error into `buffer` (NUL-terminated, cut to fit); returns its length.
++///
++/// # Safety
++/// `buffer` has room for `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_last_error(buffer: *mut std::ffi::c_char, size: usize) -> usize {
++    if buffer.is_null() || size == 0 {
++        return 0;
++    }
++    let text = LAST_ERROR.lock().map(|t| t.clone()).unwrap_or_default();
++    let n = text.len().min(size - 1);
++    unsafe {
++        std::ptr::copy_nonoverlapping(text.as_ptr(), buffer as *mut u8, n);
++        *buffer.add(n) = 0;
++    }
++    n
++}
++
 +/// # Safety
 +/// `argv` holds `argc` NUL-terminated strings, as C's `main` receives them.
 +#[unsafe(no_mangle)]
@@ -666,7 +713,10 @@ index 0000000..99c992b
 +                .into_owned()
 +        })
 +        .collect();
-+    // A panic must not unwind into C: it is reported and the title ends through the shell.
++    // A panic must not unwind into C: it is reported, kept for the game list, and the list comes back.
++    keep_error(String::new());
++    keep_panics();
++    eprintln!("psgopher: Gopher64 with {:?}", args);
 +    let result = std::panic::catch_unwind(move || {
 +        let dirs = dirs();
 +        for dir in [&dirs.config_dir, &dirs.cache_dir, &dirs.data_dir] {
@@ -687,6 +737,7 @@ index 0000000..99c992b
 +        Ok(Ok(())) => 0,
 +        Ok(Err(e)) => {
 +            eprintln!("psgopher: {e}");
++            keep_error(e.to_string());
 +            1
 +        }
 +        Err(_) => {

@@ -4,6 +4,10 @@
 
 Nothing here has run on a console yet.
 
+- Added: the boot log, `psgopher-boot.log` in the title folder (the run before kept), as OGBox and
+  Crux2; it has Gopher64's own messages and panics, which went nowhere before (Rust writes to
+  descriptor 2, which klog's capture cannot move). A game that does not start says why in the list.
+
 - Added: the game list: every N64 ROM on the console's `/data`, USB drives, extended storage and
   network shares, in tabs (Internal, USB, Network), kept between starts and searched again in the
   background; a game ends back in the list. Drawn with Dear ImGui on RADV.

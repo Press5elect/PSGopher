@@ -12,13 +12,16 @@
 
 #include <ps5platform/klog.h>
 
+#include <fcntl.h>
 #include <pthread.h>
 #include <stdarg.h>
 #include <stdatomic.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/stat.h>
 #include <time.h>
+#include <unistd.h>
 
 int sceSystemServiceHideSplashScreen(void);
 int sceSystemServiceLoadExec(const char *path, const char *const *argv);
@@ -55,15 +58,52 @@ platform_init(const char *title_name)
    say("splash dismissed: %d", sceSystemServiceHideSplashScreen());
 }
 
+/* PSGopher: the boot log, as OGBox and Crux2 keep theirs (title folder, the previous run's kept).
+ * Lines from say() go to it (one write each, with the time since the start) and to klog. Descriptor 2
+ * is made the log file too (closed, then the file opened again takes the lowest free number): a
+ * title may not dup2, so klog's capture moves only C's stderr stream, and what Rust writes to
+ * descriptor 2 (Gopher64's errors, a panic's message) would otherwise go nowhere. */
+static int log_fd = -1;
+static double log_start;
+
+int
+platform_log_open(const char *path, const char *previous)
+{
+   log_start = now_seconds();
+   if (previous) {
+      unlink(previous);
+      rename(path, previous);
+   }
+   log_fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_APPEND, 0666);
+   if (log_fd < 0)
+      return -1;
+   fchmod(log_fd, 0666);
+   fflush(stderr);
+   close(STDERR_FILENO);
+   const int two = open(path, O_WRONLY | O_APPEND);
+   if (two >= 0 && two != STDERR_FILENO)
+      close(two);
+   return two == STDERR_FILENO ? 1 : 0;
+}
+
 void
 say(const char *format, ...)
 {
+   char line[2048];
+   const int head = log_fd >= 0 ? snprintf(line, sizeof(line), "[%9.3f] ", now_seconds() - log_start) : 0;
    va_list args;
    va_start(args, format);
-   vfprintf(stderr, format, args);
+   int n = vsnprintf(line + head, sizeof(line) - head - 1, format, args);
    va_end(args);
-   fputc('\n', stderr);
+   if (n < 0)
+      n = 0;
+   if ((size_t)(head + n) > sizeof(line) - 2)
+      n = (int)sizeof(line) - 2 - head;
+   line[head + n] = '\n';
+   fwrite(line + head, 1, (size_t)n + 1, stderr);
    fflush(stderr);
+   if (log_fd >= 0 && log_fd != STDERR_FILENO)
+      (void)write(log_fd, line, (size_t)(head + n + 1));
 }
 
 double

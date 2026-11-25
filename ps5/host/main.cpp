@@ -40,6 +40,7 @@ extern "C" {
 #include "psgopher_sdl3.h"
 int psgopher_main(int argc, const char *const *argv);
 void psgopher_probe(void);
+size_t psgopher_last_error(char *buffer, size_t size);
 }
 
 static const char ROOT[] = "/data/psgopher";
@@ -178,6 +179,14 @@ static std::string autostart_rom()
 
 static void log_line(const char *line) { say("%s", line); }
 
+/* what Gopher64 said when a game did not start or ended in error (psgopher.rs keeps it) */
+static std::string last_error()
+{
+   char text[512] = {};
+   psgopher_last_error(text, sizeof(text));
+   return std::string("The game ended with an error: ") + (text[0] ? text : "see the log");
+}
+
 /* Gopher64 with one ROM; its status */
 static int play(const std::string &rom)
 {
@@ -193,7 +202,21 @@ int main()
    /* out of the sandbox before anything starts a thread (platform_init's klog capture does) */
    static char title_dir[192] = "/app0";
    (void)psgopher_sandbox_leave(title_dir, sizeof(title_dir));
+   /* the boot log, as OGBox's and Crux2's: in the title folder, the run before kept beside it; in
+    * /data/psgopher when the title folder takes no file */
+   mkdir(ROOT, 0777);
+   static std::string log_path, log_note;
+   for (const std::string &dir : {std::string(title_dir), std::string(ROOT)}) {
+      const std::string path = dir + "/psgopher-boot.log", previous = dir + "/psgopher-boot.previous.log";
+      const int opened = platform_log_open(path.c_str(), previous.c_str());
+      if (opened >= 0) {
+         log_path = path;
+         log_note = opened ? "Gopher64's own messages too" : "Gopher64's own messages only in klog";
+         break;
+      }
+   }
    platform_init("PSGopher");
+   say("log: %s (%s)", log_path.empty() ? "none could be written" : log_path.c_str(), log_note.c_str());
 #ifdef PSGOPHER_BUILD
    say("build: %s", PSGOPHER_BUILD);
 #endif
@@ -251,15 +274,17 @@ int main()
    if (!first.empty()) {
       settings.applyHdr();
       if (play(first) != 0)
-         notice = "The game ended with an error (the log says why)";
+         notice = last_error();
    }
    for (;;) {
+      if (!notice.empty() && !log_path.empty())
+         notice += " (" + log_path + ")";
       const psgopher::MenuResult chosen = psgopher::runMenu(notice);
       if (!chosen.play)
          break;
       settings.load(); /* the list may have changed HDR10 */
       settings.applyHdr();
-      notice = play(chosen.rom) == 0 ? std::string() : "The game ended with an error (the log says why)";
+      notice = play(chosen.rom) == 0 ? std::string() : last_error();
    }
    say("closing");
    return 0;

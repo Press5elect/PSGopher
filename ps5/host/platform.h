@@ -20,6 +20,10 @@ void platform_init(const char *title_name);
 
 /* One line to klog, flushed. */
 void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
+/* PSGopher: the boot log at path (the last one moved to previous first), for say() and for what is
+ * written to descriptor 2. Before any thread starts. 1: descriptor 2 is the log too; 0: it is not;
+ * -1: no log. */
+int platform_log_open(const char *path, const char *previous);
 
 double now_seconds(void);
 

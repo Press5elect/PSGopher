@@ -136,6 +136,11 @@ Files the title reads, in `/data/psgopher/` (create them over FTP):
 | `config/psgopher.ini` | the display (`display = 60`, `120` or `vrr`) and HDR10 (`hdr = on`, `hdr_white`, `hdr_peak`); the list's settings write it |
 | `benchmark.txt` | benchmark mode: lines `rom <file>`, `seconds <n>`, `unlimited` (`bench:` lines, `bench-<time>.csv`) |
 
+The boot log is `psgopher-boot.log` in the title folder (else in `/data/psgopher/`), the run before
+kept as `psgopher-boot.previous.log`: every line the title says, and what Gopher64 writes to
+standard error (descriptor 2 is the log file; a title may not `dup2`, so klog's capture moves only
+C's `stderr` stream). The same lines go to klog.
+
 What Gopher64 writes there: `config/config.json` (the list's settings write it too), `data/saves/`,
 `data/states/`, `cache/` (RADV's shader cache in `cache/radv`). The list keeps `cache/library.tsv`
 and copies a share's ROM to `cache/play/`.

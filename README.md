@@ -48,6 +48,11 @@ refresh and HDR10 are off by default and untested on a console yet.
 
 `/data/psgopher/autostart.txt` (a ROM's path or a name in `roms/`) still boots that ROM first.
 
+**The log**: `psgopher-boot.log` in the title folder (`/data/homebrew/PPSA99280/` when installed
+there; `/data/psgopher/` when the title folder takes no file), with the run before kept as
+`psgopher-boot.previous.log`, as OGBox and Crux2 keep theirs. Gopher64's own messages are in it too.
+When a game does not start, the list says why at the top.
+
 No games, BIOS or other copyrighted data are included.
 
 ## Licence and credits
