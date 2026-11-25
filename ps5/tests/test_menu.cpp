@@ -103,6 +103,13 @@ extern "C" void pad_poll(struct pad *pad)
 		}
 	}
 	*pad = {};
+	/* L2 and R2 are triggers: the script names them by the front end's digital bits */
+	const uint32_t l2 = 1u << 28, r2 = 1u << 29;
+	if (held & l2)
+		pad->l2 = 1;
+	if (held & r2)
+		pad->r2 = 1;
+	held &= ~(l2 | r2);
 	pad->pressed = held & ~g_held;
 	pad->held = held;
 	g_held = held;
@@ -112,10 +119,11 @@ extern "C" void pad_poll(struct pad *pad)
 
 static std::map<std::string, int64_t> g_settings = {
 	{ "video.upscale", 1 }, { "video.ssaa", 0 }, { "video.integer_scaling", 0 }, { "video.widescreen", 0 },
-	{ "video.crt", 0 }, { "emulation.overclock", 0 }, { "emulation.disable_expansion_pak", 0 },
+	{ "video.crt", 0 }, { "video.vsync", 1 }, { "emulation.overclock", 0 }, { "emulation.disable_expansion_pak", 0 },
 	{ "emulation.rewind", 0 }, { "emulation.usb", 0 }, { "input.emulate_vru", 0 },
 	{ "input.controller_enabled.0", 1 }, { "input.controller_enabled.1", 0 },
 	{ "input.controller_enabled.2", 0 }, { "input.controller_enabled.3", 0 },
+	{ "input.transfer_pak.0", 0 }, { "input.transfer_pak.1", 0 }, { "input.transfer_pak.2", 0 }, { "input.transfer_pak.3", 0 },
 };
 static int g_setting_reads = 0;
 
@@ -135,6 +143,79 @@ extern "C" bool psgopher_setting_set(const char *name, int64_t value)
 		return false;
 	it->second = value;
 	return true;
+}
+
+/* Gopher64's text settings and input profiles, stood in for */
+static std::map<std::string, std::string> g_texts = {
+	{ "input.input_profile_binding.0", "default" }, { "input.input_profile_binding.1", "default" },
+	{ "input.input_profile_binding.2", "default" }, { "input.input_profile_binding.3", "default" },
+	{ "input.controller_assignment.0", "ps5:pad1" }, { "input.controller_assignment.1", "" },
+	{ "input.controller_assignment.2", "" },         { "input.controller_assignment.3", "" },
+	{ "input.gb_rom_path.0", "" }, { "input.gb_rom_path.1", "" }, { "input.gb_rom_path.2", "" }, { "input.gb_rom_path.3", "" },
+	{ "input.gb_ram_path.0", "" }, { "input.gb_ram_path.1", "" }, { "input.gb_ram_path.2", "" }, { "input.gb_ram_path.3", "" },
+};
+struct StubProfile {
+	int kind[19] = {}, id[19] = {}, axis[19] = {};
+	int64_t deadzone = 5, dinput = 0;
+};
+static std::map<std::string, StubProfile> g_profiles = { { "default", {} } };
+extern "C" int psgopher_setting_text(const char *name, char *buffer, size_t size)
+{
+	const auto it = g_texts.find(name);
+	if (it == g_texts.end())
+		return -1;
+	snprintf(buffer, size, "%s", it->second.c_str());
+	return (int)it->second.size();
+}
+extern "C" bool psgopher_setting_text_set(const char *name, const char *value)
+{
+	const auto it = g_texts.find(name);
+	if (it == g_texts.end())
+		return false;
+	it->second = value;
+	return true;
+}
+extern "C" int psgopher_profiles(char *buffer, size_t size)
+{
+	std::string all;
+	for (const auto &p : g_profiles)
+		all += (all.empty() ? "" : "\n") + p.first;
+	snprintf(buffer, size, "%s", all.c_str());
+	return (int)all.size();
+}
+extern "C" bool psgopher_profile_new(const char *name)
+{
+	return g_profiles.emplace(name, StubProfile{}).second;
+}
+extern "C" bool psgopher_profile_delete(const char *name)
+{
+	return std::string(name) != "default" && g_profiles.erase(name) == 1;
+}
+extern "C" bool psgopher_profile_binding(const char *name, int index, int *kind, int *id, int *axis)
+{
+	const auto it = g_profiles.find(name);
+	if (it == g_profiles.end() || index < 0 || index >= 19)
+		return false;
+	*kind = it->second.kind[index], *id = it->second.id[index], *axis = it->second.axis[index];
+	return true;
+}
+extern "C" bool psgopher_profile_bind(const char *name, int index, int kind, int id, int axis)
+{
+	const auto it = g_profiles.find(name);
+	if (it == g_profiles.end() || index < 0 || index >= 19)
+		return false;
+	it->second.kind[index] = kind, it->second.id[index] = id, it->second.axis[index] = axis;
+	return true;
+}
+extern "C" int64_t psgopher_profile_number(const char *name, int what, int64_t value, bool set)
+{
+	const auto it = g_profiles.find(name);
+	if (it == g_profiles.end())
+		return -1;
+	int64_t &v = what == 0 ? it->second.deadzone : it->second.dinput;
+	if (set)
+		v = value;
+	return v;
 }
 
 /* ---------------------------------------------------------------- Gopher64's facts, stood in for */
@@ -248,15 +329,29 @@ int main(int argc, char **argv)
 		g_script.push_back({ PAD_OPTIONS, nullptr, 2 }); /* the filter back to All */
 	for (int i = 0; i < 3; i++)
 		g_script.push_back({ PAD_SQUARE, nullptr, 2 }); /* the sort back to A-Z */
+	const uint32_t L2 = 1u << 28, R2 = 1u << 29;
 	for (const Step &st : std::vector<Step>{
-			{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 }, { none, "5-bench", 3 },
-			{ PAD_CROSS, nullptr, 2 },                     /* the crystal: 125 MHz */
-			{ PAD_DOWN, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, /* the video stage: 2x */
-			{ none, "6-bench-changed", 3 } })
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 }, { none, "5-bench", 3 }, /* Video: Resolution */
+			{ PAD_CROSS, nullptr, 2 },                     /* 2x */
+			{ none, "6-bench-changed", 3 },
+			{ R2, "6a-bench-screen", 3 }, { R2, "6b-bench-tv", 3 }, { R2, nullptr, 2 },
+			{ PAD_CROSS, "6c-bench-emulation", 3 },       /* the CPU clock: 125 MHz */
+			{ R2, "6d-bench-controllers", 3 },
+			{ R2, "6e-bench-profiles", 3 } })
 		g_script.push_back(st);
-	for (int i = 0; i < 17; i++) /* down to "Network shares" */
+	for (int i = 0; i < 10; i++) /* down to the N64's A (Profile, New, Delete, D Right .. A) */
 		g_script.push_back({ PAD_DOWN, nullptr, 2 });
 	for (const Step &st : std::vector<Step>{
+			{ PAD_CROSS, "6f-bench-binding", 3 },          /* bind it: */
+			{ PAD_TRIANGLE, "6g-bench-bound", 3 },         /* to Triangle */
+			{ R2, "6h-bench-hotkeys", 3 } })
+		g_script.push_back(st);
+	for (int i = 0; i < 5; i++) /* down to Leave the game (Hotkeys, Quick menu tap, Activator, Save, Load, Leave) */
+		g_script.push_back({ PAD_DOWN, nullptr, 2 });
+	for (const Step &st : std::vector<Step>{
+			{ PAD_LEFT, nullptr, 2 },                      /* Leave the game: off */
+			{ none, "6i-bench-hotkey-changed", 3 },
+			{ R2, nullptr, 2 }, { R2, "6j-bench-pc-only", 3 }, { L2, nullptr, 2 },
 			{ none, "7-bench-console", 3 },
 			{ PAD_CROSS, "8-shares", 3 },
 			{ PAD_CROSS, "9-share-form", 3 },          /* Add a share */
@@ -284,7 +379,8 @@ int main(int argc, char **argv)
 	CHECK(r.name == "Bomb Squad 64 (E)" && r.load_state == -1);
 	CHECK(g_settings["emulation.overclock"] == 1);
 	CHECK(g_settings["video.upscale"] == 2);
-	CHECK(g_setting_reads < 40); /* read once each, not every frame */
+	CHECK(g_setting_reads < 60); /* read once each, not every frame */
+	CHECK(g_profiles["default"].kind[7] == 1 && g_profiles["default"].id[7] == 3); /* A bound to Triangle */
 	for (const char *shot : { "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes" }) {
 		struct stat st;
 		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);

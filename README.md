@@ -27,18 +27,26 @@ storage, and on network shares.
 - **RACK**: every cartridge on shelves, A to Z. D-pad, L2/R2 by letter, □ sort (A-Z, recently
   played, most played, size), OPTIONS show (all, played, never played, has probes, internal, USB,
   network), ✕ power on, △ seat it on the home strip.
-- **BENCH**: the board's parts are the settings, Gopher64's own (the crystal: overclock; the video
-  stage: resolution, supersampling; AV out: CRT look, widescreen, integer scaling; the expansion
-  slot; the ports; rewind and the USB link) and PSGopher's (refresh: 59.94 Hz, 119.88 Hz or
-  variable refresh; HDR10 and its brightness; in AV out, the sound buffer: 33 to 133 ms, 67 by default), and "This console": network shares, the sandbox,
-  searching again, closing. ▲ ▼ part, ◄ ► or ✕ change.
+- **BENCH**: every setting, in sections (L2/R2): Video (resolution, supersampling, vsync, shader
+  compiles, the graphics driver's thread), Screen & sound (CRT look, widescreen, integer scaling,
+  the sound buffer: 33 to 133 ms, 67 by default), TV output (59.94 Hz, 119.88 Hz or variable refresh;
+  HDR10 and its brightness), Emulation (CPU clock, Expansion Pak, rewind, USB link), Controllers
+  (each port: plugged in, which DualSense, its input profile, its Transfer Pak with the Game Boy
+  ROM and save), Profiles (every N64 button's DualSense control: ✕ then press it; the deadzone),
+  Hotkeys, This console (network shares, the sandbox, searching again, closing) and PC only (what
+  Gopher64 has on a PC alone, and why). ▲ ▼ setting, ◄ ► change, ✕ choose; the line below says what
+  the setting does.
 
 L1/R1 change the view. **In a game**, tap the touch pad for the quick menu: resume, take a probe
 (save state), load one, turn the stats overlay on or off (speed, frame times, audio), reset, or
 eject the cartridge (back to the board). The controls are
 Gopher64's default gamepad layout on the DualSense: Cross A, Square B, L2 Z, Options Start, the
-right stick the C buttons; the touch pad held down is Gopher64's hotkey (with Options: back to the
-board; with L1/R1: save/load state; with L2: fast forward). Saves and states are in
+right stick the C buttons; the touch pad held down is Gopher64's hotkey activator (with Options: back
+to the board; with L1/R1: save/load state; with L2: fast forward; with C-left: rewind; with B: change
+the pak). In BENCH, Hotkeys turns them all off, gives each action another button or none, and adds
+what Gopher64 has only on a keyboard (reset, pause, frame advance, volume, the save slot, its frame
+rate, cropping the letterbox); the quick menu's tap can be switched off too (it stays on while
+nothing else leaves a game). Saves and states are in
 `/data/psgopher/data/`.
 
 **Network shares**: BENCH, This console, Network shares adds and edits SMB and NFS shares (an

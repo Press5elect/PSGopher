@@ -65,6 +65,9 @@ ImU32 colourOf(const Look &look, float lightness = 0.62f);
  * screen: flat for a strip, the projector for the slot). font for the band's code. */
 using Transform = std::function<ImVec2(ImVec2)>;
 void drawLabel(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to);
+/* its top part: visible_height of the label's 208 units (the slot shows less of it); the box art when
+ * there is one, else the drawn label */
+void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height);
 
 /* ---- the moving parts ---- */
 struct Machine {

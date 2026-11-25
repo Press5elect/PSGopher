@@ -105,7 +105,7 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..daffec3 100644
+index b741e0d..10dacaf 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
 @@ -20,6 +20,54 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -163,7 +163,44 @@ index b741e0d..daffec3 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -496,6 +544,14 @@ static void rdp_new_processor() {
+@@ -427,6 +475,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
+     case USER_EVENT_FAST_FORWARD:
+       callback.enable_speedlimiter = !callback.enable_speedlimiter;
+       break;
++#ifdef PSGOPHER
++    // PSGopher (PS5): what Gopher64 has only on a keyboard, for the controller's hotkeys
++    // (psgopher.rs): the same as the keys do above
++    case 100: // reset (F12)
++      callback.reset_game = true;
++      break;
++    case 101: // pause (Alt+P)
++      callback.paused = !callback.paused;
++      break;
++    case 102: // frame advance (/)
++      callback.frame_advance = true;
++      break;
++    case 103: // volume down ([)
++      callback.lower_volume = true;
++      break;
++    case 104: // volume up (])
++      callback.raise_volume = true;
++      break;
++    case 105: // the frame rate (F1)
++      display_fps = !display_fps;
++      break;
++    case 106: // crop the letterbox (F4)
++      crop_letterbox = !crop_letterbox;
++      break;
++    case 107: // the next save slot (Alt+digit)
++    case 108: // the one before
++      callback.save_state_slot = (callback.save_state_slot + (event->user.code == 107 ? 1 : 9)) % 10;
++      rdp_onscreen_message(std::format("Save slot {}", callback.save_state_slot).c_str(), MESSAGE_VERY_SHORT);
++      break;
++#endif
+     default:
+       break;
+     }
+@@ -496,6 +574,14 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -178,7 +215,7 @@ index b741e0d..daffec3 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -582,6 +638,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -582,6 +668,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -188,7 +225,7 @@ index b741e0d..daffec3 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -642,6 +701,10 @@ void rdp_close() {
+@@ -642,6 +731,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -199,7 +236,7 @@ index b741e0d..daffec3 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +796,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +826,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -492,7 +529,7 @@ index b741e0d..daffec3 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +1132,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1162,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -514,7 +551,7 @@ index b741e0d..daffec3 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +1182,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1212,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -531,7 +568,7 @@ index b741e0d..daffec3 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,8 +1218,19 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,8 +1248,19 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -551,7 +588,7 @@ index b741e0d..daffec3 100644
    }
    device.submit(cmd);
  }
-@@ -857,6 +1240,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
+@@ -857,6 +1270,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
  }
  
  void rdp_render_frame() {
@@ -562,7 +599,7 @@ index b741e0d..daffec3 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1257,16 @@ void rdp_update_screen() {
+@@ -870,9 +1287,16 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -579,7 +616,7 @@ index b741e0d..daffec3 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1298,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1328,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -595,7 +632,7 @@ index b741e0d..daffec3 100644
  }
  
  size_t rdp_state_size() {
-@@ -1076,6 +1476,9 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -1076,6 +1506,9 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
@@ -605,7 +642,7 @@ index b741e0d..daffec3 100644
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1132,9 +1535,13 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1132,9 +1565,13 @@ uint64_t rdp_process_commands(uint64_t now) {
        return interrupt_timer;
      }
  
@@ -620,7 +657,7 @@ index b741e0d..daffec3 100644
  
      if (command >= 0x26 && command <= 0x29) { // Sync{Load,Pipe,Tile,Full}
        rdp_add_busy(RDP_SYNC_CLOCKS);
-@@ -1233,8 +1640,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +1670,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -634,7 +671,7 @@ index b741e0d..daffec3 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +1675,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +1705,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  
@@ -1018,10 +1055,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..33e5d21
+index 0000000..fc18ec8
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,914 @@
+@@ -0,0 +1,1206 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1056,6 +1093,81 @@ index 0000000..33e5d21
 +    // (Config is written when it is dropped)
 +}
 +
++/// The controller's hotkeys (Gopher64's: the Hotkey Activator held and another button), as the
++/// title sets them before each game (PSGOPHER_HOTKEYS, from psgopher.ini): on or off, and each
++/// action's N64 button (an input profile index) or none. Gopher64's six keep its buttons by default;
++/// the actions it has only on a keyboard are added, none by default.
++pub const HOTKEY_ACTIONS: [(&str, i32, i8); 15] = [
++    ("save", 1, crate::ui::input_profile::L_TRIG as i8),
++    ("load", 2, crate::ui::input_profile::R_TRIG as i8),
++    ("exit", 3, crate::ui::input_profile::START_BUTTON as i8),
++    ("ff", 4, crate::ui::input_profile::Z_TRIG as i8),
++    ("rewind", 5, crate::ui::input_profile::L_CBUTTON as i8),
++    ("pak", 0, crate::ui::input_profile::B_BUTTON as i8),
++    ("reset", 100, -1),
++    ("pause", 101, -1),
++    ("advance", 102, -1),
++    ("voldown", 103, -1),
++    ("volup", 104, -1),
++    ("fps", 105, -1),
++    ("crop", 106, -1),
++    ("slotnext", 107, -1),
++    ("slotprev", 108, -1),
++];
++static HOTKEYS_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
++static HOTKEY_BUTTONS: [std::sync::atomic::AtomicI8; 15] = [const { std::sync::atomic::AtomicI8::new(-1) }; 15];
++
++/// Reads PSGOPHER_HOTKEYS ("on=1,save=13,..."): what it does not name keeps Gopher64's default.
++pub fn load_hotkeys() {
++    use std::sync::atomic::Ordering::Relaxed;
++    for (i, (_, _, default)) in HOTKEY_ACTIONS.iter().enumerate() {
++        HOTKEY_BUTTONS[i].store(*default, Relaxed);
++    }
++    HOTKEYS_ON.store(true, Relaxed);
++    let Ok(text) = std::env::var("PSGOPHER_HOTKEYS") else { return };
++    for pair in text.split(',') {
++        let Some((name, value)) = pair.split_once('=') else { continue };
++        let Ok(value) = value.trim().parse::<i32>() else { continue };
++        if name.trim() == "on" {
++            HOTKEYS_ON.store(value != 0, Relaxed);
++        } else if let Some(i) = HOTKEY_ACTIONS.iter().position(|a| a.0 == name.trim()) {
++            let button = if (0..crate::ui::input_profile::HOTKEY as i32).contains(&value) { value as i8 } else { -1 };
++            HOTKEY_BUTTONS[i].store(button, Relaxed);
++        }
++    }
++}
++
++pub fn hotkeys_on() -> bool {
++    HOTKEYS_ON.load(std::sync::atomic::Ordering::Relaxed)
++}
++
++fn hotkey_button(i: usize) -> i8 {
++    HOTKEY_BUTTONS[i].load(std::sync::atomic::Ordering::Relaxed)
++}
++
++/// The Hotkey Activator is held: each action whose button went down now, as Gopher64's
++/// handle_hotkeys sends its events (the pak change is the input's own, pak_hotkey_pressed).
++pub fn handle_hotkeys(keys: u32, last_key_state: u32) {
++    for (i, (_, code, _)) in HOTKEY_ACTIONS.iter().enumerate() {
++        let button = hotkey_button(i);
++        if *code == 0 || button < 0 {
++            continue;
++        }
++        let bit = 1u32 << button;
++        if keys & bit != 0 && last_key_state & bit == 0 {
++            let mut event: sdl3_sys::events::SDL_Event = Default::default();
++            event.user.r#type = u32::from(sdl3_sys::events::SDL_EVENT_USER);
++            event.user.code = *code;
++            unsafe { sdl3_sys::events::SDL_PushEvent(&mut event) };
++        }
++    }
++}
++
++pub fn pak_hotkey_pressed(keys: u32) -> bool {
++    let button = hotkey_button(5);
++    button >= 0 && keys & (1u32 << button) != 0
++}
++
 +/// Gopher64's settings by name, for the title's game list (ps5/host/menu.cpp): each read is
 +/// config.json as it is now, each change is written back at once (Config writes itself when it
 +/// is dropped), so the list and Gopher64 always agree and every change persists. The names are
@@ -1071,6 +1183,7 @@ index 0000000..33e5d21
 +        "video.widescreen" => SettingRef::Flag(&mut config.video.widescreen),
 +        "video.vsync" => SettingRef::Flag(&mut config.video.vsync),
 +        "video.crt" => SettingRef::Flag(&mut config.video.crt),
++        "video.fullscreen" => SettingRef::Flag(&mut config.video.fullscreen),
 +        "emulation.overclock" => SettingRef::Flag(&mut config.emulation.overclock),
 +        "emulation.disable_expansion_pak" => SettingRef::Flag(&mut config.emulation.disable_expansion_pak),
 +        "emulation.usb" => SettingRef::Flag(&mut config.emulation.usb),
@@ -1481,6 +1594,7 @@ index 0000000..33e5d21
 +            let _ = std::fs::create_dir_all(dir);
 +        }
 +        assign_pads();
++        load_hotkeys();
 +        let (close_tx, handle) = crate::create_runtime();
 +        let _guard = handle.enter();
 +        let arg_count = args.len();
@@ -1936,6 +2050,221 @@ index 0000000..33e5d21
 +    }
 +    200
 +}
++
++/// Gopher64's settings that are text, by name (as `psgopher_setting_get`'s): `input.gb_rom_path.N`
++/// and `input.gb_ram_path.N` (the Transfer Pak's Game Boy ROM and save), `input.input_profile_binding.N`
++/// (the port's input profile) and `input.controller_assignment.N` (the controller's path,
++/// `ps5:padK`; "" none). Its length, or -1 for a name Gopher64 has not.
++///
++/// # Safety
++/// `name` is a NUL-terminated string; `buffer` holds `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_setting_text(name: *const std::ffi::c_char, buffer: *mut std::ffi::c_char, size: usize) -> i32 {
++    let Some(name) = setting_name(name) else { return -1 };
++    let text = std::panic::catch_unwind(|| {
++        let config = crate::ui::config::Config::new();
++        let index = |prefix: &str| name.strip_prefix(prefix)?.parse::<usize>().ok().filter(|i| *i < 4);
++        if let Some(i) = index("input.gb_rom_path.") {
++            Some(config.input.gb_rom_path[i].clone())
++        } else if let Some(i) = index("input.gb_ram_path.") {
++            Some(config.input.gb_ram_path[i].clone())
++        } else if let Some(i) = index("input.input_profile_binding.") {
++            Some(config.input.input_profile_binding[i].clone())
++        } else if let Some(i) = index("input.controller_assignment.") {
++            Some(config.input.controller_assignment[i].clone().unwrap_or_default())
++        } else {
++            None
++        }
++    })
++    .ok()
++    .flatten();
++    match text {
++        Some(text) => {
++            copy_out(&text, buffer, size);
++            text.len() as i32
++        }
++        None => -1,
++    }
++}
++
++/// Sets one (see `psgopher_setting_text`) and writes config.json; false for a name Gopher64 has not
++/// or a profile it has not.
++///
++/// # Safety
++/// `name` and `value` are NUL-terminated strings.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_setting_text_set(name: *const std::ffi::c_char, value: *const std::ffi::c_char) -> bool {
++    let (Some(name), Some(value)) = (setting_name(name), setting_name(value)) else { return false };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        let index = |prefix: &str| name.strip_prefix(prefix)?.parse::<usize>().ok().filter(|i| *i < 4);
++        if let Some(i) = index("input.gb_rom_path.") {
++            config.input.gb_rom_path[i] = value.clone();
++        } else if let Some(i) = index("input.gb_ram_path.") {
++            config.input.gb_ram_path[i] = value.clone();
++        } else if let Some(i) = index("input.input_profile_binding.") {
++            if !config.input.input_profiles.contains_key(&value) {
++                return false;
++            }
++            config.input.input_profile_binding[i] = value.clone();
++        } else if let Some(i) = index("input.controller_assignment.") {
++            config.input.controller_assignment[i] = if value.is_empty() { None } else { Some(value.clone()) };
++        } else {
++            return false;
++        }
++        true
++    })
++    .unwrap_or(false)
++}
++
++/// The input profiles' names, one a line ("default" among them).
++///
++/// # Safety
++/// `buffer` holds `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_profiles(buffer: *mut std::ffi::c_char, size: usize) -> i32 {
++    let names = std::panic::catch_unwind(|| {
++        let config = crate::ui::config::Config::new();
++        config.input.input_profiles.keys().cloned().collect::<Vec<_>>().join("\n")
++    })
++    .unwrap_or_default();
++    copy_out(&names, buffer, size);
++    names.len() as i32
++}
++
++/// A new profile by that name, Gopher64's default bindings (false when the name is taken or empty).
++///
++/// # Safety
++/// `name` is a NUL-terminated string.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_profile_new(name: *const std::ffi::c_char) -> bool {
++    let Some(name) = setting_name(name) else { return false };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        if name.trim().is_empty() || config.input.input_profiles.contains_key(&name) {
++            return false;
++        }
++        config.input.input_profiles.insert(name.clone(), crate::ui::input_profile::get_default_profile());
++        true
++    })
++    .unwrap_or(false)
++}
++
++/// Takes a profile away (not "default"); the ports that had it get "default".
++///
++/// # Safety
++/// `name` is a NUL-terminated string.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_profile_delete(name: *const std::ffi::c_char) -> bool {
++    let Some(name) = setting_name(name) else { return false };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        if name == "default" || config.input.input_profiles.remove(&name).is_none() {
++            return false;
++        }
++        for binding in config.input.input_profile_binding.iter_mut() {
++            if *binding == name {
++                *binding = "default".to_string();
++            }
++        }
++        true
++    })
++    .unwrap_or(false)
++}
++
++/// One input of a profile (an index of Gopher64's input_profile: 0 D Right .. 17 Stick Up, 18 the
++/// Hotkey Activator), its controller binding (the second of its two; the first is the keyboard's):
++/// kind 0 none, 1 a gamepad button (id: SDL_GamepadButton), 2 a gamepad axis (id: SDL_GamepadAxis,
++/// axis: its direction, 1 or -1), 3 a joystick's button, hat or axis (DirectInput). False for a
++/// profile or index Gopher64 has not.
++///
++/// # Safety
++/// `name` is a NUL-terminated string; the outputs are valid pointers.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_profile_binding(name: *const std::ffi::c_char, index: i32, kind: *mut i32, id: *mut i32, axis: *mut i32) -> bool {
++    let Some(name) = setting_name(name) else { return false };
++    let found = std::panic::catch_unwind(|| {
++        let config = crate::ui::config::Config::new();
++        let profile = config.input.input_profiles.get(&name)?;
++        let slot = profile.inputs.get(usize::try_from(index).ok()?)?;
++        Some(match &slot[1] {
++            None => (0, 0, 0),
++            Some(crate::ui::config::InputItem::ControllerButton(b)) => (1, b.id, 0),
++            Some(crate::ui::config::InputItem::ControllerAxis(a)) => (2, a.id, a.axis as i32),
++            Some(_) => (3, 0, 0),
++        })
++    })
++    .ok()
++    .flatten();
++    match found {
++        Some((k, i, a)) => {
++            unsafe {
++                *kind = k;
++                *id = i;
++                *axis = a;
++            }
++            true
++        }
++        None => false,
++    }
++}
++
++/// Binds one input of a profile to the controller (see `psgopher_profile_binding`; kind 0 clears
++/// it). The keyboard's binding stays.
++///
++/// # Safety
++/// `name` is a NUL-terminated string.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_profile_bind(name: *const std::ffi::c_char, index: i32, kind: i32, id: i32, axis: i32) -> bool {
++    let Some(name) = setting_name(name) else { return false };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        let Some(profile) = config.input.input_profiles.get_mut(&name) else { return false };
++        let Some(slot) = usize::try_from(index).ok().and_then(|i| profile.inputs.get_mut(i)) else { return false };
++        slot[1] = match kind {
++            0 => None,
++            1 => Some(crate::ui::config::InputItem::ControllerButton(crate::ui::config::InputKeyButton { id })),
++            2 => Some(crate::ui::config::InputItem::ControllerAxis(crate::ui::config::InputControllerAxis {
++                id,
++                axis: if axis < 0 { -1 } else { 1 },
++                initial_state: 0,
++            })),
++            _ => return false,
++        };
++        true
++    })
++    .unwrap_or(false)
++}
++
++/// A profile's number: `what` 0 its deadzone (Gopher64's units), 1 DirectInput (the pad read as a
++/// raw joystick, 0 or 1). With `set`, `value` is written first. -1 for a profile Gopher64 has not.
++///
++/// # Safety
++/// `name` is a NUL-terminated string.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_profile_number(name: *const std::ffi::c_char, what: i32, value: i64, set: bool) -> i64 {
++    let Some(name) = setting_name(name) else { return -1 };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        let Some(profile) = config.input.input_profiles.get_mut(&name) else { return -1 };
++        match what {
++            0 => {
++                if set {
++                    profile.deadzone = value.clamp(0, 100) as i32;
++                }
++                profile.deadzone as i64
++            }
++            1 => {
++                if set {
++                    profile.dinput = value != 0;
++                }
++                profile.dinput as i64
++            }
++            _ => -1,
++        }
++    })
++    .unwrap_or(-1)
++}
 diff --git a/src/ui.rs b/src/ui.rs
 index d23f148..e51f562 100644
 --- a/src/ui.rs
@@ -2051,6 +2380,46 @@ index ccced72..a9950e5 100644
      {
          eprintln!("Error writing config: {}", e);
      }
+diff --git a/src/ui/input.rs b/src/ui/input.rs
+index 34c6d92..2311b8c 100644
+--- a/src/ui/input.rs
++++ b/src/ui/input.rs
+@@ -348,6 +348,13 @@ fn handle_joystick_events(ui: &mut ui::Ui) {
+     }
+ }
+ 
++#[cfg(target_vendor = "sie")]
++fn handle_hotkeys(keys: u32, last_key_state: u32) {
++    // PSGopher (PS5): each action's button, or none, from the title's settings (psgopher.rs)
++    crate::psgopher::handle_hotkeys(keys, last_key_state);
++}
++
++#[cfg(not(target_vendor = "sie"))]
+ fn handle_hotkeys(keys: u32, last_key_state: u32) {
+     let mut event: sdl3_sys::events::SDL_Event = Default::default();
+     event.user.r#type = u32::from(sdl3_sys::events::SDL_EVENT_USER);
+@@ -438,11 +445,19 @@ pub fn get(ui: &mut ui::Ui, channel: usize) -> InputData {
+     let last_key_state = ui.input.controllers[channel].last_key_state;
+     ui.input.controllers[channel].last_key_state = keys;
+ 
+-    if hotkey_pressed(profile, joystick, controller) {
++    #[cfg(target_vendor = "sie")]
++    let hotkeys_on = crate::psgopher::hotkeys_on();
++    #[cfg(not(target_vendor = "sie"))]
++    let hotkeys_on = true;
++    if hotkeys_on && hotkey_pressed(profile, joystick, controller) {
+         handle_hotkeys(keys, last_key_state);
++        #[cfg(target_vendor = "sie")]
++        let pak_change_pressed = crate::psgopher::pak_hotkey_pressed(keys);
++        #[cfg(not(target_vendor = "sie"))]
++        let pak_change_pressed = keys & (1 << ui::input_profile::B_BUTTON) != 0;
+         InputData {
+             data: 0,
+-            pak_change_pressed: keys & (1 << ui::input_profile::B_BUTTON) != 0,
++            pak_change_pressed,
+         }
+     } else {
+         let mut pak_change_pressed = false;
 diff --git a/src/ui/storage.rs b/src/ui/storage.rs
 index 0fe2469..9625778 100644
 --- a/src/ui/storage.rs

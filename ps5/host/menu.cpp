@@ -63,6 +63,14 @@ extern "C" {
 #include "platform.h"
 #include "sandbox.h"
 int64_t psgopher_setting_get(const char *name);
+int psgopher_setting_text(const char *name, char *buffer, size_t size);
+bool psgopher_setting_text_set(const char *name, const char *value);
+int psgopher_profiles(char *buffer, size_t size);
+bool psgopher_profile_new(const char *name);
+bool psgopher_profile_delete(const char *name);
+bool psgopher_profile_binding(const char *name, int index, int *kind, int *id, int *axis);
+bool psgopher_profile_bind(const char *name, int index, int kind, int id, int axis);
+int64_t psgopher_profile_number(const char *name, int what, int64_t value, bool set);
 bool psgopher_setting_set(const char *name, int64_t value);
 size_t psgopher_cheats_of(const char *game, char *buffer, size_t size);
 bool psgopher_cheat_set(const char *game, const char *name, bool on, const char *option);
@@ -892,6 +900,60 @@ struct Menu {
 			if (kv.first == key)
 				kv.second = value;
 	}
+	/* Gopher64's text settings and input profiles, cached the same way (each read is config.json) */
+	std::map<std::string, std::string> texts;
+	std::string text(const std::string &key)
+	{
+		auto it = texts.find(key);
+		if (it != texts.end())
+			return it->second;
+		char buffer[1024] = {};
+		const int n = psgopher_setting_text(key.c_str(), buffer, sizeof(buffer));
+		return texts[key] = n < 0 ? std::string() : std::string(buffer);
+	}
+	bool setText(const std::string &key, const std::string &value)
+	{
+		if (!psgopher_setting_text_set(key.c_str(), value.c_str())) {
+			tell("Gopher64 did not take " + key);
+			return false;
+		}
+		texts[key] = value;
+		return true;
+	}
+	std::vector<std::string> profileNames;
+	bool profilesRead = false;
+	const std::vector<std::string> &profiles()
+	{
+		if (!profilesRead) {
+			std::string all(64 * 1024, '\0');
+			const int n = psgopher_profiles(all.data(), all.size());
+			all.resize(std::max(0, std::min(n, (int)all.size() - 1)));
+			profileNames.clear();
+			size_t at = 0;
+			while (at <= all.size() && !all.empty()) {
+				const size_t nl = all.find('\n', at);
+				profileNames.push_back(all.substr(at, nl == std::string::npos ? std::string::npos : nl - at));
+				if (nl == std::string::npos)
+					break;
+				at = nl + 1;
+			}
+			profilesRead = true;
+		}
+		return profileNames;
+	}
+	std::map<std::pair<std::string, int>, Binding> bindings;
+	Binding binding(const std::string &profile, int index)
+	{
+		const auto key = std::make_pair(profile, index);
+		auto it = bindings.find(key);
+		if (it != bindings.end())
+			return it->second;
+		Binding b;
+		if (!psgopher_profile_binding(profile.c_str(), index, &b.kind, &b.id, &b.axis))
+			b = Binding{};
+		return bindings[key] = b;
+	}
+	std::map<std::pair<std::string, int>, int64_t> profileNumbers;
 	void draw(const Buttons &b, float dt);
 	void drawShares(const Buttons &b);
 	void drawShareEdit(const Buttons &b);
@@ -1392,6 +1454,39 @@ MenuResult runMenu(const std::string &notice)
 			return { c.id, c.aspect };
 		};
 		host.about = [](const Game &g) { return webAbout(g.name); };
+		host.text = [m](const char *key) { return m->text(key); };
+		host.set_text = [m](const char *key, const std::string &value) { return m->setText(key, value); };
+		host.profiles = [m] { return m->profiles(); };
+		host.profile_new = [m](const std::string &name) {
+			const bool ok = psgopher_profile_new(name.c_str());
+			m->profilesRead = false;
+			if (ok)
+				m->tell("Profile \"" + name + "\" made with Gopher64's default bindings");
+			return ok;
+		};
+		host.profile_delete = [m](const std::string &name) {
+			const bool ok = psgopher_profile_delete(name.c_str());
+			m->profilesRead = false;
+			m->texts.clear(); /* (ports that had it have "default" now) */
+			if (ok)
+				m->tell("Profile \"" + name + "\" taken away");
+			return ok;
+		};
+		host.binding = [m](const std::string &profile, int index) { return m->binding(profile, index); };
+		host.bind = [m](const std::string &profile, int index, const Binding &b) {
+			const bool ok = psgopher_profile_bind(profile.c_str(), index, b.kind, b.id, b.axis);
+			m->bindings.erase(std::make_pair(profile, index));
+			return ok;
+		};
+		host.profile_number = [m](const std::string &profile, int what, int64_t value, bool set) {
+			const auto key = std::make_pair(profile, what);
+			if (!set) {
+				auto it = m->profileNumbers.find(key);
+				if (it != m->profileNumbers.end())
+					return it->second;
+			}
+			return m->profileNumbers[key] = psgopher_profile_number(profile.c_str(), what, value, set);
+		};
 		menu.front = std::make_unique<Frontend>(std::move(host));
 	}
 
@@ -1418,6 +1513,9 @@ MenuResult runMenu(const std::string &notice)
 			menu.input.now = (float)now_seconds();
 			menu.input.held = held;
 			menu.input.pressed = held & ~was;
+			menu.input.left_x = released ? p.left_x : 0, menu.input.left_y = released ? p.left_y : 0;
+			menu.input.right_x = released ? p.right_x : 0, menu.input.right_y = released ? p.right_y : 0;
+			menu.input.l2 = released ? p.l2 : 0, menu.input.r2 = released ? p.r2 : 0;
 			for (int bit = 0; bit < 32; bit++)
 				if (menu.input.pressed & (1u << bit))
 					menu.input.held_since[bit] = menu.input.last_repeat[bit] = menu.input.now;

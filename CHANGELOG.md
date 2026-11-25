@@ -95,6 +95,25 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### Settings, hotkeys, BENCH and the cartridges (the owner's requests, 2026-11-25)
+
+- Added: every Gopher64 setting is in BENCH: vsync; each port's controller (which DualSense), input
+  profile and Transfer Pak with its Game Boy ROM and save (a file picker over the console and USB
+  drives); the input profiles themselves (each N64 button's DualSense control, bound by pressing
+  it, the Hotkey Activator, the deadzone, DirectInput; new and deleted profiles). What has no place
+  on the console (fullscreen, keyboard bindings, Gopher64's own window's theme and folders,
+  netplay, RetroAchievements) is listed under PC only with the reason.
+- Added: the hotkeys can be configured: all on or off, each action's N64 button or none, the
+  activator rebound; Gopher64's keyboard-only functions become hotkey actions (reset, pause, frame
+  advance, volume, next and previous save slot, its frame rate, crop the letterbox). The quick
+  menu's touch pad tap can be off (kept on while nothing else leaves a game). In `psgopher.ini`
+  (`hotkeys`, `hotkey_<action>`, `quickmenu_tap`); the core reads them before each game.
+- Changed: BENCH is sections (L2/R2) of labelled rows with a line saying what the chosen one does,
+  in place of cards around the board that ▲▼ crossed in no clear order.
+- Changed: the home strip's cartridges are drawn as N64 cartridges (the owner's reference photo):
+  the grey shell with its arched top, raised centre panel, grooves and steps, the label in its
+  recess.
+
 ### From the fifth console log (2026-11-25)
 
 - Measured: shading with the general pipeline is 0% at 8x, and at 2x parallel-rdp takes 1.7 ms of

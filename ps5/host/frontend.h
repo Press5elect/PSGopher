@@ -45,6 +45,15 @@ struct PadInput {
 	float now = 0;
 	float held_since[32] = {};
 	float last_repeat[32] = {};
+	/* the sticks and triggers (-1..1 and 0..1), for binding a profile's input to one */
+	float left_x = 0, left_y = 0, right_x = 0, right_y = 0, l2 = 0, r2 = 0;
+};
+
+/* a controller binding of an input profile (psgopher.rs's psgopher_profile_binding): kind 0 none,
+ * 1 a gamepad button (SDL_GamepadButton), 2 a gamepad axis (SDL_GamepadAxis, its direction), 3 a
+ * raw joystick's */
+struct Binding {
+	int kind = 0, id = 0, axis = 0;
 };
 
 struct FrontendFonts {
@@ -78,6 +87,17 @@ struct FrontendHost {
 	std::function<std::pair<ImTextureID, float>(const Game &)> cover;
 	/* its description ("title\ntext": Wikipedia's summary), "" while there is none */
 	std::function<std::string(const Game &)> about;
+	/* Gopher64's text settings (psgopher_setting_text): the Transfer Pak's files, each port's profile
+	 * and controller */
+	std::function<std::string(const char *)> text;
+	std::function<bool(const char *, const std::string &)> set_text;
+	/* its input profiles: the names, a new one (Gopher64's default bindings), one taken away, an
+	 * input's binding and a new one, the deadzone (0) and DirectInput (1) */
+	std::function<std::vector<std::string>()> profiles;
+	std::function<bool(const std::string &)> profile_new, profile_delete;
+	std::function<Binding(const std::string &, int)> binding;
+	std::function<bool(const std::string &, int, const Binding &)> bind;
+	std::function<int64_t(const std::string &, int, int64_t, bool)> profile_number;
 };
 
 class Frontend {
@@ -103,7 +123,21 @@ private:
 	float strip_x_ = 0; // the strip's scroll (eased)
 	float rack_scroll_ = 0;
 	int sort_ = 0, show_ = 0;
-	int bench_sel_ = 0;
+	int bench_section_ = 0, bench_sel_ = 0;
+	float bench_scroll_ = 0;
+	std::string bench_profile_;       // the profile BENCH's Profiles section edits
+	/* binding an input: the profile and input, when it began, and whether the button that began it
+	 * was let go */
+	int capture_input_ = -1;
+	std::string capture_profile_;
+	float capture_since_ = 0;
+	bool capture_released_ = false;
+	/* the file picker (a Transfer Pak's Game Boy ROM or save): its folder, the setting it writes, its
+	 * cursor (-1 closed) */
+	int picker_sel_ = -1;
+	std::string picker_folder_, picker_key_;
+	bool picker_rom_ = true;
+	void filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
 	int probes_open_ = -1; // the probe picker: its cursor, -1 closed
 	struct Cheat {
 		std::string name, note;

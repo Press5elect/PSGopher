@@ -7,6 +7,7 @@
  */
 #pragma once
 
+#include <array>
 #include <string>
 
 namespace psgopher {
@@ -21,6 +22,14 @@ struct TitleSettings {
 	std::string shaderCompile{ "1" }; // parallel-rdp's specialised shading pipelines: "1" one background
 	                                  // thread (Gopher64's), "4" four, "now" compiled when first needed
 	bool driverThread{ false };  // RADV records and submits on a thread of its own (Crux2's switch)
+	/* the controller's hotkeys (Gopher64's: its Hotkey Activator held, the touch pad by default, and
+	 * a button): on or off, and each action's N64 button (an input profile index, -1 none); the
+	 * actions are kHotkeyActions' (psgopher.rs's HOTKEY_ACTIONS, in its order) */
+	bool hotkeys{ true };
+	std::array<int, 15> hotkey{ { 13, 12, 4, 5, 9, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1 } };
+	bool quickmenuTap{ true };   // a touch pad tap opens the quick menu (kept on when nothing else leaves a game)
+	/* a game can be left: by the quick menu's tap or the hotkey's Leave game */
+	bool canLeaveGame() const { return quickmenuTap || (hotkeys && hotkey[2] >= 0); }
 	std::string file;            // "" is /data/psgopher/config/psgopher.ini (the host tests give another)
 
 	/* Reads the file (written with the defaults when it is missing). */
@@ -36,5 +45,13 @@ struct TitleSettings {
 };
 
 extern const char kTitleSettingsFile[];
+
+/* the hotkeys' actions, in psgopher.rs's order: the ini's name, the label */
+struct HotkeyAction {
+	const char *key, *label;
+};
+extern const HotkeyAction kHotkeyActions[15];
+/* the N64's buttons by input profile index (0 D Right .. 17 Stick Up), as Gopher64 names them */
+extern const char *const kN64Inputs[19];
 
 } // namespace psgopher

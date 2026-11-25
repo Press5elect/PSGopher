@@ -281,6 +281,8 @@ ImU32 lerpColour(ImU32 a, ImU32 b, float t)
 	return ch(0) | ch(8) | ch(16) | ch(24);
 }
 
+} // namespace
+
 void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height)
 {
 	if (look.cover != ImTextureID_Invalid && look.cover_aspect > 0) {
@@ -363,6 +365,8 @@ void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transfo
 		p.fill({ ImVec2(196, 180), ImVec2(222, 180), ImVec2(222, 194), ImVec2(196, 194) }, colourOf(look));
 	}
 }
+
+namespace {
 
 } // namespace
 

@@ -507,6 +507,11 @@ extern "C" int psgopher_sdl3_take_tap(void)
 {
    const bool seen = tap_seen;
    tap_seen = false;
+   /* the quick menu's tap can be off (psgopher.ini's quickmenu_tap; the title keeps it on when no
+    * hotkey leaves the game) */
+   const char *on = getenv("PSGOPHER_QUICKMENU_TAP");
+   if (on && !strcmp(on, "0"))
+      return 0;
    return seen;
 }
 

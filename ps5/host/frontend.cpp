@@ -719,6 +719,65 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 
 /* ---------------------------------------------------------------- HOME */
 
+/* An N64 cartridge seen from the front, as the owner's reference photo shows one: a grey shell wider
+ * than tall with an arched top, a raised centre panel set off by grooves, steps at the bottom of the
+ * side panels, and the label recessed into the centre panel (the box art, or the drawn label) */
+static void cartridge(ImDrawList *dl, const Ink &ink, float x0, float top, float sw, float sh, const board::Look &look, ImFont *font, bool on)
+{
+	auto P = [&](float x, float y) { return ink.at(x0 + x * sw, top + y * sh); };
+	auto arc = [](float x) { const float d = 2 * x - 1; return .13f * d * d; }; /* the top's curve: 0 at the middle */
+	/* the shell */
+	constexpr int kArc = 16;
+	ImVec2 shell[kArc + 1 + 4];
+	int n = 0;
+	for (int i = 0; i <= kArc; i++) {
+		const float x = (float)i / kArc;
+		shell[n++] = P(x, arc(x));
+	}
+	shell[n++] = P(1, .96f);
+	shell[n++] = P(.985f, 1);
+	shell[n++] = P(.015f, 1);
+	shell[n++] = P(0, .96f);
+	const ImU32 grey = IM_COL32(0x8e, 0x90, 0x95, 255), light = IM_COL32(0xa2, 0xa4, 0xa9, 255), groove = IM_COL32(0x6c, 0x6e, 0x73, 255),
+	            shadow = IM_COL32(0x5c, 0x5e, 0x63, 255);
+	dl->AddConvexPolyFilled(shell, n, grey);
+	/* the centre panel, raised: lighter, on the same arch */
+	{
+		ImVec2 panel[kArc + 1 + 2];
+		int m = 0;
+		for (int i = 0; i <= kArc; i++) {
+			const float x = .19f + .62f * i / kArc;
+			panel[m++] = P(x, arc(x) - .005f);
+		}
+		panel[m++] = P(.81f, 1);
+		panel[m++] = P(.19f, 1);
+		dl->AddConvexPolyFilled(panel, m, light);
+	}
+	/* light from above: the lower part a little darker */
+	dl->AddRectFilledMultiColor(P(0, .45f), P(1, 1), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 46), IM_COL32(0, 0, 0, 46));
+	/* the grooves either side of the centre panel */
+	for (float x : { .19f, .81f })
+		dl->AddLine(P(x, arc(x) + .01f), P(x, 1), groove, ink.u * 1.6f);
+	/* the steps at the bottom of the side panels */
+	for (int side = 0; side < 2; side++) {
+		auto X = [side](float x) { return side ? 1 - x : x; };
+		const ImVec2 step[4] = { P(X(.035f), 1), P(X(.035f), .70f), P(X(.13f), .70f), P(X(.13f), 1) };
+		dl->AddPolyline(step, 4, groove, ink.u * 1.3f);
+	}
+	/* the label's recess: a rounded inset, its edge in shadow; the label inside, filling it */
+	const float lx = x0 + .245f * sw, ly = top + .085f * sh, lw = .51f * sw, lh = .83f * sh;
+	ink.rect(lx - 3, ly - 3, lw + 6, lh + 6, shadow, 7);
+	dl->PushClipRect(ink.at(lx, ly), ink.at(lx + lw, ly + lh), true);
+	{
+		const float k = std::max(lw / 236, lh / 208), ox = lx + (lw - 236 * k) / 2, oy = ly;
+		board::drawLabelPart(dl, look, font, [&](ImVec2 v) { return ink.at(ox + v.x * k, oy + v.y * k); }, std::max(208.0f, lh / k));
+	}
+	dl->PopClipRect();
+	ink.frame(lx - 1, ly - 1, lw + 2, lh + 2, IM_COL32(0x4a, 0x4c, 0x50, 255), 6, 1.5f);
+	/* the shell's edge */
+	dl->AddPolyline(shell, n, on ? board::colourOf(look) : IM_COL32(0x55, 0x57, 0x5c, 255), ink.u * (on ? 2.2f : 1.2f), ImDrawFlags_Closed);
+}
+
 void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 {
 	Ink ink{ dl, u_ };
@@ -761,7 +820,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	if (g) {
 		const board::Look look = board::lookOf(g->name, g->id); /* (its colour only: no cover asked for) */
 		const ImVec2 slot = projector_(board::anchor("slot"));
-		const ImVec2 from = S(960, 806);
+		const ImVec2 from = S(960, 842);
 		ImVec2 pts[40];
 		for (int i = 0; i < 40; i++) {
 			const float t = i / 39.0f, a = 1 - t;
@@ -778,7 +837,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		panel(dl, f, *g, false, 1920 - 64 - 470, 150, 1);
 
 	/* the strip */
-	const float pitch = 172, target = 960 - 75 - strip_sel_ * pitch;
+	const float pitch = 214, target = 960 - 98 - strip_sel_ * pitch;
 	strip_x_ += (target - strip_x_) * std::min(1.0f, 1.0f / 60 * 9);
 	if (n == 0) {
 		ink.text(f.mono, 18, 64, 900, kDim,
@@ -787,27 +846,17 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	for (int k = std::max(0, strip_sel_ - 7); k < std::min(n, strip_sel_ + 8); k++) {
 		const Game &cg = games_[strip_[k]];
 		const bool on = k == strip_sel_;
-		const float scale = on ? 1.08f : .9f, lift = on ? 0 : 34;
-		const float cx = strip_x_ + k * pitch + 75, top = 808 + lift + (1 - scale) * 120;
-		const float sw = 150 * scale, sh = 170 * scale, x0 = cx - sw / 2;
+		const float scale = on ? 1.08f : .9f, lift = on ? 0 : 22;
+		const float sw = 196 * scale, sh = 126 * scale, cx = strip_x_ + k * pitch + 98, top = 846 + lift + (1 - scale) * 80;
+		const float x0 = cx - sw / 2;
 		const board::Look look = lookFor(cg);
 		if (on)
 			ink.glow(x0, top, sw, sh, board::colourOf(look), 22, 10);
-		/* the shell (the design's clip-path), its label */
-		const float px[10] = { 0, .10f, .90f, 1, 1, .78f, .74f, .26f, .22f, 0 };
-		const float py[10] = { .12f, 0, 0, .12f, 1, 1, .93f, .93f, 1, 1 };
-		ImVec2 shell[10];
-		for (int i = 0; i < 10; i++)
-			shell[i] = S(x0 + px[i] * sw, top + py[i] * sh);
-		dl->AddConcavePolyFilled(shell, 10, IM_COL32(0x22, 0x2b, 0x33, 255));
-		dl->AddRectFilledMultiColor(S(x0, top + sh * .12f), S(x0 + sw, top + sh * .93f), IM_COL32(0x27, 0x31, 0x3a, 0),
-		                            IM_COL32(0x27, 0x31, 0x3a, 0), IM_COL32(0x12, 0x18, 0x1d, 200), IM_COL32(0x12, 0x18, 0x1d, 200));
-		const float lw = 118 * scale, lx = cx - lw / 2, ly = top + 16 * scale, s = lw / 236 * u_;
-		board::drawLabel(dl, look, f.mono_heavy, [lx, ly, s, this](ImVec2 v) { return ImVec2(lx * u_ + v.x * s, ly * u_ + v.y * s); });
+		cartridge(dl, ink, x0, top, sw, sh, look, f.mono_heavy, on);
 		if (const char r = regionOf(cg))
-			flag(ink, r, x0 + sw - 34 * scale, top + sh - 30 * scale, 24 * scale);
+			flag(ink, r, x0 + sw * .86f - 12 * scale, top + sh * .30f, 22 * scale);
 		std::string name = titleOf(cg);
-		while (name.size() > 4 && ink.width(f.mono, 16, name) > 168)
+		while (name.size() > 4 && ink.width(f.mono, 16, name) > 200)
 			name = name.substr(0, name.size() - 4) + "\xE2\x80\xA6";
 		const float nw = ink.width(f.mono, 16, name);
 		ink.text(f.mono, 16, cx - nw / 2, top + sh + 10, on ? kText : kDim, name);
@@ -1229,43 +1278,111 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 
 namespace {
 
-/* a callout's row: options to choose one of, or a value moved with left/right */
+/* BENCH: sections (L2 and R2), each a panel of labelled rows (up and down), each row one setting */
 struct Option {
-	const char *label;
+	std::string label;
 	int64_t value;
 };
 struct Row {
-	std::vector<Option> options;
-	std::function<int64_t()> get;
+	enum Kind { Choice, Stepper, Action, File, Bind, Info } kind = Choice;
+	std::string label, help;
+	std::vector<Option> options;                 // Choice
+	std::function<int64_t()> get;                // Choice, Stepper
 	std::function<void(int64_t)> set;
-	bool stepper = false; // left/right move the value by `step` within [lo, hi]
-	int64_t lo = 0, hi = 0, step = 1;
-	const char *unit = "";
+	int64_t lo = 0, hi = 0, step = 1;            // Stepper
+	std::string unit;
+	std::function<std::string()> value;          // Action, File, Bind, Info: what is shown
+	std::function<void()> run;                   // Action, File (the picker), Bind (press a button)
+	std::function<void()> clear;                 // File, Bind: left clears
 };
-struct Callout {
-	const char *title, *text;
-	const char *part; // board::anchor's name
-	float x, y, w;
+struct Section {
+	std::string name, part, text;
 	std::vector<Row> rows;
 };
+
+/* a DualSense control by SDL's gamepad numbering, as Gopher64's profiles keep it */
+std::string bindingLabel(const Binding &b)
+{
+	static const char *const buttons[21] = { "Cross", "Circle", "Square", "Triangle", "Touch pad", "PS", "Options", "L3", "R3", "L1", "R1",
+		                                     "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Mute", "", "", "", "", "Touch pad" };
+	switch (b.kind) {
+	case 1:
+		return b.id >= 0 && b.id < 21 && buttons[b.id][0] ? buttons[b.id] : "Button " + std::to_string(b.id);
+	case 2:
+		switch (b.id) {
+		case 0: return b.axis < 0 ? "Left stick \xE2\x86\x90" : "Left stick \xE2\x86\x92";
+		case 1: return b.axis < 0 ? "Left stick \xE2\x86\x91" : "Left stick \xE2\x86\x93";
+		case 2: return b.axis < 0 ? "Right stick \xE2\x86\x90" : "Right stick \xE2\x86\x92";
+		case 3: return b.axis < 0 ? "Right stick \xE2\x86\x91" : "Right stick \xE2\x86\x93";
+		case 4: return "L2";
+		case 5: return "R2";
+		default: return "Axis " + std::to_string(b.id);
+		}
+	case 3: return "a joystick's input (DirectInput)";
+	default: return "\xE2\x80\x94 none";
+	}
+}
+
+/* what the pad does now, as a binding (the first button down, or a stick or trigger past 60%) */
+bool padBinding(const PadInput &pad, Binding *out)
+{
+	static const struct {
+		uint32_t bit;
+		int id;
+	} buttons[] = { { PAD_CROSS, 0 }, { PAD_CIRCLE, 1 }, { PAD_SQUARE, 2 }, { PAD_TRIANGLE, 3 }, { PAD_TOUCH_PAD, 4 }, { PAD_OPTIONS, 6 },
+		            { PAD_L3, 7 },    { PAD_R3, 8 },     { PAD_L1, 9 },      { PAD_R1, 10 },      { PAD_UP, 11 },       { PAD_DOWN, 12 },
+		            { PAD_LEFT, 13 }, { PAD_RIGHT, 14 } };
+	for (const auto &b : buttons)
+		if (pad.pressed & b.bit) {
+			*out = { 1, b.id, 0 };
+			return true;
+		}
+	const float axes[4] = { pad.left_x, pad.left_y, pad.right_x, pad.right_y };
+	for (int a = 0; a < 4; a++)
+		if (std::fabs(axes[a]) > .6f) {
+			*out = { 2, a, axes[a] < 0 ? -1 : 1 };
+			return true;
+		}
+	if (pad.l2 > .6f) {
+		*out = { 2, 4, 1 };
+		return true;
+	}
+	if (pad.r2 > .6f) {
+		*out = { 2, 5, 1 };
+		return true;
+	}
+	return false;
+}
+
+bool padAtRest(const PadInput &pad)
+{
+	return pad.held == 0 && std::fabs(pad.left_x) < .3f && std::fabs(pad.left_y) < .3f && std::fabs(pad.right_x) < .3f &&
+	       std::fabs(pad.right_y) < .3f && pad.l2 < .3f && pad.r2 < .3f;
+}
+
+std::string baseName(const std::string &path)
+{
+	const size_t slash = path.rfind('/');
+	return slash == std::string::npos ? path : path.substr(slash + 1);
+}
 
 } // namespace
 
 void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 {
 	Ink ink{ dl, u_ };
-	auto setting = [this](const char *key) {
-		return Row{ {}, [this, key] { return host_.get ? host_.get(key) : 0; }, [this, key](int64_t v) { if (host_.set) host_.set(key, v); } };
-	};
-	auto choose = [&](const char *key, std::vector<Option> options) {
-		Row r = setting(key);
-		r.options = std::move(options);
+	TitleSettings *ts = host_.title;
+	auto choose = [this](const char *key, const std::string &label, const std::string &help, std::vector<Option> options) {
+		Row r;
+		r.label = label, r.help = help, r.options = std::move(options);
+		r.get = [this, key] { return host_.get ? host_.get(key) : 0; };
+		r.set = [this, key](int64_t v) { if (host_.set) host_.set(key, v); };
 		return r;
 	};
-	TitleSettings *ts = host_.title;
-	auto title_row = [ts](std::vector<Option> options, std::function<int64_t(TitleSettings &)> get, std::function<void(TitleSettings &, int64_t)> set) {
+	auto title_row = [ts](const std::string &label, const std::string &help, std::vector<Option> options,
+	                      std::function<int64_t(TitleSettings &)> get, std::function<void(TitleSettings &, int64_t)> set) {
 		Row r;
-		r.options = std::move(options);
+		r.label = label, r.help = help, r.options = std::move(options);
 		r.get = [ts, get] { return ts ? get(*ts) : 0; };
 		r.set = [ts, set](int64_t v) {
 			if (ts) {
@@ -1275,98 +1392,292 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		};
 		return r;
 	};
-	std::vector<Callout> callouts;
-	callouts.push_back({ "Crystal \xC2\xB7 the clock", "Swap the oscillator to overclock the emulated CPU. Fewer slowdowns in heavy games; a few games need the stock part.",
-		                 "xtal", 440, 140, 300, { choose("emulation.overclock", { { "93.75 MHz stock", 0 }, { "125 MHz", 1 } }) } });
-	callouts.push_back({ "Video stage \xC2\xB7 sharpness", "How much finer than the original the picture is drawn, and how its shaders are made (from the next game).", "rdp", 1000, 140, 330,
-		                 { choose("video.upscale", { { "1\xC3\x97 original", 1 }, { "2\xC3\x97", 2 }, { "4\xC3\x97", 4 }, { "8\xC3\x97", 8 } }),
-		                   choose("video.ssaa", { { "Sharp", 0 }, { "Supersampled", 1 } }),
-		                   title_row({ { "Shaders: 1 thread", 1 }, { "4 threads", 4 }, { "At once", 0 } },
-		                             [](TitleSettings &t) -> int64_t { return t.shaderCompile == "now" ? 0 : atoi(t.shaderCompile.c_str()); },
-		                             [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 0 ? "now" : std::to_string(v); }),
-		                   title_row({ { "Driver: same thread", 0 }, { "Own thread", 1 } },
-		                             [](TitleSettings &t) -> int64_t { return t.driverThread; },
-		                             [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }) } });
-	callouts.push_back({ "AV out \xC2\xB7 the screen", "What is plugged into the AV multi out, how the picture fills it, and how much sound is kept ready (more: fewer gaps, more delay).", "vdac", 1413, 300, 330,
-		                 { choose("video.crt", { { "Flat panel", 0 }, { "Tube TV look", 1 } }),
-		                   choose("video.widescreen", { { "4:3", 0 }, { "16:9 stretch", 1 } }),
-		                   choose("video.integer_scaling", { { "Any size", 0 }, { "Whole steps", 1 } }),
-		                   title_row({ { "33 ms", 2 }, { "67 ms", 4 }, { "100 ms", 6 }, { "133 ms", 8 } },
-		                             [](TitleSettings &t) -> int64_t { return t.audioBuffer; },
-		                             [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)v; }) } });
-	callouts.push_back({ "TV link \xC2\xB7 the console's output", "The refresh (from the next start) and HDR10 (from the next game). Untested on a console yet.", "vdac", 1413, 590, 330,
-		                 { title_row({ { "59.94 Hz", 0 }, { "119.88 Hz", 1 }, { "VRR", 2 } },
-		                             [](TitleSettings &t) -> int64_t { return t.display == "120" ? 1 : t.display == "vrr" ? 2 : 0; },
-		                             [](TitleSettings &t, int64_t v) { t.display = v == 1 ? "120" : v == 2 ? "vrr" : "60"; }),
-		                   title_row({ { "SDR", 0 }, { "HDR10", 1 } }, [](TitleSettings &t) -> int64_t { return t.hdr; },
-		                             [](TitleSettings &t, int64_t v) { t.hdr = v != 0; }) } });
-	{
-		Row white = title_row({}, [](TitleSettings &t) -> int64_t { return t.hdrWhite; }, [](TitleSettings &t, int64_t v) { t.hdrWhite = (int)v; });
-		white.stepper = true, white.lo = 80, white.hi = 400, white.step = 10, white.unit = " nits white";
-		Row peak = title_row({}, [](TitleSettings &t) -> int64_t { return t.hdrPeak; }, [](TitleSettings &t, int64_t v) { t.hdrPeak = (int)v; });
-		peak.stepper = true, peak.lo = 0, peak.hi = 4000, peak.step = 100, peak.unit = " nits highlights";
-		callouts.back().rows.push_back(white);
-		callouts.back().rows.push_back(peak);
-	}
-	callouts.push_back({ "Expansion slot \xC2\xB7 memory", "The 4 MB Expansion Pak. Some games need it, a few misbehave with it.", "exp", 1413, 868, 330,
-		                 { choose("emulation.disable_expansion_pak", { { "Jumper Pak", 1 }, { "Expansion Pak", 0 } }) } });
-	{
-		Callout ports{ "Ports \xC2\xB7 your DualSense", "Which ports have a controller: player n's DualSense plays port n. Port 4 can hold the Voice Recognition Unit.", "port1", 60, 610, 330, {} };
-		for (int i = 0; i < 4; i++) {
-			static const char *const keys[4] = { "input.controller_enabled.0", "input.controller_enabled.1", "input.controller_enabled.2",
-				                                 "input.controller_enabled.3" };
-			static const char *const names[4] = { "Port 1", "Port 2", "Port 3", "Port 4" };
-			Row r = choose(keys[i], { { "Empty", 0 }, { names[i], 1 } });
-			ports.rows.push_back(r);
-		}
-		ports.rows.push_back(choose("input.emulate_vru", { { "No VRU", 0 }, { "VRU in port 4", 1 } }));
-		callouts.push_back(ports);
-	}
-	callouts.push_back({ "Cartridge slot \xC2\xB7 extras", "Rewind keeps the last moments to go back to; the USB link is the development cartridge's (homebrew).", "slot", 60, 300, 330,
-		                 { choose("emulation.rewind", { { "No rewind", 0 }, { "Rewind", 1 } }), choose("emulation.usb", { { "No USB link", 0 }, { "USB link", 1 } }) } });
-	/* this console: actions, not parts */
-	struct Action {
-		std::string label, hint;
-		std::function<void()> run;
+	auto info = [](const std::string &label, const std::string &value, const std::string &help) {
+		Row r;
+		r.kind = Row::Info, r.label = label, r.help = help;
+		r.value = [value] { return value; };
+		return r;
 	};
-	std::vector<Action> actions;
-	char shares[48];
-	snprintf(shares, sizeof(shares), "%d", host_.share_count ? host_.share_count() : 0);
-	actions.push_back({ "Network shares", shares, [this] { if (host_.shares) host_.shares(); } });
-	const bool off = host_.elevation_off && host_.elevation_off();
-	actions.push_back({ "Leave the sandbox", off ? "off from the next start" : host_.elevated && host_.elevated() ? "on: USB, all of /data" : "on (not left: see the log)",
-		                [this, off] { if (host_.set_elevation_off) host_.set_elevation_off(!off); } });
-	actions.push_back({ "Search for cartridges", library().scanning() ? "searching" : "again", [] { library().rescan(); } });
-	actions.push_back({ "Close PSGopher", "to the home screen", [this] { if (host_.close) host_.close(); } });
+	auto action = [](const std::string &label, std::function<std::string()> value, const std::string &help, std::function<void()> run) {
+		Row r;
+		r.kind = Row::Action, r.label = label, r.help = help, r.value = std::move(value), r.run = std::move(run);
+		return r;
+	};
+	const std::vector<std::string> profiles = host_.profiles ? host_.profiles() : std::vector<std::string>{ "default" };
+	if (bench_profile_.empty() || std::find(profiles.begin(), profiles.end(), bench_profile_) == profiles.end())
+		bench_profile_ = profiles.empty() ? "default" : profiles.front();
+	auto bind_row = [this, &pad](const std::string &profile, int input, const std::string &label, const std::string &help) {
+		Row r;
+		r.kind = Row::Bind, r.label = label, r.help = help;
+		r.value = [this, profile, input] {
+			if (capture_input_ == input && capture_profile_ == profile)
+				return std::string("press a button or move a stick\xE2\x80\xA6");
+			return bindingLabel(host_.binding ? host_.binding(profile, input) : Binding{});
+		};
+		r.run = [this, profile, input, &pad] {
+			capture_input_ = input, capture_profile_ = profile, capture_since_ = pad.now, capture_released_ = false;
+		};
+		r.clear = [this, profile, input] { if (host_.bind) host_.bind(profile, input, Binding{}); };
+		return r;
+	};
+	const std::string port1_profile = host_.text ? host_.text("input.input_profile_binding.0") : "default";
 
-	/* the items: each callout's rows, then the actions */
-	struct Item {
-		int callout = -1, row = -1, action = -1;
-	};
-	std::vector<Item> items;
-	for (size_t c = 0; c < callouts.size(); c++)
-		for (size_t r = 0; r < callouts[c].rows.size(); r++)
-			items.push_back({ (int)c, (int)r, -1 });
-	for (size_t a = 0; a < actions.size(); a++)
-		items.push_back({ -1, -1, (int)a });
-	const int n = (int)items.size();
+	std::vector<Section> sections;
+	/* Video */
+	{
+		Section s{ "Video", "rdp", "How finely the picture is drawn and how parallel-rdp makes its shaders (from the next game).", {} };
+		s.rows.push_back(choose("video.upscale", "Resolution", "How much finer than the original the picture is drawn: 2\xC3\x97, 4\xC3\x97 or 8\xC3\x97 the N64's pixels.",
+		                        { { "1\xC3\x97 original", 1 }, { "2\xC3\x97", 2 }, { "4\xC3\x97", 4 }, { "8\xC3\x97", 8 } }));
+		s.rows.push_back(choose("video.ssaa", "Supersampling", "Draws finely and shows the result at the original size: smoother edges, the original's sharpness.",
+		                        { { "Off", 0 }, { "On", 1 } }));
+		s.rows.push_back(choose("video.vsync", "Vsync", "Each frame waits for the screen's refresh (Gopher64's vsync).", { { "Off", 0 }, { "On", 1 } }));
+		s.rows.push_back(title_row("Shader compiles", "Until a state's own shader is made, parallel-rdp draws with a general, slower one: one thread (Gopher64's), four, or each made when first needed.",
+		                           { { "1 thread", 1 }, { "4 threads", 4 }, { "At once", 0 } },
+		                           [](TitleSettings &t) -> int64_t { return t.shaderCompile == "now" ? 0 : atoi(t.shaderCompile.c_str()); },
+		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 0 ? "now" : std::to_string(v); }));
+		s.rows.push_back(title_row("Graphics driver", "The driver records and submits on a thread of its own (Crux2's switch).", { { "Same thread", 0 }, { "Own thread", 1 } },
+		                           [](TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }));
+		sections.push_back(std::move(s));
+	}
+	/* Screen and sound */
+	{
+		Section s{ "Screen & sound", "adac", "What is plugged into the AV multi out, how the picture fills the screen, how much sound is kept ready.", {} };
+		s.rows.push_back(choose("video.crt", "Tube TV look", "Scanlines and the glow of a CRT.", { { "Off", 0 }, { "On", 1 } }));
+		s.rows.push_back(choose("video.widescreen", "Widescreen", "Stretches the picture to 16:9.", { { "4:3", 0 }, { "16:9 stretch", 1 } }));
+		s.rows.push_back(choose("video.integer_scaling", "Integer scaling", "The picture grows in whole steps only: every pixel the same size.", { { "Off", 0 }, { "On", 1 } }));
+		s.rows.push_back(title_row("Sound buffer", "How much sound is kept queued: more, fewer gaps when the game is slow, and more delay.",
+		                           { { "33 ms", 2 }, { "67 ms", 4 }, { "100 ms", 6 }, { "133 ms", 8 } },
+		                           [](TitleSettings &t) -> int64_t { return t.audioBuffer; }, [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)v; }));
+		sections.push_back(std::move(s));
+	}
+	/* TV output */
+	{
+		Section s{ "TV output", "vdac", "The console's output: refresh from the next start, HDR10 from the next game. Untested on a console yet.", {} };
+		s.rows.push_back(title_row("Refresh", "59.94 Hz is the N64's; 119.88 Hz and variable refresh need a TV that has them.",
+		                           { { "59.94 Hz", 0 }, { "119.88 Hz", 1 }, { "VRR", 2 } },
+		                           [](TitleSettings &t) -> int64_t { return t.display == "120" ? 1 : t.display == "vrr" ? 2 : 0; },
+		                           [](TitleSettings &t, int64_t v) { t.display = v == 1 ? "120" : v == 2 ? "vrr" : "60"; }));
+		s.rows.push_back(title_row("HDR10", "HDR10 when the console's own output is HDR.", { { "SDR", 0 }, { "HDR10", 1 } },
+		                           [](TitleSettings &t) -> int64_t { return t.hdr; }, [](TitleSettings &t, int64_t v) { t.hdr = v != 0; }));
+		Row white = title_row("HDR white", "The brightness white is shown at (203 nits is HDR's reference).", {}, [](TitleSettings &t) -> int64_t { return t.hdrWhite; },
+		                      [](TitleSettings &t, int64_t v) { t.hdrWhite = (int)v; });
+		white.kind = Row::Stepper, white.lo = 80, white.hi = 400, white.step = 10, white.unit = " nits";
+		s.rows.push_back(white);
+		Row peak = title_row("HDR highlights", "The brightness the brightest parts are raised to (0 off).", {}, [](TitleSettings &t) -> int64_t { return t.hdrPeak; },
+		                     [](TitleSettings &t, int64_t v) { t.hdrPeak = (int)v; });
+		peak.kind = Row::Stepper, peak.lo = 0, peak.hi = 4000, peak.step = 100, peak.unit = " nits";
+		s.rows.push_back(peak);
+		sections.push_back(std::move(s));
+	}
+	/* Emulation */
+	{
+		Section s{ "Emulation", "xtal", "The N64 itself: its clock, its memory, and what the cartridge slot holds.", {} };
+		s.rows.push_back(choose("emulation.overclock", "CPU clock", "Overclocks the emulated CPU: fewer slowdowns in heavy games, more work for the console; a few games need the stock clock.",
+		                        { { "93.75 MHz stock", 0 }, { "125 MHz", 1 } }));
+		s.rows.push_back(choose("emulation.disable_expansion_pak", "Memory", "The 4 MB Expansion Pak. Some games need it, a few misbehave with it.",
+		                        { { "Expansion Pak", 0 }, { "Jumper Pak", 1 } }));
+		s.rows.push_back(choose("emulation.rewind", "Rewind", "Keeps a snapshot every second to go back to (the hotkey's Rewind).", { { "Off", 0 }, { "On", 1 } }));
+		s.rows.push_back(choose("emulation.usb", "USB link", "The development cartridge's USB link (homebrew). Off on the console: it needs network sockets.", { { "Off", 0 }, { "On", 1 } }));
+		sections.push_back(std::move(s));
+	}
+	/* Controllers */
+	{
+		Section s{ "Controllers", "port1", "Each port: whether a controller is plugged in, which DualSense plays it, its input profile, its Transfer Pak.", {} };
+		for (int i = 0; i < 4; i++) {
+			const std::string n = std::to_string(i + 1), idx = std::to_string(i);
+			static std::string enabled_keys[4], assign_keys[4], profile_keys[4], tpak_keys[4], rom_keys[4], ram_keys[4];
+			enabled_keys[i] = "input.controller_enabled." + idx, assign_keys[i] = "input.controller_assignment." + idx;
+			profile_keys[i] = "input.input_profile_binding." + idx, tpak_keys[i] = "input.transfer_pak." + idx;
+			rom_keys[i] = "input.gb_rom_path." + idx, ram_keys[i] = "input.gb_ram_path." + idx;
+			s.rows.push_back(choose(enabled_keys[i].c_str(), "Port " + n, "Whether port " + n + " has a controller.", { { "Empty", 0 }, { "Plugged in", 1 } }));
+			Row who;
+			who.label = "Port " + n + " \xC2\xB7 controller", who.help = "Which DualSense plays port " + n + " (player numbers as the console signs them in).";
+			who.options = { { "None", 0 }, { "DualSense 1", 1 }, { "DualSense 2", 2 }, { "DualSense 3", 3 }, { "DualSense 4", 4 } };
+			who.get = [this, i] {
+				const std::string v = host_.text ? host_.text(assign_keys[i].c_str()) : "";
+				return v.rfind("ps5:pad", 0) == 0 ? (int64_t)atoi(v.c_str() + 7) : (int64_t)0;
+			};
+			who.set = [this, i](int64_t v) { if (host_.set_text) host_.set_text(assign_keys[i].c_str(), v ? "ps5:pad" + std::to_string(v) : ""); };
+			s.rows.push_back(who);
+			Row prof;
+			prof.label = "Port " + n + " \xC2\xB7 profile", prof.help = "Its input profile: which DualSense control is which N64 button (edited under Profiles).";
+			for (size_t p = 0; p < profiles.size(); p++)
+				prof.options.push_back({ profiles[p], (int64_t)p });
+			prof.get = [this, i, profiles] {
+				const std::string v = host_.text ? host_.text(profile_keys[i].c_str()) : "default";
+				const auto it = std::find(profiles.begin(), profiles.end(), v);
+				return (int64_t)(it == profiles.end() ? 0 : it - profiles.begin());
+			};
+			prof.set = [this, i, profiles](int64_t v) {
+				if (host_.set_text && v >= 0 && v < (int64_t)profiles.size())
+					host_.set_text(profile_keys[i].c_str(), profiles[v]);
+			};
+			s.rows.push_back(prof);
+			s.rows.push_back(choose(tpak_keys[i].c_str(), "Port " + n + " \xC2\xB7 Transfer Pak", "A Transfer Pak with a Game Boy cartridge: its ROM and save below.",
+			                        { { "Off", 0 }, { "On", 1 } }));
+			for (int which = 0; which < 2; which++) {
+				Row file;
+				file.kind = Row::File;
+				const char *key = which == 0 ? rom_keys[i].c_str() : ram_keys[i].c_str();
+				file.label = "Port " + n + (which == 0 ? " \xC2\xB7 Game Boy ROM" : " \xC2\xB7 Game Boy save");
+				file.help = which == 0 ? "The Game Boy cartridge in the Transfer Pak (.gb, .gbc) from the console or a USB drive. \xE2\x97\x84 clears."
+				                       : "Its save (.sav), or one made beside the ROM. \xE2\x97\x84 clears.";
+				file.value = [this, key] {
+					const std::string v = host_.text ? host_.text(key) : "";
+					return v.empty() ? std::string("\xE2\x80\x94 none") : baseName(v);
+				};
+				file.run = [this, key, which] {
+					picker_key_ = key, picker_rom_ = which == 0, picker_sel_ = 0;
+					const std::string v = host_.text ? host_.text(key) : "";
+					picker_folder_ = v.empty() ? "" : v.substr(0, v.rfind('/'));
+				};
+				file.clear = [this, key] { if (host_.set_text) host_.set_text(key, ""); };
+				s.rows.push_back(file);
+			}
+		}
+		s.rows.push_back(choose("input.emulate_vru", "Voice Recognition Unit", "The VRU in port 4 (its games' voice commands).", { { "Off", 0 }, { "In port 4", 1 } }));
+		sections.push_back(std::move(s));
+	}
+	/* Profiles */
+	{
+		Section s{ "Profiles", "pif", "Input profiles: each N64 button's DualSense control. \xE2\x9C\x95 then press the control; \xE2\x97\x84 clears.", {} };
+		Row which;
+		which.label = "Profile", which.help = "The profile edited below. Ports choose theirs under Controllers.";
+		for (size_t p = 0; p < profiles.size(); p++)
+			which.options.push_back({ profiles[p], (int64_t)p });
+		which.get = [this, profiles] {
+			const auto it = std::find(profiles.begin(), profiles.end(), bench_profile_);
+			return (int64_t)(it == profiles.end() ? 0 : it - profiles.begin());
+		};
+		which.set = [this, profiles](int64_t v) { if (v >= 0 && v < (int64_t)profiles.size()) bench_profile_ = profiles[v]; };
+		s.rows.push_back(which);
+		s.rows.push_back(action("New profile", [] { return std::string("Gopher64's default bindings"); }, "Makes a profile with Gopher64's default bindings, to change here.",
+		                        [this, profiles] {
+			                        for (int k = 1; k < 100; k++) {
+				                        const std::string name = "Profile " + std::to_string(k);
+				                        if (std::find(profiles.begin(), profiles.end(), name) == profiles.end()) {
+					                        if (host_.profile_new && host_.profile_new(name))
+						                        bench_profile_ = name;
+					                        break;
+				                        }
+			                        }
+		                        }));
+		s.rows.push_back(action("Delete this profile", [this] { return bench_profile_ == "default" ? std::string("default stays") : bench_profile_; },
+		                        "Takes this profile away; ports that had it get \"default\".", [this] {
+			                        if (bench_profile_ != "default" && host_.profile_delete && host_.profile_delete(bench_profile_))
+				                        bench_profile_ = "default";
+		                        }));
+		for (int input = 0; input < 19; input++)
+			s.rows.push_back(bind_row(bench_profile_, input, kN64Inputs[input],
+			                          input == 18 ? "Held with another button, it makes that button a hotkey (see Hotkeys)."
+			                                      : std::string("The N64's ") + kN64Inputs[input] + ": \xE2\x9C\x95 then press the DualSense control for it."));
+		Row dead;
+		dead.kind = Row::Stepper, dead.label = "Deadzone", dead.help = "How far a stick moves before the N64 sees it.";
+		dead.lo = 0, dead.hi = 50, dead.step = 1, dead.unit = " %";
+		dead.get = [this] { return host_.profile_number ? host_.profile_number(bench_profile_, 0, 0, false) : 0; };
+		dead.set = [this](int64_t v) { if (host_.profile_number) host_.profile_number(bench_profile_, 0, v, true); };
+		s.rows.push_back(dead);
+		Row raw;
+		raw.label = "Read the pad as", raw.help = "Gopher64's DirectInput mode reads a raw joystick; its bindings are then a joystick's, which only a PC's dialog makes.";
+		raw.options = { { "Gamepad", 0 }, { "Joystick (DirectInput)", 1 } };
+		raw.get = [this] { return host_.profile_number ? host_.profile_number(bench_profile_, 1, 0, false) : 0; };
+		raw.set = [this](int64_t v) { if (host_.profile_number) host_.profile_number(bench_profile_, 1, v, true); };
+		s.rows.push_back(raw);
+		sections.push_back(std::move(s));
+	}
+	/* Hotkeys */
+	{
+		Section s{ "Hotkeys", "cpu", "Gopher64's hotkeys: the Hotkey Activator held, then a button. Each can be another N64 button or off.", {} };
+		s.rows.push_back(title_row("Hotkeys", "All of them on or off.", { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.hotkeys; },
+		                           [](TitleSettings &t, int64_t v) { t.hotkeys = v != 0; }));
+		Row tap = title_row("Quick menu tap", "A touch pad tap opens the quick menu. Kept on while nothing else can leave a game (Hotkeys off or Leave the game off).",
+		                    { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.quickmenuTap; },
+		                    [](TitleSettings &t, int64_t v) { t.quickmenuTap = v != 0; });
+		s.rows.push_back(tap);
+		s.rows.push_back(bind_row(port1_profile, 18, "Activator (port 1)", "The control held for a hotkey, in port 1's profile (\"" + port1_profile + "\"): the touch pad by default."));
+		for (size_t a = 0; a < 15; a++) {
+			Row r;
+			r.label = kHotkeyActions[a].label;
+			r.help = a < 6 ? "One of Gopher64's own hotkeys." : "On a PC this is a key; here it can be a hotkey.";
+			r.options.push_back({ "Off", -1 });
+			for (int input = 0; input < 14; input++) {
+				const Binding b = host_.binding ? host_.binding(port1_profile, input) : Binding{};
+				r.options.push_back({ std::string(kN64Inputs[input]) + (b.kind ? " \xC2\xB7 " + bindingLabel(b) : ""), input });
+			}
+			r.get = [ts, a]() -> int64_t { return ts ? ts->hotkey[a] : -1; };
+			r.set = [ts, a](int64_t v) {
+				if (ts) {
+					ts->hotkey[a] = (int)v;
+					ts->save();
+				}
+			};
+			s.rows.push_back(r);
+		}
+		sections.push_back(std::move(s));
+	}
+	/* This console */
+	{
+		Section s{ "This console", "slot", "PSGopher on this console: network shares, the sandbox, the library.", {} };
+		char shares[48];
+		snprintf(shares, sizeof(shares), "%d", host_.share_count ? host_.share_count() : 0);
+		const std::string shares_text = shares;
+		s.rows.push_back(action("Network shares", [shares_text] { return shares_text; }, "Add, change or take away SMB and NFS shares.", [this] { if (host_.shares) host_.shares(); }));
+		const bool off = host_.elevation_off && host_.elevation_off();
+		const std::string elevation = off ? "off from the next start" : host_.elevated && host_.elevated() ? "on: USB, all of /data" : "on (not left: see the log)";
+		s.rows.push_back(action("Leave the sandbox", [elevation] { return elevation; }, "Outside the sandbox PSGopher reaches USB drives and all of /data.",
+		                        [this, off] { if (host_.set_elevation_off) host_.set_elevation_off(!off); }));
+		s.rows.push_back(action("Search for cartridges", [] { return std::string(library().scanning() ? "searching" : "again"); }, "Searches every place again.",
+		                        [] { library().rescan(); }));
+		s.rows.push_back(action("Close PSGopher", [] { return std::string("to the home screen"); }, "Closes the title.", [this] { if (host_.close) host_.close(); }));
+		sections.push_back(std::move(s));
+	}
+	/* What Gopher64 has on a PC only */
+	{
+		Section s{ "PC only", "slot", "Gopher64's settings that have no place on the console, and why.", {} };
+		s.rows.push_back(info("Fullscreen", "always", "The console's screen is always the whole picture."));
+		s.rows.push_back(info("Keyboard bindings", "no keyboard", "Each input's first binding is a keyboard key; the console's controller is the second."));
+		s.rows.push_back(info("Theme, ROM folder, recent games", "the library", "Gopher64's own window keeps these; PSGopher's library and board do that here."));
+		s.rows.push_back(info("Netplay, RetroAchievements", "not on the console", "Both need network sockets Gopher64 makes through Tokio, which the console refuses."));
+		sections.push_back(std::move(s));
+	}
+
+	const int ns = (int)sections.size();
+	bench_section_ = std::clamp(bench_section_, 0, ns - 1);
+	Section &sec = sections[bench_section_];
+	const int n = (int)sec.rows.size();
 	bench_sel_ = std::clamp(bench_sel_, 0, n - 1);
-	if (pad.repeat(PAD_DOWN))
-		bench_sel_ = (bench_sel_ + 1) % n;
-	if (pad.repeat(PAD_UP))
-		bench_sel_ = (bench_sel_ + n - 1) % n;
-	if (pad.pressed & PAD_CIRCLE)
-		setView(board::View::Home);
-	const Item &it = items[bench_sel_];
-	if (it.callout >= 0) {
-		Row &r = callouts[it.callout].rows[it.row];
-		const int64_t v = r.get ? r.get() : 0;
-		if (r.stepper) {
-			if (pad.repeat(PAD_RIGHT))
-				r.set(std::min(r.hi, v + r.step));
-			if (pad.repeat(PAD_LEFT))
-				r.set(std::max(r.lo, v - r.step));
-		} else {
+
+	/* binding an input: the press after every control was let go; 6 s without one, nothing changes */
+	if (capture_input_ >= 0) {
+		Binding b;
+		if (!capture_released_)
+			capture_released_ = padAtRest(pad);
+		else if (padBinding(pad, &b)) {
+			if (host_.bind)
+				host_.bind(capture_profile_, capture_input_, b);
+			capture_input_ = -1;
+		}
+		if (capture_input_ >= 0 && pad.now - capture_since_ > 6)
+			capture_input_ = -1;
+	} else if (picker_sel_ >= 0) {
+		/* the file picker has the pad (drawn last) */
+	} else {
+		if (pad.pressed & PAD_R2_DIGITAL)
+			bench_section_ = (bench_section_ + 1) % ns, bench_sel_ = 0, bench_scroll_ = 0;
+		if (pad.pressed & PAD_L2_DIGITAL)
+			bench_section_ = (bench_section_ + ns - 1) % ns, bench_sel_ = 0, bench_scroll_ = 0;
+		if (pad.repeat(PAD_DOWN))
+			bench_sel_ = (bench_sel_ + 1) % n;
+		if (pad.repeat(PAD_UP))
+			bench_sel_ = (bench_sel_ + n - 1) % n;
+		if (pad.pressed & PAD_CIRCLE)
+			setView(board::View::Home);
+		Row &r = sections[bench_section_].rows[std::clamp(bench_sel_, 0, (int)sections[bench_section_].rows.size() - 1)];
+		switch (r.kind) {
+		case Row::Choice: {
+			if (r.options.empty())
+				break;
+			const int64_t v = r.get ? r.get() : 0;
 			int at = 0;
 			for (size_t o = 0; o < r.options.size(); o++)
 				if (r.options[o].value == v)
@@ -1376,85 +1687,226 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 				r.set(r.options[(at + 1) % m].value);
 			else if (pad.repeat(PAD_LEFT))
 				r.set(r.options[(at + m - 1) % m].value);
+			break;
 		}
-	} else if (it.action >= 0 && (pad.pressed & PAD_CROSS))
-		actions[it.action].run();
-
-	/* the callouts, each with its line to its part */
-	for (size_t c = 0; c < callouts.size(); c++) {
-		const Callout &co = callouts[c];
-		const ImVec2 part = projector_(board::anchor(co.part));
-		const auto lines = wrap(ink, f.mono, 13, co.text, co.w - 36, 4);
-		float h = 16 + 26 + lines.size() * 19 + 10;
-		for (const Row &r : co.rows)
-			h += r.stepper ? 38 : 38;
-		h += 8;
-		const float cx = co.x, cy = co.y;
-		/* the line: from the card's side nearest the part */
-		const bool right_side = co.x > 1200;
-		const ImVec2 from = right_side ? S(cx, cy + h / 2) : S(cx + co.w, cy + h / 2);
-		dl->AddLine(from, part, IM_COL32(255, 182, 72, 230), L(2));
-		dl->AddCircleFilled(part, L(7), kAmber);
-		bool any = false;
-		for (size_t r = 0; r < co.rows.size(); r++)
-			any |= it.callout == (int)c && it.row == (int)r;
-		ink.rect(cx, cy, co.w, h, kPanel, 14);
-		ink.frame(cx, cy, co.w, h, any ? kAmber : kLine, 14, any ? 2 : 1);
-		ink.text(f.display, 22, cx + 18, cy + 14, kText, co.title, -.01f);
-		float y = cy + 16 + 28;
-		for (const std::string &l : lines) {
-			ink.text(f.mono, 13, cx + 18, y, kDim, l);
-			y += 19;
+		case Row::Stepper: {
+			const int64_t v = r.get ? r.get() : 0;
+			if (pad.repeat(PAD_RIGHT))
+				r.set(std::min(r.hi, v + r.step));
+			if (pad.repeat(PAD_LEFT))
+				r.set(std::max(r.lo, v - r.step));
+			break;
 		}
-		y += 8;
-		for (size_t r = 0; r < co.rows.size(); r++) {
-			const Row &row = co.rows[r];
-			const bool here = it.callout == (int)c && it.row == (int)r;
-			const int64_t v = row.get ? row.get() : 0;
-			float x = cx + 18;
-			if (here)
-				ink.rect(cx + 6, y - 4, co.w - 12, 36, IM_COL32(255, 182, 72, 26), 8);
-			if (row.stepper) {
-				char t[64];
-				snprintf(t, sizeof(t), "\xE2\x97\x84 %lld%s \xE2\x96\xBA", (long long)v, row.unit);
-				const float tw = ink.width(f.mono_bold, 14, t) + 20;
-				ink.rect(x, y, tw, 28, here ? kAmber : IM_COL32(12, 26, 30, 255), 6);
-				ink.text(f.mono_bold, 14, x + 10, y + 6, here ? kInk : kText, t);
-			} else
-				for (const Option &o : row.options) {
-					const bool chosen = o.value == v;
-					const float tw = ink.width(f.mono_bold, 14, o.label) + 20;
-					if (chosen)
-						ink.rect(x, y, tw, 28, kAmber, 6);
-					else
-						ink.frame(x, y, tw, 28, kLine, 6, 1);
-					ink.text(f.mono_bold, 14, x + 10, y + 6, chosen ? kInk : (here ? kText : kDim), o.label);
-					x += tw + 6;
-				}
-			y += 38;
+		case Row::Action:
+		case Row::File:
+		case Row::Bind:
+			if ((pad.pressed & PAD_CROSS) && r.run)
+				r.run();
+			else if (pad.repeat(PAD_LEFT) && r.clear)
+				r.clear();
+			break;
+		case Row::Info:
+			break;
 		}
 	}
-	/* this console */
+
+	/* the line from the panel to the section's part, under the panels */
 	{
-		const float cx = 760, cy = 868, w = 520, rh = 34;
-		const float h = 16 + 30 + actions.size() * (rh + 4) + 10;
-		bool here_any = false;
-		for (size_t a = 0; a < actions.size(); a++)
-			here_any |= it.action == (int)a;
-		ink.rect(cx, cy, w, h, kPanel, 14);
-		ink.frame(cx, cy, w, h, here_any ? kAmber : kLine, 14, here_any ? 2 : 1);
-		ink.text(f.display, 22, cx + 18, cy + 14, kText, "This console");
-		float y = cy + 16 + 30;
-		for (size_t a = 0; a < actions.size(); a++) {
-			const bool here = it.action == (int)a;
-			ink.rect(cx + 12, y, w - 24, rh, here ? kText : IM_COL32(16, 34, 38, 255), 8);
-			ink.text(f.mono_bold, 15, cx + 26, y + 9, here ? kInk : kText, actions[a].label);
-			ink.text(f.mono, 13, cx + w - 26 - ink.width(f.mono, 13, actions[a].hint), y + 10, here ? kInk : kDim, actions[a].hint);
-			y += rh + 4;
+		const ImVec2 part = projector_(board::anchor(sec.part.c_str()));
+		dl->AddLine(S(980, 190), part, IM_COL32(255, 182, 72, 230), L(2));
+		dl->AddCircleFilled(part, L(8), kAmber);
+	}
+	const ImU32 solid = IM_COL32(7, 17, 21, 255);
+	/* the sections, down the left */
+	{
+		const float x = 64, y0 = 150, w = 300, rh = 50;
+		ink.rect(x, y0, w, ns * rh + 24, solid, 14);
+		ink.frame(x, y0, w, ns * rh + 24, kLine, 14, 1);
+		for (int i = 0; i < ns; i++) {
+			const float y = y0 + 12 + i * rh;
+			const bool on = i == bench_section_;
+			if (on)
+				ink.rect(x + 8, y, w - 16, rh - 6, kAmber, 8);
+			ink.text(f.display, 20, x + 22, y + 10, on ? kInk : kText, sections[i].name);
+		}
+		ink.text(f.mono, 13, x + 4, y0 + ns * rh + 34, kDim, "L2 \xC2\xB7 R2  section", .06f);
+	}
+	/* the panel: the section's rows */
+	{
+		const float x = 980, y0 = 150, w = 876, h = 860, rh = 44;
+		ink.rect(x, y0, w, h, solid, 16);
+		ink.frame(x, y0, w, h, kAmber, 16, 2);
+		ink.text(f.display, 28, x + 28, y0 + 18, kText, sec.name, -.01f);
+		const auto lines = wrap(ink, f.mono, 14, sec.text, w - 56, 2);
+		float ty = y0 + 60;
+		for (const std::string &l : lines) {
+			ink.text(f.mono, 14, x + 28, ty, kDim, l);
+			ty += 20;
+		}
+		const float list_top = y0 + 112, list_h = h - 112 - 96;
+		const int visible = std::max(1, (int)(list_h / rh));
+		const float target = (float)std::clamp(bench_sel_ - visible / 2, 0, std::max(0, n - visible));
+		bench_scroll_ += (target - bench_scroll_) * .35f;
+		const int first = std::max(0, (int)bench_scroll_);
+		for (int i = first; i < std::min(n, first + visible + 1); i++) {
+			const float y = list_top + (i - bench_scroll_) * rh;
+			if (y < list_top - 1 || y + rh > list_top + list_h + 1)
+				continue;
+			const Row &r = sec.rows[i];
+			const bool here = i == bench_sel_;
+			if (here)
+				ink.rect(x + 12, y, w - 24, rh - 4, IM_COL32(255, 182, 72, 34), 8);
+			ink.text(f.mono_bold, 16, x + 28, y + 11, here ? kText : kDim, r.label);
+			/* the value, right-aligned: ◄ value ► for what left and right change */
+			std::string v;
+			switch (r.kind) {
+			case Row::Choice: {
+				const int64_t cur = r.get ? r.get() : 0;
+				v = "?";
+				for (const Option &o : r.options)
+					if (o.value == cur)
+						v = o.label;
+				v = "\xE2\x97\x84 " + v + " \xE2\x96\xBA";
+				break;
+			}
+			case Row::Stepper:
+				v = "\xE2\x97\x84 " + std::to_string(r.get ? r.get() : 0) + r.unit + " \xE2\x96\xBA";
+				break;
+			case Row::Action:
+				v = (r.value ? r.value() : "") + "  \xE2\x9C\x95";
+				break;
+			case Row::File:
+			case Row::Bind:
+				v = (r.value ? r.value() : "") + "  \xE2\x9C\x95";
+				break;
+			case Row::Info:
+				v = r.value ? r.value() : "";
+				break;
+			}
+			const float vw = ink.width(f.mono_bold, 16, v);
+			const bool capturing = r.kind == Row::Bind && capture_input_ >= 0 && here;
+			if (here && r.kind != Row::Info)
+				ink.rect(x + w - 40 - vw, y + 4, vw + 20, rh - 12, capturing ? kText : kAmber, 6);
+			ink.text(f.mono_bold, 16, x + w - 30 - vw, y + 11, here && r.kind != Row::Info ? kInk : (r.kind == Row::Info ? kDim : kText), v);
+		}
+		/* the scroll's place, when the list is longer than the panel */
+		if (n > visible) {
+			const float bar_h = list_h * visible / n, bar_y = list_top + (list_h - bar_h) * bench_scroll_ / std::max(1, n - visible);
+			ink.rect(x + w - 10, bar_y, 4, bar_h, kLine, 2);
+		}
+		/* the chosen row's help */
+		const Row &r = sec.rows[bench_sel_];
+		ink.rect(x + 12, y0 + h - 88, w - 24, 1, kLine);
+		const auto help = wrap(ink, f.mono, 14, r.help, w - 56, 3);
+		float hy = y0 + h - 76;
+		for (const std::string &l : help) {
+			ink.text(f.mono, 14, x + 28, hy, kText, l);
+			hy += 20;
 		}
 	}
 	ink.text(f.mono, 14, 64, 1046, kDim,
-	         "L1 \xC2\xB7 R1  VIEWS      \xE2\x96\xB2 \xE2\x96\xBC  PART      \xE2\x97\x84 \xE2\x96\xBA \xE2\x9C\x95  CHANGE      \xE2\x97\x8B  HOME", .08f);
+	         "L1 \xC2\xB7 R1  VIEWS      L2 \xC2\xB7 R2  SECTION      \xE2\x96\xB2 \xE2\x96\xBC  SETTING      \xE2\x97\x84 \xE2\x96\xBA  CHANGE      \xE2\x9C\x95  CHOOSE      \xE2\x97\x8B  HOME",
+	         .08f);
+	if (picker_sel_ >= 0)
+		filePicker(dl, pad, f);
+}
+
+/* A Game Boy ROM or save for a Transfer Pak: folders and files of the console and its USB drives
+ * (Gopher64 reads them itself: a network share's are not reachable from it) */
+void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
+{
+	Ink ink{ dl, u_ };
+	struct Entry {
+		std::string label, path;
+		bool folder;
+	};
+	std::vector<Entry> entries;
+	if (picker_folder_.empty()) {
+		entries.push_back({ "/data", "/data", true });
+		for (int i = 0; i < 8; i++) {
+			const std::string usb = "/mnt/usb" + std::to_string(i);
+			struct stat st;
+			if (stat(usb.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+				entries.push_back({ usb, usb, true });
+		}
+	} else {
+		entries.push_back({ "\xE2\x86\x90 up", picker_folder_.substr(0, picker_folder_.rfind('/')), true });
+		std::vector<Entry> folders, files;
+		if (DIR *d = opendir(picker_folder_.c_str())) {
+			while (dirent *e = readdir(d)) {
+				if (e->d_name[0] == '.')
+					continue;
+				const std::string path = picker_folder_ + "/" + e->d_name;
+				struct stat st;
+				if (stat(path.c_str(), &st) != 0)
+					continue;
+				std::string lower = e->d_name;
+				for (char &c : lower)
+					c = (char)tolower((unsigned char)c);
+				auto ends = [&](const char *t) { return lower.size() >= strlen(t) && lower.compare(lower.size() - strlen(t), strlen(t), t) == 0; };
+				if (S_ISDIR(st.st_mode))
+					folders.push_back({ std::string(e->d_name) + "/", path, true });
+				else if (picker_rom_ ? (ends(".gb") || ends(".gbc")) : (ends(".sav") || ends(".srm") || ends(".ram")))
+					files.push_back({ e->d_name, path, false });
+			}
+			closedir(d);
+		}
+		auto by_name = [](const Entry &a, const Entry &b) { return a.label < b.label; };
+		std::sort(folders.begin(), folders.end(), by_name);
+		std::sort(files.begin(), files.end(), by_name);
+		entries.insert(entries.end(), folders.begin(), folders.end());
+		entries.insert(entries.end(), files.begin(), files.end());
+		if (!picker_rom_) {
+			/* a save beside the ROM, made by Gopher64 when it is not there */
+			std::string rom = host_.text ? host_.text(("input.gb_rom_path." + picker_key_.substr(picker_key_.size() - 1)).c_str()) : "";
+			if (!rom.empty()) {
+				const size_t dot = rom.rfind('.');
+				entries.insert(entries.begin() + 1, { "beside the ROM: " + baseName(rom.substr(0, dot)) + ".sav", rom.substr(0, dot) + ".sav", false });
+			}
+		}
+	}
+	const int n = (int)entries.size();
+	picker_sel_ = std::clamp(picker_sel_, 0, std::max(0, n - 1));
+	if (pad.repeat(PAD_DOWN) && n)
+		picker_sel_ = (picker_sel_ + 1) % n;
+	if (pad.repeat(PAD_UP) && n)
+		picker_sel_ = (picker_sel_ + n - 1) % n;
+	if (pad.pressed & PAD_CIRCLE) {
+		picker_sel_ = -1;
+		return;
+	}
+	if ((pad.pressed & PAD_CROSS) && n) {
+		const Entry &e = entries[picker_sel_];
+		if (e.folder) {
+			picker_folder_ = (e.path == "/mnt" || e.path.empty()) ? "" : e.path;
+			if (picker_folder_ == "/" )
+				picker_folder_.clear();
+			picker_sel_ = 0;
+		} else {
+			if (host_.set_text)
+				host_.set_text(picker_key_.c_str(), e.path);
+			picker_sel_ = -1;
+			return;
+		}
+	}
+	const float x = 520, y = 150, w = 880, h = 860, rh = 40;
+	dl->AddRectFilled(S(0, 0), S(1920, 1080), IM_COL32(0, 0, 0, 150));
+	ink.rect(x, y, w, h, IM_COL32(7, 17, 21, 250), 16);
+	ink.frame(x, y, w, h, kAmber, 16, 2);
+	ink.text(f.display, 26, x + 28, y + 18, kText, picker_rom_ ? "Game Boy ROM" : "Game Boy save");
+	ink.text(f.mono, 14, x + 28, y + 56, kDim, picker_folder_.empty() ? "the console and its USB drives" : picker_folder_);
+	const int visible = (int)((h - 140) / rh);
+	const int first = std::clamp(picker_sel_ - visible / 2, 0, std::max(0, n - visible));
+	for (int i = first; i < std::min(n, first + visible); i++) {
+		const float ry = y + 90 + (i - first) * rh;
+		const bool here = i == picker_sel_;
+		if (here)
+			ink.rect(x + 12, ry, w - 24, rh - 4, kAmber, 8);
+		ink.text(f.mono_bold, 16, x + 28, ry + 9, here ? kInk : (entries[i].folder ? kText : kDim), entries[i].label);
+	}
+	if (n == 1 && !picker_folder_.empty())
+		ink.text(f.mono, 14, x + 28, y + 140, kDim, picker_rom_ ? "No .gb or .gbc files here" : "No .sav files here");
+	ink.text(f.mono, 14, x + 28, y + h - 34, kDim, "\xE2\x96\xB2 \xE2\x96\xBC  MOVE      \xE2\x9C\x95  OPEN \xC2\xB7 CHOOSE      \xE2\x97\x8B  CLOSE", .08f);
 }
 
 } // namespace psgopher

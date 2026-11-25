@@ -19,6 +19,18 @@ namespace psgopher {
 
 const char kTitleSettingsFile[] = "/data/psgopher/config/psgopher.ini";
 
+const HotkeyAction kHotkeyActions[15] = {
+	{ "save", "Save state" },         { "load", "Load state" },         { "exit", "Leave the game" },
+	{ "ff", "Fast forward" },         { "rewind", "Rewind" },           { "pak", "Change pak" },
+	{ "reset", "Reset" },             { "pause", "Pause" },             { "advance", "Frame advance" },
+	{ "voldown", "Volume down" },     { "volup", "Volume up" },         { "fps", "Gopher64's frame rate" },
+	{ "crop", "Crop the letterbox" }, { "slotnext", "Next save slot" }, { "slotprev", "Previous save slot" },
+};
+
+const char *const kN64Inputs[19] = { "D Right", "D Left", "D Down", "D Up", "Start", "Z", "B", "A", "C Right", "C Left",
+	                                 "C Down", "C Up", "R", "L", "Stick Right", "Stick Left", "Stick Down", "Stick Up",
+	                                 "Hotkey Activator" };
+
 void TitleSettings::load()
 {
 	const std::string path = file.empty() ? kTitleSettingsFile : file;
@@ -48,6 +60,17 @@ void TitleSettings::load()
 			shaderCompile = (!strcmp(value, "4") || !strcmp(value, "now")) ? value : "1";
 		else if (!strcmp(key, "driver_thread"))
 			driverThread = !strcmp(value, "on");
+		else if (!strcmp(key, "hotkeys"))
+			hotkeys = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "quickmenu_tap"))
+			quickmenuTap = strcmp(value, "off") != 0;
+		else if (!strncmp(key, "hotkey_", 7))
+			for (size_t i = 0; i < hotkey.size(); i++)
+				if (!strcmp(key + 7, kHotkeyActions[i].key)) {
+					char *end = nullptr;
+					const long v = strtol(value, &end, 10);
+					hotkey[i] = end == value ? -1 : std::clamp((int)v, -1, 17); /* ("off" and the like: none) */
+				}
 	}
 	fclose(f);
 }
@@ -85,9 +108,23 @@ bool TitleSettings::save() const
 		"# needed (a short pause the first time; kept in the shader cache for the next start)\n"
 		"shader_compile = %s\n"
 		"# driver_thread: on records and submits the graphics commands on a thread of their own (Crux2's)\n"
-		"driver_thread = %s\n",
+		"driver_thread = %s\n"
+		"\n"
+		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
+		"# hotkey_<action>: the N64 button by Gopher64's input number (0 D Right, 1 D Left, 2 D Down, 3 D Up,\n"
+		"# 4 Start, 5 Z, 6 B, 7 A, 8 C Right, 9 C Left, 10 C Down, 11 C Up, 12 R, 13 L), -1 none\n"
+		"hotkeys = %s\n"
+		"# quickmenu_tap: a touch pad tap opens the quick menu (on whenever nothing else leaves a game)\n"
+		"quickmenu_tap = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
+	{
+		std::string lines;
+		for (size_t i = 0; i < hotkey.size(); i++)
+			lines += std::string("hotkey_") + kHotkeyActions[i].key + " = " + std::to_string(hotkey[i]) + "\n";
+		const size_t used = strlen(text);
+		snprintf(text + used, sizeof(text) - used, "%s", lines.c_str());
+	}
 	/* one write of a small file, beside it first */
 	const std::string path = file.empty() ? kTitleSettingsFile : file;
 	const std::string temporary = path + ".new";
@@ -144,6 +181,17 @@ void TitleSettings::applyHdr() const
 		setenv("RADV_THREADED_RECORDING", "1", 1);
 	else
 		unsetenv("RADV_THREADED_RECORDING");
+	/* the hotkeys, and the quick menu's tap (on when nothing else would leave the game) */
+	{
+		std::string table = std::string("on=") + (hotkeys ? "1" : "0");
+		for (size_t i = 0; i < hotkey.size(); i++)
+			table += std::string(",") + kHotkeyActions[i].key + "=" + std::to_string(hotkey[i]);
+		setenv("PSGOPHER_HOTKEYS", table.c_str(), 1);
+		const bool tap = canLeaveGame() ? quickmenuTap : true;
+		setenv("PSGOPHER_QUICKMENU_TAP", tap ? "1" : "0", 1);
+		say("hotkeys: %s; the quick menu's tap %s%s", hotkeys ? "on" : "off", tap ? "on" : "off",
+		    tap && !quickmenuTap ? " (kept on: nothing else leaves the game)" : "");
+	}
 	say("rdp: shading pipelines %s; the driver %s", shaderCompile == "now" ? "compiled when first needed" :
 	    shaderCompile == "4" ? "compiled by four background threads" : "compiled by one background thread (Gopher64's)",
 	    driverThread ? "records on a thread of its own" : "records on the emulation thread");

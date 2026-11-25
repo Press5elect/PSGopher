@@ -22,6 +22,8 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
 | Descriptions of the N64's years only | this commit | the 1997 game's description for its cartridge |
 | Shader compiles on 4 threads or at once; the driver's own thread | this commit | the `video:` line's shading share and speed at 8x with each |
+| The configurable hotkeys and their new actions, the quick menu tap switch | this commit | each action in a game with the activator held; `hotkeys:` line at a game's start |
+| Binding a profile's input by pressing it, the Transfer Pak's file picker, port controller assignment | this commit | Profiles and Controllers in BENCH, then a game |
 | Cheats applied to a game | `33c8907` | a cheat on, the game started from the board |
 | The stats overlay | `33c8907` | the quick menu's Stats overlay in a game (the `video:` and `rdp:` lines have run) |
 | The quick menu's reset, and loading a probe from it | `d7010d1` | the quick menu in a game (resume, eject, taking a probe and starting from one on the board have run) |
