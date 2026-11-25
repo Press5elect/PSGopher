@@ -1437,6 +1437,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 0 ? "now" : std::to_string(v); }));
 		s.rows.push_back(title_row("Graphics driver", "The driver records and submits on a thread of its own (Crux2's switch).", { { "Same thread", 0 }, { "Own thread", 1 } },
 		                           [](TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }));
+		s.rows.push_back(title_row("GPU timing", "Writes the GPU's time in each of parallel-rdp's stages to the boot log every 10 s (gpu: lines), to find what a slow game costs.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.gpuTiming; },
+		                           [](TitleSettings &t, int64_t v) { t.gpuTiming = v != 0; }));
 		sections.push_back(std::move(s));
 	}
 	/* Screen and sound */

@@ -60,6 +60,8 @@ void TitleSettings::load()
 			shaderCompile = (!strcmp(value, "4") || !strcmp(value, "now")) ? value : "1";
 		else if (!strcmp(key, "driver_thread"))
 			driverThread = !strcmp(value, "on");
+		else if (!strcmp(key, "gpu_timing"))
+			gpuTiming = !strcmp(value, "on");
 		else if (!strcmp(key, "hotkeys"))
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
@@ -109,6 +111,8 @@ bool TitleSettings::save() const
 		"shader_compile = %s\n"
 		"# driver_thread: on records and submits the graphics commands on a thread of their own (Crux2's)\n"
 		"driver_thread = %s\n"
+		"# gpu_timing: on writes the GPU's time in each of parallel-rdp's stages to the boot log (gpu: lines)\n"
+		"gpu_timing = %s\n"
 		"\n"
 		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
 		"# hotkey_<action>: the N64 button by Gopher64's input number (0 D Right, 1 D Left, 2 D Down, 3 D Up,\n"
@@ -117,7 +121,7 @@ bool TitleSettings::save() const
 		"# quickmenu_tap: a touch pad tap opens the quick menu (on whenever nothing else leaves a game)\n"
 		"quickmenu_tap = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)
@@ -177,6 +181,10 @@ void TitleSettings::applyHdr() const
 		unsetenv("PARALLEL_RDP_FORCE_SYNC_SHADER");
 		setenv("PSGOPHER_RDP_COMPILE_THREADS", shaderCompile.c_str(), 1);
 	}
+	if (gpuTiming)
+		setenv("PARALLEL_RDP_BENCH", "2", 1);
+	else
+		unsetenv("PARALLEL_RDP_BENCH");
 	if (driverThread)
 		setenv("RADV_THREADED_RECORDING", "1", 1);
 	else

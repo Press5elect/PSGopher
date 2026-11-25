@@ -105,7 +105,7 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..10dacaf 100644
+index b741e0d..503ad1a 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
 @@ -20,6 +20,54 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -599,7 +599,7 @@ index b741e0d..10dacaf 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1287,16 @@ void rdp_update_screen() {
+@@ -870,9 +1287,34 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -612,11 +612,29 @@ index b741e0d..10dacaf 100644
 +#ifdef PSGOPHER
 +    psgopher_bench_present(present_begin, psgopher_now_ns());
 +    psgopher_quickmenu_check();
++    // the GPU's time in each of parallel-rdp's stages, every 600 frames, when asked for
++    // (psgopher.ini's gpu_timing sets PARALLEL_RDP_BENCH=2: parallel-rdp's own timestamps)
++    {
++      const bool timing = getenv("PARALLEL_RDP_BENCH") != nullptr;
++      static unsigned frames;
++      if (timing && ++frames % 600 == 0) {
++        auto &device = wsi->get_device();
++        std::string line;
++        device.timestamp_log([&line](const std::string &tag, const Vulkan::TimestampIntervalReport &r) {
++          char part[160];
++          snprintf(part, sizeof(part), "%s%s %.2f ms (%.1fx)", line.empty() ? "" : "; ", tag.c_str(),
++                   1000.0 * r.time_per_frame_context, r.accumulations_per_frame_context);
++          line += part;
++        });
++        device.timestamp_log_reset();
++        psgopher_say("gpu: a frame: %s", line.empty() ? "no timestamps (the device gave none)" : line.c_str());
++      }
++    }
 +#endif
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1328,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1346,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -632,7 +650,7 @@ index b741e0d..10dacaf 100644
  }
  
  size_t rdp_state_size() {
-@@ -1076,6 +1506,9 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -1076,6 +1524,9 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
@@ -642,7 +660,7 @@ index b741e0d..10dacaf 100644
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1132,9 +1565,13 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1132,9 +1583,13 @@ uint64_t rdp_process_commands(uint64_t now) {
        return interrupt_timer;
      }
  
@@ -657,7 +675,7 @@ index b741e0d..10dacaf 100644
  
      if (command >= 0x26 && command <= 0x29) { // Sync{Load,Pipe,Tile,Full}
        rdp_add_busy(RDP_SYNC_CLOCKS);
-@@ -1233,8 +1670,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +1688,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -671,7 +689,7 @@ index b741e0d..10dacaf 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +1705,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +1723,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  

@@ -95,6 +95,12 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### From the sixth console log (2026-11-25)
+
+- Added: GPU timing (BENCH's video stage, `gpu_timing`, off by default): parallel-rdp's own GPU
+  timestamps, each stage's time a frame in the boot log every 10 s (`gpu:` lines). The log showed
+  the emulation thread waiting 8-13 ms a VI for the GPU at 8x in one game; this says which stage.
+
 ### Settings, hotkeys, BENCH and the cartridges (the owner's requests, 2026-11-25)
 
 - Added: every Gopher64 setting is in BENCH: vsync; each port's controller (which DualSense), input

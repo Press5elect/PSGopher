@@ -22,6 +22,7 @@ struct TitleSettings {
 	std::string shaderCompile{ "1" }; // parallel-rdp's specialised shading pipelines: "1" one background
 	                                  // thread (Gopher64's), "4" four, "now" compiled when first needed
 	bool driverThread{ false };  // RADV records and submits on a thread of its own (Crux2's switch)
+	bool gpuTiming{ false };     // parallel-rdp's GPU timestamps, each stage's time in the boot log
 	/* the controller's hotkeys (Gopher64's: its Hotkey Activator held, the touch pad by default, and
 	 * a button): on or off, and each action's N64 button (an input profile index, -1 none); the
 	 * actions are kHotkeyActions' (psgopher.rs's HOTKEY_ACTIONS, in its order) */
