@@ -5,7 +5,7 @@ branch. Games are named by cartridge ID only.
 
 ## Unreleased
 
-Status: the title, the sandbox exit, an SMB share, USB drives, covers, descriptions and three games
+Status: the title, the sandbox exit, an SMB share, USB drives, covers, descriptions, the sound buffer and three games
 have run on a console (2026-11-25): one NTSC game at full speed, two below it. Not yet run on a
 console: the cheats, variable refresh, HDR10.
 
@@ -94,6 +94,14 @@ console: the cheats, variable refresh, HDR10.
 - Changed: the `video:` line gives parallel-rdp's share of the CPU time (`CPU x ms (RDP y)`), so a
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
+
+### From the fourth console log (2026-11-25)
+
+- Fixed: a cartridge got the description of a later game of the same name: an article whose title
+  or description gives a year outside the N64's (1995-2004) is not taken; the earlier ones are
+  asked again.
+- Changed: BENCH's video stage says what the log showed: 8x costs the console the most and a
+  demanding game can slow down (64% at 8x, 93-100% at 1x in one game).
 
 ### Console fixes (from the third console log, 2026-11-25)
 

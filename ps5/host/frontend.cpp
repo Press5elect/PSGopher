@@ -1278,7 +1278,7 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	std::vector<Callout> callouts;
 	callouts.push_back({ "Crystal \xC2\xB7 the clock", "Swap the oscillator to overclock the emulated CPU. Fewer slowdowns in heavy games; a few games need the stock part.",
 		                 "xtal", 440, 140, 300, { choose("emulation.overclock", { { "93.75 MHz stock", 0 }, { "125 MHz", 1 } }) } });
-	callouts.push_back({ "Video stage \xC2\xB7 sharpness", "How much finer than the original the picture is drawn before it reaches your TV.", "rdp", 1000, 140, 330,
+	callouts.push_back({ "Video stage \xC2\xB7 sharpness", "How much finer than the original the picture is drawn. 8\xC3\x97 costs the console the most: a demanding game can slow down; 1\xC3\x97 to 4\xC3\x97 leave room.", "rdp", 1000, 140, 330,
 		                 { choose("video.upscale", { { "1\xC3\x97 original", 1 }, { "2\xC3\x97", 2 }, { "4\xC3\x97", 4 }, { "8\xC3\x97", 8 } }),
 		                   choose("video.ssaa", { { "Sharp", 0 }, { "Supersampled", 1 } }) } });
 	callouts.push_back({ "AV out \xC2\xB7 the screen", "What is plugged into the AV multi out, how the picture fills it, and how much sound is kept ready (more: fewer gaps, more delay).", "vdac", 1413, 300, 330,

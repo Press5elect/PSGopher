@@ -146,7 +146,7 @@ void doCover(Web &w, const std::string &name)
 
 void doAbout(Web &w, const std::string &name)
 {
-	const std::string base = w.folder + "/about3-" + safeName(name); /* (about3: matched by title, any word order) */
+	const std::string base = w.folder + "/about4-" + safeName(name); /* (about4: matched by title, any word order, of the N64's years) */
 	std::string text;
 	bool done = true;
 	if (readText(base + ".txt", text)) {
@@ -228,11 +228,12 @@ void webStart(const std::string &folder)
 		return;
 	mkdir(folder.c_str(), 0777);
 	/* the earlier descriptions go and are asked again: about- took any game's article the search
-	 * offered (some were another game's), about2- missed titles with the words in another order */
+	 * offered (some were another game's), about2- missed titles with the words in another order,
+	 * about3- took a later game of the same name */
 	if (DIR *dir = opendir(folder.c_str())) {
 		std::vector<std::string> old;
 		while (struct dirent *e = readdir(dir))
-			if (strncmp(e->d_name, "about-", 6) == 0 || strncmp(e->d_name, "about2-", 7) == 0)
+			if (strncmp(e->d_name, "about-", 6) == 0 || strncmp(e->d_name, "about2-", 7) == 0 || strncmp(e->d_name, "about3-", 7) == 0)
 				old.push_back(folder + "/" + e->d_name);
 		closedir(dir);
 		for (const std::string &path : old)
