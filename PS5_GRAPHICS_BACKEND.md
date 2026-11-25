@@ -17,6 +17,31 @@ D5). No high-level renderer, no rewrite of the RDP. Labels as in PS5_PORTING_ANA
 | Shaders? | SPIR-V precompiled into parallel-rdp (no runtime GLSL); ACO compiles pipelines; RADV's disk cache at a path we set |
 | Accuracy | parallel-rdp is the accuracy reference for LLE RDP; any replacement would be a regression by definition |
 
+## Where parallel-rdp comes from
+
+| Repository | What it is | PSGopher |
+| --- | --- | --- |
+| [gopher64/parallel-rdp](https://github.com/gopher64/parallel-rdp), branch `gopher64` | Gopher64's fork of Themaister's parallel-rdp: 22 commits over the original (whose last change is from 2024-11-09): the RDRAM tracker and timeline, texture-load snapshots, save states, three patches (descriptor buffer, timer, Turnip). Also the test tools: `rdp-conformance`, `vi-conformance` (GPU against angrylion's CPU reference, byte for byte), `rdp-bench`, `rdp-dump`/`rdp-replayer` | the source of truth; the test tools are built from it |
+| [gopher64/parallel-rdp-standalone](https://github.com/gopher64/parallel-rdp-standalone), branch `gopher64` | generated from the above by its `generate_standalone_codebase.sh`: the renderer only, shaders precompiled into `slangmosh.hpp` | what Gopher64 builds (its submodule) and so what PSGopher ships |
+
+At PSGopher's pin, the standalone copy (`1c1014c`) was generated from `748144e`, the fork's newest
+commit, and its `slangmosh.hpp` is the one in PSGopher's build [here, 2026-11-25].
+
+## Accuracy check: the conformance suites
+
+`rdp-conformance` runs 257 test suites: random RDP command streams drawn by the GPU and by
+angrylion-rdp-plus, RDRAM and TMEM compared byte for byte. Built with the precompiled shaders PSGopher
+ships, on the PC's software Vulkan (lavapipe): see PS5_COMPATIBILITY.md for the result. The same tool,
+built for the console as a test title, answers whether RADV on the PS5 draws exactly what angrylion
+draws: the accuracy question no game run can answer as well. Not built for the console yet.
+
+## GPU cost without the CPU: dump and replay
+
+parallel-rdp records a game's RDP command stream (`PARALLEL_RDP_DUMP=<file>`, `rdp_device.cpp`);
+`rdp-bench` and `rdp-replayer` play it back. A dump made once on the desktop build of the same pin,
+replayed on the console at 1x/2x/4x/8x, gives the GPU time per frame of real game content with no
+emulation on the CPU: the measurement that decides the upscale default (PS5_PERFORMANCE.md).
+
 ## The PS5-specific pieces
 
 | Piece | Implementation | Status |
