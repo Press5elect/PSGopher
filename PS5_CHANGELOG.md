@@ -2,7 +2,14 @@
 
 ## Unreleased
 
-Nothing here has run on a console yet.
+Games ran on no console yet; the list, the sandbox exit, an SMB share and USB drives did (first
+console logs, 2026-11-25).
+
+- Fixed (Gopher64, in `ps5.patch`): no game started: Tokio's whole runtime is refused by the console
+  (`Operation not supported`, errno 45) and Gopher64 panicked. PSGopher builds it with the scheduler
+  and timers only when that happens (all Gopher64 uses on the console), logs which of kqueue and an
+  AF_UNIX socket pair was refused, and keeps the USB cartridge's TCP link off without it.
+- Changed: a panic is written to the boot log with its message, place and thread.
 
 - Added: the boot log, `psgopher-boot.log` in the title folder (the run before kept), as OGBox and
   Crux2; it has Gopher64's own messages and panics, which went nowhere before (Rust writes to

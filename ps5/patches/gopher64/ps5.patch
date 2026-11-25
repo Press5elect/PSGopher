@@ -519,7 +519,7 @@ index 0000000..bc02942
 +    0x00000033, 0x00010038,
 +};
 diff --git a/src/lib.rs b/src/lib.rs
-index 4e51a1b..35d03a2 100644
+index 4e51a1b..7caeeb3 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -3,6 +3,8 @@
@@ -531,12 +531,38 @@ index 4e51a1b..35d03a2 100644
  mod retroachievements;
  mod savestates;
  mod ui;
+@@ -127,6 +129,11 @@ pub fn create_runtime() -> (tokio::sync::oneshot::Sender<()>, tokio::runtime::Ha
+     let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
+ 
+     std::thread::spawn(move || {
++        // PSGopher (PS5): Tokio's I/O driver may not start on the console; without it, the
++        // scheduler and timers (psgopher::build_runtime)
++        #[cfg(psgopher)]
++        let rt = crate::psgopher::build_runtime();
++        #[cfg(not(psgopher))]
+         let rt = tokio::runtime::Runtime::new().expect("Failed to build runtime");
+         tx.send(rt.handle().clone()).unwrap();
+         rt.block_on(close_rx).unwrap();
+@@ -227,7 +234,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+                 }
+             }
+ 
+-            if device.ui.config.emulation.usb {
++            // PSGopher (PS5): the USB cartridge's TCP link needs Tokio's I/O driver
++            #[cfg(psgopher)]
++            let usb = device.ui.config.emulation.usb && crate::psgopher::runtime_has_io();
++            #[cfg(not(psgopher))]
++            let usb = device.ui.config.emulation.usb;
++            if usb {
+                 (shutdown_tx, usb_handle, device.ui.usb) = ui::usb::init();
+             }
+         }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..80e4857
+index 0000000..ad98075
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,352 @@
+@@ -0,0 +1,410 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -714,6 +740,64 @@ index 0000000..80e4857
 +        *buffer.add(n) = 0;
 +    }
 +    n
++}
++
++static RUNTIME_HAS_IO: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(true);
++
++/// Whether the last runtime built has Tokio's I/O driver (sockets, processes).
++pub fn runtime_has_io() -> bool {
++    RUNTIME_HAS_IO.load(std::sync::atomic::Ordering::Relaxed)
++}
++
++unsafe extern "C" {
++    fn kqueue() -> i32;
++    fn socketpair(domain: i32, kind: i32, protocol: i32, fds: *mut i32) -> i32;
++    fn close(fd: i32) -> i32;
++}
++
++/// Gopher64's Tokio runtime. The whole one (Runtime::new: scheduler, timers, I/O) when the console
++/// gives it; the first console runs refused it with EOPNOTSUPP (errno 45), so then the scheduler and
++/// timers only, which is all Gopher64 uses here: tasks, channels, tokio::fs (blocking threads),
++/// sleeps and timeouts. Without the I/O driver, sockets and processes are off: the USB cartridge's
++/// TCP link (netplay and RetroAchievements are never started, D10). What the console refused is
++/// logged once: kqueue() (mio's poller) and an AF_UNIX socketpair (Tokio's signal driver, which the
++/// "process" feature brings) are tried by themselves.
++pub fn build_runtime() -> tokio::runtime::Runtime {
++    match tokio::runtime::Runtime::new() {
++        Ok(rt) => {
++            RUNTIME_HAS_IO.store(true, std::sync::atomic::Ordering::Relaxed);
++            rt
++        }
++        Err(e) => {
++            static TOLD: std::sync::Once = std::sync::Once::new();
++            TOLD.call_once(|| {
++                let kq = unsafe { kqueue() };
++                let kq_errno = std::io::Error::last_os_error();
++                if kq >= 0 {
++                    unsafe { close(kq) };
++                }
++                let mut fds = [-1i32; 2];
++                let sp = unsafe { socketpair(1 /* AF_UNIX */, 1 /* SOCK_STREAM */, 0, fds.as_mut_ptr()) };
++                let sp_errno = std::io::Error::last_os_error();
++                for fd in fds {
++                    if fd >= 0 {
++                        unsafe { close(fd) };
++                    }
++                }
++                log_line(&format!(
++                    "psgopher: Tokio's whole runtime was refused ({e}); kqueue(): {}; socketpair(AF_UNIX): {}. \
++                     Going on with its scheduler and timers only (no sockets or processes: the USB cartridge's link is off)",
++                    if kq >= 0 { "ok".to_string() } else { kq_errno.to_string() },
++                    if sp == 0 { "ok".to_string() } else { sp_errno.to_string() },
++                ));
++            });
++            RUNTIME_HAS_IO.store(false, std::sync::atomic::Ordering::Relaxed);
++            tokio::runtime::Builder::new_multi_thread()
++                .enable_time()
++                .build()
++                .expect("Failed to build runtime (scheduler and timers only)")
++        }
++    }
 +}
 +
 +/// # Safety

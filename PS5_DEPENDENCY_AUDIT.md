@@ -50,7 +50,7 @@ and wraps them, kept local.
 | `sdl3-sys` 0.7.3 (SDL 3.4.20), `sdl3-ttf-sys` 0.7.1 | SDL3, SDL3_ttf | bindings only (`no-link`); functions from `ps5/sdl3` (D2) |
 | `slint`, `rfd`, `open`, `winit`/`wgpu` (via slint) | window system, GPU through wgpu | not built (`--no-default-features`, PS5 target table) |
 | `mimalloc` | its own `mmap` heap | not built on the PS5 (would bypass the platform heap in direct memory) |
-| `tokio` (rt-multi-thread, fs, process, macros) | threads, `kqueue` (mio), signals | compiles; used for file writes and timers. kqueue differs from FreeBSD: re-armed `EVFILT_USER` with `EV_ADD|NOTE_TRIGGER` does not wake [console: PROBE.md] [unknown] whether Tokio's waker path hits that: watch the first run's save writes |
+| `tokio` (rt-multi-thread, fs, process, macros) | threads, `kqueue` (mio), signals | compiles; used for file writes and timers. [console 2026-11-25] `Runtime::new` fails with EOPNOTSUPP (45): `psgopher::build_runtime` then builds the scheduler and timers only (no I/O driver; the USB cartridge's TCP link off) and logs whether kqueue() or an AF_UNIX socketpair was the one refused. kqueue differs from FreeBSD: re-armed `EVFILT_USER` with `EV_ADD|NOTE_TRIGGER` does not wake [console: PROBE.md] [unknown] whether Tokio's waker path hits that: watch the first run's save writes |
 | `spin_sleep` | `nanosleep`, spin | compiles; pacing accuracy [unknown]: measured by the benchmark mode |
 | `serde`, `serde_json`, `postcard`, `serde-big-array` | none | compiles |
 | `zip` 9 (deflate, deflate64, bzip2, lzma, ppmd, zstd) | `zstd-sys` C | compiles (zstd through the SDK's clang) |
