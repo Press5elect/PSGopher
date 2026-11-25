@@ -1437,6 +1437,12 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 0 ? "now" : std::to_string(v); }));
 		s.rows.push_back(title_row("Graphics driver", "The driver records and submits on a thread of its own (Crux2's switch).", { { "Same thread", 0 }, { "Own thread", 1 } },
 		                           [](TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }));
+		s.rows.push_back(title_row("Compute waves", "How wide the GPU runs parallel-rdp's shaders: 64 (RADV's default) or 32, which suits its per-pixel loops on RDNA. GPU timing shows which is faster.",
+		                           { { "64 wide", 0 }, { "32 wide", 1 } }, [](TitleSettings &t) -> int64_t { return t.wave32; },
+		                           [](TitleSettings &t, int64_t v) { t.wave32 = v != 0; }));
+		s.rows.push_back(title_row("8/16-bit maths", "parallel-rdp's 8 and 16-bit arithmetic, which it turns off on RADV (measured on PCs). GPU timing shows which is faster here.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.smallTypes; },
+		                           [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; }));
 		s.rows.push_back(title_row("GPU timing", "Writes the GPU's time in each of parallel-rdp's stages to the boot log every 10 s (gpu: lines), to find what a slow game costs.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.gpuTiming; },
 		                           [](TitleSettings &t, int64_t v) { t.gpuTiming = v != 0; }));

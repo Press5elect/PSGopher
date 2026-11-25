@@ -42,7 +42,7 @@ void TitleSettings::load()
 	char line[256];
 	while (fgets(line, sizeof(line), f)) {
 		char key[64] = {}, value[128] = {};
-		if (line[0] == '#' || sscanf(line, " %63[a-z_] = %127s", key, value) != 2)
+		if (line[0] == '#' || sscanf(line, " %63[a-z_0-9] = %127s", key, value) != 2)
 			continue;
 		if (!strcmp(key, "display"))
 			display = (!strcmp(value, "120") || !strcmp(value, "vrr")) ? value : "60";
@@ -62,6 +62,10 @@ void TitleSettings::load()
 			driverThread = !strcmp(value, "on");
 		else if (!strcmp(key, "gpu_timing"))
 			gpuTiming = !strcmp(value, "on");
+		else if (!strcmp(key, "wave32"))
+			wave32 = !strcmp(value, "on");
+		else if (!strcmp(key, "small_types"))
+			smallTypes = !strcmp(value, "on");
 		else if (!strcmp(key, "hotkeys"))
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
@@ -113,6 +117,10 @@ bool TitleSettings::save() const
 		"driver_thread = %s\n"
 		"# gpu_timing: on writes the GPU's time in each of parallel-rdp's stages to the boot log (gpu: lines)\n"
 		"gpu_timing = %s\n"
+		"# wave32: on runs the GPU's compute shaders 32 wide (RADV's default is 64); small_types: on lets\n"
+		"# parallel-rdp use 8 and 16-bit arithmetic (it turns that off on RADV). Measured with gpu_timing\n"
+		"wave32 = %s\n"
+		"small_types = %s\n"
 		"\n"
 		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
 		"# hotkey_<action>: the N64 button by Gopher64's input number (0 D Right, 1 D Left, 2 D Down, 3 D Up,\n"
@@ -121,7 +129,7 @@ bool TitleSettings::save() const
 		"# quickmenu_tap: a touch pad tap opens the quick menu (on whenever nothing else leaves a game)\n"
 		"quickmenu_tap = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)
@@ -181,6 +189,16 @@ void TitleSettings::applyHdr() const
 		unsetenv("PARALLEL_RDP_FORCE_SYNC_SHADER");
 		setenv("PSGOPHER_RDP_COMPILE_THREADS", shaderCompile.c_str(), 1);
 	}
+	if (wave32)
+		setenv("RADV_PERFTEST", "cswave32", 1);
+	else
+		unsetenv("RADV_PERFTEST");
+	if (smallTypes)
+		setenv("PARALLEL_RDP_SMALL_TYPES", "1", 1);
+	else
+		unsetenv("PARALLEL_RDP_SMALL_TYPES");
+	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
+	    gpuTiming ? ", GPU timing on" : "");
 	if (gpuTiming)
 		setenv("PARALLEL_RDP_BENCH", "2", 1);
 	else

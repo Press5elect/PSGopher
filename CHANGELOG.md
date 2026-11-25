@@ -95,6 +95,15 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### From the seventh console log (2026-11-25)
+
+- Measured: at 8x the GPU spends 15-16 ms a frame in parallel-rdp's depth-blending pass (of ~18 ms),
+  the shading 1-1.5 ms: that pass is what slows a demanding game at 8x.
+- Added: two switches for that pass (BENCH's video stage, off by default, measured with GPU timing):
+  compute waves 32 wide (`wave32`, RADV_PERFTEST=cswave32; RADV's default is 64) and parallel-rdp's
+  8/16-bit arithmetic (`small_types`; it turns it off on RADV from PC measurements).
+- Fixed: `psgopher.ini` keys with digits were not read (the parser took letters and _ only).
+
 ### From the sixth console log (2026-11-25)
 
 - Added: GPU timing (BENCH's video stage, `gpu_timing`, off by default): parallel-rdp's own GPU
