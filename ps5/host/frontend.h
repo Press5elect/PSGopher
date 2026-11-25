@@ -20,6 +20,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <utility>
 #include <string>
 #include <vector>
 
@@ -69,6 +70,14 @@ struct FrontendHost {
 	std::function<int()> share_count;
 	std::function<bool()> busy;                        // a copy from a share is under way
 	std::function<std::string()> notice;               // what was said last ("" none)
+	/* Gopher64's cheats of a game (by its key): "name\tnote\toptions\ton\toption" lines; one set */
+	std::function<std::string(const std::string &)> cheats_of;
+	std::function<bool(const std::string &, const std::string &, bool, const std::string &)> cheat_set;
+	/* the cartridge's cover (libretro's box art): its texture and width / height; invalid while
+	 * there is none (asked for when asked here) */
+	std::function<std::pair<ImTextureID, float>(const Game &)> cover;
+	/* its description ("title\ntext": Wikipedia's summary), "" while there is none */
+	std::function<std::string(const Game &)> about;
 };
 
 class Frontend {
@@ -96,6 +105,16 @@ private:
 	int sort_ = 0, show_ = 0;
 	int bench_sel_ = 0;
 	int probes_open_ = -1; // the probe picker: its cursor, -1 closed
+	struct Cheat {
+		std::string name, note;
+		std::vector<std::string> options;
+		bool on = false;
+		std::string option;
+	};
+	int cheats_open_ = -1; // the cheat picker: its cursor, -1 closed
+	std::vector<Cheat> cheats_;
+	void readCheats(const Game &g);
+	void cheatPicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f, const Game &g);
 	std::vector<Probe> probes_;
 	std::vector<std::string> probe_files_;
 	std::string probes_for_;
@@ -107,6 +126,7 @@ private:
 
 	void refresh();
 	void order();
+	board::Look lookFor(const Game &g) const; // its look, with its cover when there is one
 	const Game *selected() const;
 	void home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
 	void rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);

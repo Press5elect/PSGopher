@@ -24,8 +24,14 @@ void psgopher_bench_rdram_wait(uint64_t ns);
  * (cpu_ms -1 when the thread clock is not there) */
 struct psgopher_live {
    double frames_per_second, cpu_ms, present_ms;
+   double rdram_ms, rdram_waits;  /* RDRAM syncs' wait a VI, and how many */
+   double speed;                  /* VIs a second against the console's 50 or 60, in % */
+   unsigned game_fps, target_vis; /* pictures the game drew a second (Gopher64's count); 50 or 60 */
+   unsigned long long audio_queue, audio_underruns;
 };
 void psgopher_live_read(struct psgopher_live *out);
+/* the last frames' times (ms between VIs), oldest first, at most max; their number */
+int psgopher_live_history(float *out, int max);
 
 /* PSGopher: the video line's counts start again (before each game) */
 void psgopher_video_reset(void);

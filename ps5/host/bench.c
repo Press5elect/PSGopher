@@ -51,19 +51,41 @@ static uint64_t now_ns(clockid_t clock)
 
 /* PSGopher: the boot log's video line, whatever the benchmark mode: the first frame shown, then
  * the frames of each 10 s (one line; a game that stops showing frames stops it) */
-/* PSGopher: the quick menu's live figures, each the last whole second's (always on: one thread
- * CPU clock read a frame; waiting, in present or the speed limiter, is no CPU time) */
+/* PSGopher: the live figures (the quick menu, the stats overlay, the boot log's video line), each
+ * the last whole second's; always on: one thread CPU clock read a VI (waiting, in present, the speed
+ * limiter or an RDRAM sync, is no CPU time) */
 static struct psgopher_live live_now;
-static uint64_t live_since_ns, live_frames, live_present_ns, live_cpu_start;
+static uint64_t live_since_ns, live_frames, live_present_ns, live_cpu_start, live_last_end;
+static _Atomic uint64_t live_rdram_ns, live_rdram_waits;
+#define HISTORY 180
+static float history_ms[HISTORY];
+static int history_at, history_n;
+
+void psgopher_rdp_rates(uint32_t *fps, uint32_t *vis, int *pal) __attribute__((weak));
 
 void psgopher_live_read(struct psgopher_live *out)
 {
    *out = live_now;
 }
 
+int psgopher_live_history(float *out, int max)
+{
+   const int n = history_n < max ? history_n : max;
+   for (int i = 0; i < n; i++)
+      out[i] = history_ms[(history_at - n + i + HISTORY) % HISTORY];
+   return n;
+}
+
 static void live_frame(uint64_t begin_ns, uint64_t end_ns)
 {
    const uint64_t cpu = now_ns(CLOCK_THREAD_CPUTIME_ID);
+   if (live_last_end) {
+      history_ms[history_at] = (float)((double)(end_ns - live_last_end) / 1e6);
+      history_at = (history_at + 1) % HISTORY;
+      if (history_n < HISTORY)
+         history_n++;
+   }
+   live_last_end = end_ns;
    if (!live_since_ns) {
       live_since_ns = end_ns;
       live_cpu_start = cpu;
@@ -77,20 +99,41 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
       live_now.present_ms = (double)live_present_ns / 1e6 / (double)live_frames;
       live_now.cpu_ms = cpu == UINT64_MAX || live_cpu_start == UINT64_MAX
                            ? -1.0 : (double)(cpu - live_cpu_start) / 1e6 / (double)live_frames;
+      const uint64_t rdram = atomic_exchange(&live_rdram_ns, 0), waits = atomic_exchange(&live_rdram_waits, 0);
+      live_now.rdram_ms = (double)rdram / 1e6 / (double)live_frames;
+      live_now.rdram_waits = (double)waits / (double)live_frames;
+      if (psgopher_rdp_rates) {
+         uint32_t fps = 0, vis = 0;
+         int pal = 0;
+         psgopher_rdp_rates(&fps, &vis, &pal);
+         live_now.game_fps = fps;
+         live_now.target_vis = pal ? 50 : 60;
+         live_now.speed = (double)live_frames * 1e9 / (double)span / live_now.target_vis * 100.0;
+      }
+      psgopher_sdl3_audio_stats audio;
+      psgopher_sdl3_audio_stats_read(&audio);
+      live_now.audio_queue = audio.queued_frames;
+      live_now.audio_underruns = audio.underrun_grains;
       live_since_ns = end_ns;
       live_cpu_start = cpu;
       live_frames = live_present_ns = 0;
    }
 }
 
-static uint64_t video_since_ns, video_count, video_total;
+static uint64_t video_since_ns, video_count, video_total, video_underruns_at;
 
 /* a new game: its first frame is said again */
 void psgopher_video_reset(void)
 {
    video_since_ns = video_count = video_total = 0;
-   live_since_ns = live_frames = live_present_ns = 0;
+   live_since_ns = live_frames = live_present_ns = live_last_end = 0;
+   atomic_store(&live_rdram_ns, 0);
+   atomic_store(&live_rdram_waits, 0);
+   history_at = history_n = 0;
    live_now = (struct psgopher_live){ 0 };
+   psgopher_sdl3_audio_stats audio;
+   psgopher_sdl3_audio_stats_read(&audio);
+   video_underruns_at = audio.underrun_grains;
 }
 
 static void video_heartbeat(uint64_t end_ns)
@@ -103,8 +146,17 @@ static void video_heartbeat(uint64_t end_ns)
    video_count++;
    const uint64_t span = end_ns - video_since_ns;
    if (span >= 10000000000ull) {
-      say("video: %llu frames in %.1f s (%.2f a second), %llu since the start", (unsigned long long)video_count,
-          (double)span / 1e9, (double)video_count * 1e9 / (double)span, (unsigned long long)video_total);
+      /* the last second's figures beside the ten seconds' count: where a VI's time goes */
+      const struct psgopher_live l = live_now;
+      psgopher_sdl3_audio_stats audio;
+      psgopher_sdl3_audio_stats_read(&audio);
+      say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms, present wait %.2f ms, "
+          "RDRAM sync %.2f ms (%.1f); audio queue %llu, %llu underrun(s) in 10 s",
+          (unsigned long long)video_count, (double)span / 1e9, (double)video_count * 1e9 / (double)span,
+          l.target_vis ? (double)video_count * 1e9 / (double)span / l.target_vis * 100.0 : 0.0, l.game_fps, l.cpu_ms,
+          l.present_ms, l.rdram_ms, l.rdram_waits, (unsigned long long)audio.queued_frames,
+          (unsigned long long)(audio.underrun_grains - video_underruns_at));
+      video_underruns_at = audio.underrun_grains;
       video_since_ns = end_ns;
       video_count = 0;
    }
@@ -128,6 +180,8 @@ void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns)
 
 void psgopher_bench_rdram_wait(uint64_t ns)
 {
+   atomic_fetch_add(&live_rdram_ns, ns);
+   atomic_fetch_add(&live_rdram_waits, 1);
    if (!atomic_load_explicit(&enabled, memory_order_relaxed))
       return;
    pthread_mutex_lock(&lock);

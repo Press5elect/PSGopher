@@ -32,6 +32,7 @@
 #include "library.h"
 #include "menu.h"
 #include "title_settings.h"
+#include "web.h"
 
 extern "C" {
 #include "bench.h"
@@ -273,6 +274,8 @@ int main()
    }
 
    psgopher::startShares(title_dir);
+   /* the covers and descriptions the front end shows, fetched as it shows them */
+   psgopher::webStart(std::string(ROOT) + "/cache/covers");
    psgopher::library().load();
    psgopher::library().rescan();
 

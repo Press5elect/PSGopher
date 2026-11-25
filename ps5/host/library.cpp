@@ -179,6 +179,10 @@ void readFacts(Game &g)
 	g.id.clear();
 	for (int i = 0x3B; i < 0x3F; i++)
 		g.id += head[i] >= 0x20 && head[i] < 0x7f ? (char)head[i] : '-';
+	char crc[40];
+	snprintf(crc, sizeof(crc), "%02X%02X%02X%02X-%02X%02X%02X%02X-C:%02X", head[0x10], head[0x11], head[0x12], head[0x13],
+	         head[0x14], head[0x15], head[0x16], head[0x17], head[0x3E]);
+	g.crc = crc;
 	PsgopherRomFacts f = {};
 	if (psgopher_rom_facts && psgopher_rom_facts(head, sizeof(head), &f)) {
 		g.cic = f.cic;
@@ -268,15 +272,15 @@ void sortGames(std::vector<Game> &games)
 void save(const std::vector<Game> &games)
 {
 	std::string text;
-	/* v2: tab, size, facts, cic, save, rumble, id, header, path (the path last: it may hold anything
-	 * but a newline; the header's name has no tab) */
-	text += "#psgopher-library 2\n";
+	/* v3: tab, size, facts, cic, save, rumble, id, header, crc, path (the path last: it may hold
+	 * anything but a newline; the header's name has no tab) */
+	text += "#psgopher-library 3\n";
 	for (const Game &g : games) {
 		std::string header = g.header;
 		std::replace(header.begin(), header.end(), '\t', ' ');
 		text += std::to_string(g.tab) + "\t" + std::to_string(g.size) + "\t" + (g.facts ? "1" : "0") + "\t" +
 			std::to_string(g.cic) + "\t" + std::to_string(g.save) + "\t" + (g.rumble ? "1" : "0") + "\t" +
-			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + g.path + "\n";
+			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + (g.crc.empty() ? "-" : g.crc) + "\t" + g.path + "\n";
 	}
 	const std::string file = listFile(), temporary = file + ".new";
 	if (FILE *f = fopen(temporary.c_str(), "wb")) {
@@ -371,18 +375,18 @@ void Library::load()
 	std::vector<Game> games;
 	if (FILE *f = fopen(listFile().c_str(), "rb")) {
 		char line[2048];
-		bool v2 = false;
+		int version = 1;
 		while (fgets(line, sizeof(line), f)) {
 			std::string text = line;
 			while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
 				text.pop_back();
-			if (text == "#psgopher-library 2") {
-				v2 = true;
+			if (text.rfind("#psgopher-library ", 0) == 0) {
+				version = atoi(text.c_str() + 18);
 				continue;
 			}
 			std::vector<std::string> fields;
 			size_t at = 0;
-			const int count = v2 ? 9 : 3;
+			const int count = version >= 3 ? 10 : version == 2 ? 9 : 3;
 			for (int i = 0; i < count - 1; i++) {
 				const size_t tab_at = text.find('\t', at);
 				if (tab_at == std::string::npos)
@@ -399,13 +403,17 @@ void Library::load()
 			g.path = fields.back();
 			const size_t slash = g.path.rfind('/');
 			g.name = stem(slash == std::string::npos ? g.path : g.path.substr(slash + 1));
-			if (v2) {
+			if (version >= 2) {
 				g.facts = fields[2] == "1";
 				g.cic = (uint32_t)strtoul(fields[3].c_str(), nullptr, 10);
 				g.save = (uint32_t)strtoul(fields[4].c_str(), nullptr, 10);
 				g.rumble = fields[5] == "1";
 				g.id = fields[6] == "-" ? "" : fields[6];
 				g.header = fields[7];
+				if (version >= 3)
+					g.crc = fields[8] == "-" ? "" : fields[8];
+				else
+					g.facts = false; /* read again: v2 kept no key for cheats */
 			}
 			if (!g.path.empty())
 				games.push_back(g);
@@ -447,6 +455,7 @@ void Library::rescan()
 					g.cic = it->cic;
 					g.save = it->save;
 					g.rumble = it->rumble;
+					g.crc = it->crc;
 					continue;
 				}
 				{

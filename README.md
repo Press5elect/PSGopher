@@ -30,7 +30,9 @@ play time and your probes (save states). It finds every N64 ROM (`.z64`, `.n64`,
 storage, and on network shares.
 
 - **HOME**: the board and the cartridge strip (recently played first). ◄ ► cartridge, ✕ power on,
-  □ power on from a probe, △ the bench.
+  □ power on from a probe, △ cheats. Each cartridge shows its box art (libretro's thumbnails) and
+  its region's flag, the panel three lines of its Wikipedia summary, fetched once over the network
+  and kept in `/data/psgopher/cache/covers`.
 - **RACK**: every cartridge on shelves, A to Z. D-pad, L2/R2 by letter, □ sort (A-Z, recently
   played, most played, size), OPTIONS show (all, played, never played, has probes, internal, USB,
   network), ✕ power on, △ seat it on the home strip.
@@ -41,7 +43,8 @@ storage, and on network shares.
   searching again, closing. ▲ ▼ part, ◄ ► or ✕ change.
 
 L1/R1 change the view. **In a game**, tap the touch pad for the quick menu: resume, take a probe
-(save state), load one, reset, or eject the cartridge (back to the board). The controls are
+(save state), load one, turn the stats overlay on or off (speed, frame times, audio), reset, or
+eject the cartridge (back to the board). The controls are
 Gopher64's default gamepad layout on the DualSense: Cross A, Square B, L2 Z, Options Start, the
 right stick the C buttons; the touch pad held down is Gopher64's hotkey (with Options: back to the
 board; with L1/R1: save/load state; with L2: fast forward). Saves and states are in
@@ -72,7 +75,10 @@ No games, BIOS or other copyrighted data are included.
 GPL-3.0 (see `LICENSE`), as Gopher64. Gopher64 is by Logan McNaughton and its contributors;
 the gopher logo is Gopher64's (`data/icon` in its repository, GPL-3.0), used for PSGopher's icon;
 parallel-rdp by Hans-Kristian Arntzen (MIT); rcheevos by the RetroAchievements team (MIT);
-stb_truetype and stb_image by Sean Barrett (public domain/MIT); the front end's faces, Bricolage
+stb_truetype and stb_image by Sean Barrett (public domain/MIT); rustls and webpki-roots
+(Apache-2.0/MIT/ISC, webpki-roots' certificates from Mozilla's, MPL-2.0); covers from the
+libretro-thumbnails project and descriptions from Wikipedia (CC BY-SA), fetched on the console,
+none shipped; the front end's faces, Bricolage
 Grotesque and JetBrains Mono (SIL Open Font License). The network shares and the sandbox exit are
 OGBox by Press5elect, the virtual file layer Crux2 by Press5elect (GPL-3.0 with the attribution term
 of section 7(b): `NOTICE`); Dear ImGui by Omar Cornut (MIT); libsmb2 and

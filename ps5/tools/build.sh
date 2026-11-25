@@ -92,6 +92,7 @@ compile -std=c++20 quickmenu.o "$root/ps5/host/quickmenu.cpp" "${list[@]}" -Wno-
 compile -std=c++20 board.o "$root/ps5/host/board.cpp" "${list[@]}"
 compile -std=c++20 frontend.o "$root/ps5/host/frontend.cpp" "${list[@]}" -Wno-missing-field-initializers
 compile -std=c++20 image.o "$root/ps5/host/image.cpp" -w
+compile -std=c++20 web.o "$root/ps5/host/web.cpp" "${list[@]}"
 for vfs in ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp; do
     compile -std=c++20 "$vfs.o" "$root/ps5/vfs/$vfs.cpp" "${list[@]}" -Wno-missing-field-initializers -Wno-sign-compare
 done
@@ -105,7 +106,7 @@ echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
 objects=()
-for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings library shares menu quickmenu board frontend image \
+for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings library shares menu quickmenu board frontend image web \
     ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp imgui_imgui imgui_imgui_draw imgui_imgui_tables imgui_imgui_widgets \
     imgui_imgui_impl_vulkan; do
     objects+=("$work/obj/$object.o")

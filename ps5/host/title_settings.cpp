@@ -40,6 +40,8 @@ void TitleSettings::load()
 			hdrWhite = std::clamp(atoi(value), 80, 400);
 		else if (!strcmp(key, "hdr_peak"))
 			hdrPeak = std::clamp(atoi(value), 0, 4000);
+		else if (!strcmp(key, "stats"))
+			stats = !strcmp(value, "on");
 	}
 	fclose(f);
 }
@@ -63,8 +65,11 @@ bool TitleSettings::save() const
 		"# hdr_white: the nits white is shown at (80 to 400; 203 is HDR's reference)\n"
 		"hdr_white = %d\n"
 		"# hdr_peak: the nits the brightest parts of the picture are raised to (0 off; up to 4000)\n"
-		"hdr_peak = %d\n",
-		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak);
+		"hdr_peak = %d\n"
+		"\n"
+		"# stats: on shows the stats overlay in a game (VIs, speed, CPU, waits, audio, frame times)\n"
+		"stats = %s\n",
+		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off");
 	/* one write of a small file, beside it first */
 	const std::string path = file.empty() ? kTitleSettingsFile : file;
 	const std::string temporary = path + ".new";

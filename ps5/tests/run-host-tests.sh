@@ -42,7 +42,7 @@ if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/font_
     ${CXX:-g++} "${menu_flags[@]}" -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-unused-function \
         -Wno-unused-variable \
         "$root/ps5/tests/test_menu.cpp" "$root/ps5/host/menu.cpp" "$root/ps5/host/library.cpp" \
-        "$root/ps5/host/frontend.cpp" "$root/ps5/host/board.cpp" "$root/ps5/host/image.cpp" \
+        "$root/ps5/host/frontend.cpp" "$root/ps5/host/board.cpp" "$root/ps5/host/image.cpp" "$root/ps5/host/web.cpp" \
         "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" "$root/ps5/host/sandbox.cpp" \
         "$out/volk.o" "$out"/imgui_*.o -o "$out/test_menu" -lpthread -ldl
     [[ -f $lavapipe ]] && export VK_ICD_FILENAMES=$lavapipe
@@ -51,6 +51,7 @@ if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/font_
     ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
         -fsanitize=address,undefined -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$imgui" \
         -I"$root/build/ps5/gen" "$root/ps5/tests/test_quickmenu.cpp" "$root/ps5/host/quickmenu.cpp" \
+        "$root/ps5/host/title_settings.cpp" \
         "$out"/imgui_imgui.o "$out"/imgui_imgui_draw.o "$out"/imgui_imgui_tables.o "$out"/imgui_imgui_widgets.o \
         -o "$out/test_quickmenu"
     "$out/test_quickmenu" "$out/quickmenu-work" "$out/menu-pictures/quickmenu"

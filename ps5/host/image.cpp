@@ -17,6 +17,19 @@ extern "C" void say(const char *format, ...) __attribute__((format(printf, 1, 2)
 
 namespace psgopher {
 
+Image decodeImage(const std::string &path)
+{
+	Image img;
+	int channels = 0;
+	if (stbi_uc *pixels = stbi_load(path.c_str(), &img.width, &img.height, &channels, 4)) {
+		img.rgba.assign(pixels, pixels + (size_t)img.width * img.height * 4);
+		stbi_image_free(pixels);
+	} else {
+		img.width = img.height = 0;
+	}
+	return img;
+}
+
 const Image &loadImage(const std::string &path)
 {
 	static std::mutex mutex;

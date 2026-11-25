@@ -13,7 +13,7 @@ set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 upstream=https://github.com/gopher64/gopher64.git
 # master of 2026-11-24 ("better handling of VI_V_INTR_REG (#1441)"), v1.2.4 + 0
-revision=439e6c11f69d7aab7ca1e5cb217a3c62eee00921
+revision=5cf32936c8b4c2b7573f3d939bddf5c4d2913363
 patch="$root/ps5/patches/gopher64/ps5.patch"
 vendor="$root/vendor/gopher64"
 

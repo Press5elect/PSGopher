@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <map>
 #include <memory>
 #include <mutex>
 #include <thread>
@@ -56,12 +57,15 @@ extern "C" const char *psgopher_menu_host_shot;
 #include "ps5_vfs.h"
 #include "shares.h"
 #include "title_settings.h"
+#include "web.h"
 
 extern "C" {
 #include "platform.h"
 #include "sandbox.h"
 int64_t psgopher_setting_get(const char *name);
 bool psgopher_setting_set(const char *name, int64_t value);
+size_t psgopher_cheats_of(const char *game, char *buffer, size_t size);
+bool psgopher_cheat_set(const char *game, const char *name, bool on, const char *option);
 int wsi_videoout_set_hdr10(int enable) __attribute__((weak));
 int wsi_videoout_hdr10(void) __attribute__((weak));
 }
@@ -315,6 +319,24 @@ ImTextureID uploadTexture(Display &d, const Image &img)
 	t.set = ImGui_ImplVulkan_AddTexture(t.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	d.textures.push_back(t);
 	return (ImTextureID)t.set;
+}
+
+/* A picture uploadTexture made, let go (the device idle first: a frame in flight may sample it) */
+void freeTexture(Display &d, ImTextureID id)
+{
+	for (size_t i = 0; i < d.textures.size(); i++) {
+		Display::Texture &t = d.textures[i];
+		if ((ImTextureID)t.set != id)
+			continue;
+		vkDeviceWaitIdle(d.device);
+		if (d.imgui && t.set)
+			ImGui_ImplVulkan_RemoveTexture(t.set);
+		vkDestroyImageView(d.device, t.view, nullptr);
+		vkDestroyImage(d.device, t.image, nullptr);
+		vkFreeMemory(d.device, t.memory, nullptr);
+		d.textures.erase(d.textures.begin() + (long)i);
+		return;
+	}
 }
 
 #ifdef PSGOPHER_MENU_HOST
@@ -767,6 +789,15 @@ struct Menu {
 	bool elevationOff{ false };
 	MenuResult result;
 	bool done{ false };
+	/* the covers on the screen: their textures (at most kCovers, the least lately shown let go) */
+	struct Cover {
+		ImTextureID id = ImTextureID_Invalid;
+		float aspect = 0;
+		uint64_t shown = 0;
+	};
+	static constexpr size_t kCovers = 48;
+	std::map<std::string, Cover> covers;
+	uint64_t frames = 0, uploaded_at = 0;
 	/* shares */
 	ShareFile shares;
 	int editing{ -1 }; // the share being edited, -1 a new one
@@ -1249,6 +1280,52 @@ MenuResult runMenu(const std::string &notice)
 		host.share_count = [m] { return (int)m->shares.shares.size(); };
 		host.busy = [] { return g_copy.state == 1; };
 		host.notice = [m] { return now_seconds() < m->noticeUntil ? m->notice : std::string(); };
+		host.cheats_of = [](const std::string &game) {
+			std::string text(256 * 1024, '\0');
+			size_t n = psgopher_cheats_of(game.c_str(), text.data(), text.size());
+			if (n >= text.size()) {
+				text.assign(n + 1, '\0');
+				n = psgopher_cheats_of(game.c_str(), text.data(), text.size());
+			}
+			text.resize(std::min(n, text.size() - 1));
+			return text;
+		};
+		host.cheat_set = [](const std::string &game, const std::string &name, bool on, const std::string &option) {
+			return psgopher_cheat_set(game.c_str(), name.c_str(), on, option.c_str());
+		};
+		Display *dp = &d;
+		host.cover = [m, dp](const Game &g) -> std::pair<ImTextureID, float> {
+			auto it = m->covers.find(g.name);
+			if (it != m->covers.end()) {
+				it->second.shown = m->frames;
+				return { it->second.id, it->second.aspect };
+			}
+			/* one upload a frame (each waits for the queue) */
+			if (m->uploaded_at == m->frames)
+				return { ImTextureID_Invalid, 0.0f };
+			Image picture;
+			if (webCover(g.name, &picture) != WebState::Ready)
+				return { ImTextureID_Invalid, 0.0f };
+			m->uploaded_at = m->frames;
+			if (m->covers.size() >= Menu::kCovers) {
+				auto oldest = m->covers.begin();
+				for (auto c = m->covers.begin(); c != m->covers.end(); ++c)
+					if (c->second.shown < oldest->second.shown)
+						oldest = c;
+				if (oldest->second.shown + 2 < m->frames) {
+					freeTexture(*dp, oldest->second.id);
+					webForget(oldest->first);
+					m->covers.erase(oldest);
+				}
+			}
+			Menu::Cover c;
+			c.id = uploadTexture(*dp, picture);
+			c.aspect = picture.height ? (float)picture.width / (float)picture.height : 0;
+			c.shown = m->frames;
+			m->covers[g.name] = c;
+			return { c.id, c.aspect };
+		};
+		host.about = [](const Game &g) { return webAbout(g.name); };
 		menu.front = std::make_unique<Frontend>(std::move(host));
 	}
 
@@ -1271,6 +1348,7 @@ MenuResult runMenu(const std::string &notice)
 				held |= PAD_L2_DIGITAL;
 			if (released && p.r2 > .5f)
 				held |= PAD_R2_DIGITAL;
+			menu.frames++;
 			menu.input.now = (float)now_seconds();
 			menu.input.held = held;
 			menu.input.pressed = held & ~was;

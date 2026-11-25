@@ -283,6 +283,34 @@ ImU32 lerpColour(ImU32 a, ImU32 b, float t)
 
 void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height)
 {
+	if (look.cover != ImTextureID_Invalid && look.cover_aspect > 0) {
+		/* the box art, cropped to fill the label (centred), its top part when less is visible; in a
+		 * grid of quads, so the slot's projection bends it as it bends the board */
+		const float vis = std::min(208.0f, visible_height), want = 236.0f / 208.0f;
+		float u0 = 0, u1 = 1, v0 = 0, v1 = 1;
+		if (look.cover_aspect > want) {
+			const float keep = want / look.cover_aspect;
+			u0 = (1 - keep) / 2;
+			u1 = u0 + keep;
+		} else {
+			const float keep = look.cover_aspect / want;
+			v0 = (1 - keep) / 2;
+			v1 = v0 + keep;
+		}
+		v1 = v0 + (v1 - v0) * vis / 208.0f;
+		constexpr int kCells = 6;
+		for (int j = 0; j < kCells; j++)
+			for (int i = 0; i < kCells; i++) {
+				const float a = (float)i / kCells, b = (float)(i + 1) / kCells, c = (float)j / kCells, d = (float)(j + 1) / kCells;
+				auto at = [&](float x, float y) { return to(ImVec2(x * 236, y * vis)); };
+				auto uv = [&](float x, float y) { return ImVec2(u0 + (u1 - u0) * x, v0 + (v1 - v0) * y); };
+				dl->AddImageQuad(ImTextureRef(look.cover), at(a, c), at(b, c), at(b, d), at(a, d), uv(a, c), uv(b, c), uv(b, d), uv(a, d));
+			}
+		/* its edge, as the label's */
+		const ImVec2 edge[4] = { to(ImVec2(0, 0)), to(ImVec2(236, 0)), to(ImVec2(236, vis)), to(ImVec2(0, vis)) };
+		dl->AddPolyline(edge, 4, IM_COL32(0, 0, 0, 90), 1.0f, ImDrawFlags_Closed);
+		return;
+	}
 	Rng r{ look.seed };
 	const float h2 = std::fmod(look.hue + 40 + r() * 80, 360.0f);
 	LabelPainter p{ dl, to, 0, 0, 236, std::min(208.0f, visible_height) };
@@ -453,6 +481,11 @@ void Machine::step(float dt, const Look *wanted)
 	const bool other = wanted && (!has_cartridge || wanted->seed != shown.seed);
 	if (other && seat_dir == 0)
 		seat_dir = has_cartridge ? -1 : 1;
+	if (wanted && has_cartridge && !other && seat_dir == 0) {
+		/* the same cartridge: its cover, come since it was seated */
+		shown.cover = wanted->cover;
+		shown.cover_aspect = wanted->cover_aspect;
+	}
 	if (!has_cartridge && wanted) {
 		shown = *wanted;
 		has_cartridge = true;

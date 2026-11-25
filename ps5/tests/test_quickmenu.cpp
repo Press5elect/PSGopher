@@ -68,7 +68,18 @@ extern "C" double now_seconds(void)
 }
 extern "C" void psgopher_live_read(struct psgopher_live *out)
 {
-   *out = { 59.94, 10.4, 3.4 };
+   *out = {};
+   out->frames_per_second = 59.94, out->cpu_ms = 10.4, out->present_ms = 3.4, out->speed = 100, out->target_vis = 60;
+}
+extern "C" int psgopher_live_history(float *out, int max)
+{
+   for (int i = 0; i < max; i++)
+      out[i] = 16.7f + (i % 7 == 0 ? 9.0f : 0.0f);
+   return max;
+}
+extern "C" void psgopher_overlay_set(const struct psgopher_overlay_vertex *, uint32_t, const uint32_t *, uint32_t,
+                                     const struct psgopher_overlay_command *, uint32_t)
+{
 }
 extern "C" void psgopher_sdl3_audio_stats_read(psgopher_sdl3_audio_stats *stats)
 {
@@ -109,9 +120,11 @@ extern "C" void psgopher_sdl3_menu_pad(struct pad *p)
       std::fprintf(stderr, "FAILED: the script ended and the menu stayed\n");
       std::exit(1);
    }
+   /* as the PS5 layer's pad_poll: "pressed" is against the held buttons the caller's struct had */
+   const uint32_t before = p->held;
    *p = {};
    p->held = held;
-   p->pressed = held & ~g_held;
+   p->pressed = held & ~before;
    g_held = held;
 }
 static int g_holds = 0;
@@ -289,8 +302,8 @@ int main(int argc, char **argv)
    /* load a probe: the newest is chosen first (3) */
    a = run({ PAD_DOWN, PAD_DOWN, PAD_CROSS, PAD_CROSS }, 2, "3-load");
    CHECK(a.action == 2 && a.slot == 3);
-   /* reset, quit */
-   a = run({ PAD_DOWN, PAD_DOWN, PAD_DOWN, PAD_CROSS });
+   /* reset (below the stats overlay's switch), quit */
+   a = run({ PAD_DOWN, PAD_DOWN, PAD_DOWN, PAD_DOWN, PAD_CROSS });
    CHECK(a.action == 3);
    a = run({ PAD_UP, PAD_CROSS });
    CHECK(a.action == 4);

@@ -20,4 +20,7 @@ struct Image {
  * decoded once a run of the title, not each time the list comes back). */
 const Image &loadImage(const std::string &path);
 
+/* The picture at path, decoded each time (the covers: decoded on their thread, not kept here) */
+Image decodeImage(const std::string &path);
+
 } // namespace psgopher

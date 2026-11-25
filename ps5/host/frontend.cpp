@@ -174,6 +174,124 @@ std::string where(const Game &g)
 	return g.tab == TabUsb ? "USB drive" : g.tab == TabNetwork ? "Network share" : "This console";
 }
 
+/* the game's region: the header's letter, else the file name's tag ("(USA)", "(Europe)"...) */
+char regionOf(const Game &g)
+{
+	if (g.id.size() >= 4 && !regionText(g.id).empty())
+		return g.id[3];
+	static const struct {
+		const char *tag;
+		char letter;
+	} tags[] = { { "(USA", 'E' }, { "(U)", 'E' }, { "(Europe", 'P' }, { "(E)", 'P' }, { "(Japan", 'J' }, { "(J)", 'J' },
+		         { "(Germany", 'D' }, { "(France", 'F' }, { "(Italy", 'I' }, { "(Spain", 'S' }, { "(Australia", 'U' },
+		         { "(Brazil", 'B' }, { "(Korea", 'K' }, { "(China", 'C' }, { "(Asia", 'A' } };
+	for (const auto &t : tags)
+		if (g.name.find(t.tag) != std::string::npos)
+			return t.letter;
+	return 0;
+}
+
+std::string regionName(char letter)
+{
+	const char id[5] = { 'N', 'X', 'X', letter, 0 };
+	return letter ? regionText(id) : std::string();
+}
+
+/* the region's flag, drawn (stage units: x, y, w; 3:2) */
+void flag(const Ink &ink, char region, float x, float y, float w)
+{
+	const float h = w * 2 / 3;
+	ImDrawList *dl = ink.dl;
+	const float u = ink.u;
+	auto band = [&](float x0, float y0, float x1, float y1, ImU32 c) { dl->AddRectFilled(ink.at(x + x0 * w, y + y0 * h), ink.at(x + x1 * w, y + y1 * h), c); };
+	auto star = [&](float cx, float cy, float r, ImU32 c) {
+		ImVec2 p[10];
+		for (int i = 0; i < 10; i++) {
+			const float a = -1.5708f + i * 3.14159265f / 5, rr = (i % 2 ? r * .42f : r);
+			p[i] = ink.at(cx + std::cos(a) * rr, cy + std::sin(a) * rr);
+		}
+		dl->AddConcavePolyFilled(p, 10, c);
+	};
+	const ImU32 white = IM_COL32(246, 246, 246, 255), red = IM_COL32(0xd2, 0x21, 0x2b, 255), blue = IM_COL32(0x1f, 0x3a, 0x93, 255);
+	switch (region) {
+	case 'E': /* the United States: stripes and the canton */
+		for (int i = 0; i < 7; i++)
+			band(0, i * 2 / 13.0f, 1, (i * 2 + 1) / 13.0f, red);
+		for (int i = 0; i < 6; i++)
+			band(0, (i * 2 + 1) / 13.0f, 1, (i * 2 + 2) / 13.0f, white);
+		band(0, 0, .4f, 7 / 13.0f, IM_COL32(0x3c, 0x3b, 0x6e, 255));
+		for (int r = 0; r < 3; r++)
+			for (int c = 0; c < 4; c++)
+				dl->AddCircleFilled(ink.at(x + (.06f + c * .095f) * w, y + (.09f + r * .17f) * h), .02f * w * u, white);
+		break;
+	case 'J':
+		band(0, 0, 1, 1, white);
+		dl->AddCircleFilled(ink.at(x + w / 2, y + h / 2), h * .3f * u, IM_COL32(0xbc, 0x00, 0x2d, 255), 32);
+		break;
+	case 'P': case 'X': case 'Y': /* Europe: twelve stars in a circle */
+		band(0, 0, 1, 1, IM_COL32(0x00, 0x33, 0x99, 255));
+		for (int i = 0; i < 12; i++) {
+			const float a = i * 3.14159265f / 6;
+			star(x + w / 2 + std::cos(a) * h * .33f, y + h / 2 + std::sin(a) * h * .33f, h * .06f, IM_COL32(0xff, 0xcc, 0x00, 255));
+		}
+		break;
+	case 'D':
+		band(0, 0, 1, 1 / 3.0f, IM_COL32(0, 0, 0, 255));
+		band(0, 1 / 3.0f, 1, 2 / 3.0f, IM_COL32(0xdd, 0x00, 0x00, 255));
+		band(0, 2 / 3.0f, 1, 1, IM_COL32(0xff, 0xce, 0x00, 255));
+		break;
+	case 'F':
+		band(0, 0, 1 / 3.0f, 1, IM_COL32(0x00, 0x23, 0x95, 255));
+		band(1 / 3.0f, 0, 2 / 3.0f, 1, white);
+		band(2 / 3.0f, 0, 1, 1, IM_COL32(0xed, 0x29, 0x39, 255));
+		break;
+	case 'I':
+		band(0, 0, 1 / 3.0f, 1, IM_COL32(0x00, 0x92, 0x46, 255));
+		band(1 / 3.0f, 0, 2 / 3.0f, 1, white);
+		band(2 / 3.0f, 0, 1, 1, IM_COL32(0xce, 0x2b, 0x37, 255));
+		break;
+	case 'S':
+		band(0, 0, 1, .25f, IM_COL32(0xaa, 0x15, 0x1b, 255));
+		band(0, .25f, 1, .75f, IM_COL32(0xf1, 0xbf, 0x00, 255));
+		band(0, .75f, 1, 1, IM_COL32(0xaa, 0x15, 0x1b, 255));
+		break;
+	case 'U': /* Australia: the field and the Southern Cross */
+		band(0, 0, 1, 1, IM_COL32(0x01, 0x21, 0x69, 255));
+		band(0, 0, .5f, .5f, IM_COL32(0x01, 0x21, 0x69, 255));
+		dl->AddLine(ink.at(x, y), ink.at(x + w * .5f, y + h * .5f), white, .05f * w * u);
+		dl->AddLine(ink.at(x + w * .5f, y), ink.at(x, y + h * .5f), white, .05f * w * u);
+		band(.22f, 0, .28f, .5f, red);
+		band(0, .22f, .5f, .28f, red);
+		star(x + w * .25f, y + h * .75f, h * .1f, white);
+		for (const auto &p : { ImVec2(.75f, .2f), ImVec2(.62f, .48f), ImVec2(.88f, .42f), ImVec2(.75f, .8f) })
+			star(x + w * p.x, y + h * p.y, h * .06f, white);
+		break;
+	case 'B':
+		band(0, 0, 1, 1, IM_COL32(0x00, 0x9c, 0x3b, 255));
+		{
+			const ImVec2 d[4] = { ink.at(x + w * .5f, y + h * .1f), ink.at(x + w * .92f, y + h * .5f), ink.at(x + w * .5f, y + h * .9f),
+				                  ink.at(x + w * .08f, y + h * .5f) };
+			dl->AddConvexPolyFilled(d, 4, IM_COL32(0xff, 0xdf, 0x00, 255));
+		}
+		dl->AddCircleFilled(ink.at(x + w / 2, y + h / 2), h * .22f * u, IM_COL32(0x00, 0x27, 0x76, 255), 24);
+		break;
+	case 'K':
+		band(0, 0, 1, 1, white);
+		dl->PathArcTo(ink.at(x + w / 2, y + h / 2), h * .25f * u, 3.14159265f, 2 * 3.14159265f, 16);
+		dl->PathFillConvex(IM_COL32(0xcd, 0x2e, 0x3a, 255));
+		dl->PathArcTo(ink.at(x + w / 2, y + h / 2), h * .25f * u, 0, 3.14159265f, 16);
+		dl->PathFillConvex(IM_COL32(0x00, 0x47, 0xa0, 255));
+		break;
+	case 'C':
+		band(0, 0, 1, 1, IM_COL32(0xee, 0x1c, 0x25, 255));
+		star(x + w * .2f, y + h * .28f, h * .17f, IM_COL32(0xff, 0xff, 0x00, 255));
+		break;
+	default:
+		return;
+	}
+	dl->AddRect(ink.at(x, y), ink.at(x + w, y + h), IM_COL32(255, 255, 255, 60), 2 * u, 1 * u);
+}
+
 /* the design's text-wrap: words to lines of at most `width` */
 std::vector<std::string> wrap(const Ink &ink, ImFont *font, float size, const std::string &s, float width, int max_lines)
 {
@@ -321,6 +439,17 @@ const Game *Frontend::selected() const
 	return nullptr;
 }
 
+board::Look Frontend::lookFor(const Game &g) const
+{
+	board::Look look = board::lookOf(g.name, g.id);
+	if (host_.cover) {
+		const auto c = host_.cover(g);
+		look.cover = c.first;
+		look.cover_aspect = c.second;
+	}
+	return look;
+}
+
 /* ---------------------------------------------------------------- the frame */
 
 void Frontend::frame(ImDrawList *dl, const PadInput &pad, float w, float h, float dt, ImTextureRef boardTex, ImTextureRef logo,
@@ -332,7 +461,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad, float w, float h, floa
 	(void)stage_w;
 	Ink ink{ dl, u_ };
 	const Game *g = selected();
-	const board::Look look = g ? board::lookOf(g->name, g->id) : board::Look{};
+	const board::Look look = g ? lookFor(*g) : board::Look{};
 
 	/* the views: L1/R1 (not while the probe picker is up) */
 	if (probes_open_ < 0) {
@@ -445,7 +574,7 @@ void Frontend::header(ImDrawList *dl, ImTextureRef logo, const FrontendFonts &f,
 void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool rack_panel, float x, float y, float alpha)
 {
 	Ink ink{ dl, u_ };
-	const board::Look look = board::lookOf(g.name, g.id);
+	const board::Look look = lookFor(g);
 	const ImU32 game = board::colourOf(look);
 	const float w = 470, pad_x = 30;
 	const float inner = w - pad_x * 2;
@@ -472,8 +601,23 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 	std::string sub = playedText(pl.seconds);
 	if (pl.last > 0)
 		sub += " \xC2\xB7 last " + agoText(pl.last, false);
+	sub += " \xC2\xB7 " + where(g);
 	ink.text(f.mono, 16, x + pad_x, cy, withAlpha(kDim, alpha), sub);
 	cy += 16 + 16;
+	/* its description (Wikipedia's), three lines of it */
+	if (host_.about) {
+		const std::string about = host_.about(g);
+		const size_t nl = about.find('\n');
+		const std::string text = nl == std::string::npos ? about : about.substr(nl + 1);
+		if (!text.empty()) {
+			for (const std::string &line : wrap(ink, f.mono, 14, text, inner, 3)) {
+				ink.text(f.mono, 14, x + pad_x, cy, withAlpha(kDim, alpha), line);
+				cy += 19;
+			}
+			ink.text(f.mono, 11, x + pad_x, cy + 2, withAlpha(kDim, alpha * .7f), "WIKIPEDIA \xC2\xB7 CC BY-SA", .14f);
+			cy += 11 + 16;
+		}
+	}
 
 	/* the facts, two by three */
 	char rom_size[24];
@@ -489,7 +633,7 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		{ "LOCKOUT CHIP", g.facts ? cicText(g.cic) : "-" },
 		{ "SAVE MEMORY", g.facts ? saveText(g.save) : "-" },
 		{ "PAK", g.facts ? (g.rumble ? "Rumble" : "Controller Pak") : "-" },
-		{ "WHERE", where(g) },
+		{ "REGION", regionName(regionOf(g)).empty() ? "-" : regionName(regionOf(g)) },
 	};
 	const float cell_w = (inner - 1) / 2, cell_h = 62;
 	const float gx = x + pad_x, gy = cy;
@@ -504,7 +648,12 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		std::string value = facts[i][1];
 		while (value.size() > 3 && ink.width(f.mono_bold, 18, value) > cell_w - 24)
 			value = value.substr(0, value.size() - 4) + "\xE2\x80\xA6";
-		ink.text(f.mono_bold, 18, cx + 14, cyy + 30, withAlpha(kText, alpha), value);
+		float vx = cx + 14;
+		if (i == 5 && regionOf(g)) { /* the region's flag before its name */
+			flag(ink, regionOf(g), vx, cyy + 31, 27);
+			vx += 36;
+		}
+		ink.text(f.mono_bold, 18, vx, cyy + 30, withAlpha(kText, alpha), value);
 	}
 	cy += cell_h * 3 + 2 + 18;
 
@@ -550,7 +699,7 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		bool first;
 	};
 	const Act acts[3] = { { "\xE2\x9C\x95 Power on", true }, { "\xE2\x96\xA1 Probes", false },
-		                  { rack_panel ? "\xE2\x96\xB3 Seat it" : "\xE2\x96\xB3 Bench", false } };
+		                  { rack_panel ? "\xE2\x96\xB3 Seat it" : "\xE2\x96\xB3 Cheats", false } };
 	float ax = x + pad_x;
 	for (const Act &a : acts) {
 		const float aw = ink.width(f.mono_bold, 16, a.text) + 32;
@@ -579,6 +728,10 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		probePicker(dl, pad, f, *g);
 		return;
 	}
+	if (cheats_open_ >= 0 && g) {
+		cheatPicker(dl, pad, f, *g);
+		return;
+	}
 	if (n > 0) {
 		if (pad.repeat(PAD_RIGHT))
 			strip_sel_ = std::min(n - 1, strip_sel_ + 1);
@@ -596,12 +749,17 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		else
 			probes_open_ = 0;
 	}
-	if (pad.pressed & PAD_TRIANGLE)
-		setView(board::View::Bench);
+	if (g && (pad.pressed & PAD_TRIANGLE)) {
+		readCheats(*g);
+		if (cheats_.empty())
+			host_.tell(g->crc.empty() ? "No cheats: this cartridge's header could not be read" : "Gopher64 has no cheats for this cartridge");
+		else
+			cheats_open_ = 0;
+	}
 
 	/* the line from the strip's cartridge to the slot */
 	if (g) {
-		const board::Look look = board::lookOf(g->name, g->id);
+		const board::Look look = lookFor(*g);
 		const ImVec2 slot = projector_(board::anchor("slot"));
 		const ImVec2 from = S(960, 806);
 		ImVec2 pts[40];
@@ -632,7 +790,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		const float scale = on ? 1.08f : .9f, lift = on ? 0 : 34;
 		const float cx = strip_x_ + k * pitch + 75, top = 808 + lift + (1 - scale) * 120;
 		const float sw = 150 * scale, sh = 170 * scale, x0 = cx - sw / 2;
-		const board::Look look = board::lookOf(cg.name, cg.id);
+		const board::Look look = lookFor(cg);
 		if (on)
 			ink.glow(x0, top, sw, sh, board::colourOf(look), 22, 10);
 		/* the shell (the design's clip-path), its label */
@@ -646,13 +804,15 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		                            IM_COL32(0x27, 0x31, 0x3a, 0), IM_COL32(0x12, 0x18, 0x1d, 200), IM_COL32(0x12, 0x18, 0x1d, 200));
 		const float lw = 118 * scale, lx = cx - lw / 2, ly = top + 16 * scale, s = lw / 236 * u_;
 		board::drawLabel(dl, look, f.mono_heavy, [lx, ly, s, this](ImVec2 v) { return ImVec2(lx * u_ + v.x * s, ly * u_ + v.y * s); });
+		if (const char r = regionOf(cg))
+			flag(ink, r, x0 + sw - 34 * scale, top + sh - 30 * scale, 24 * scale);
 		std::string name = titleOf(cg);
 		while (name.size() > 4 && ink.width(f.mono, 16, name) > 168)
 			name = name.substr(0, name.size() - 4) + "\xE2\x80\xA6";
 		const float nw = ink.width(f.mono, 16, name);
 		ink.text(f.mono, 16, cx - nw / 2, top + sh + 10, on ? kText : kDim, name);
 	}
-	ink.text(f.mono, 14, 64, 1046, kDim, "L1 \xC2\xB7 R1  VIEWS      \xE2\x97\x84 \xE2\x96\xBA  CARTRIDGE      \xE2\x9C\x95  POWER ON      \xE2\x96\xA1  PROBES      \xE2\x96\xB3  BENCH", .08f);
+	ink.text(f.mono, 14, 64, 1046, kDim, "L1 \xC2\xB7 R1  VIEWS      \xE2\x97\x84 \xE2\x96\xBA  CARTRIDGE      \xE2\x9C\x95  POWER ON      \xE2\x96\xA1  PROBES      \xE2\x96\xB3  CHEATS", .08f);
 }
 
 /* the probes of the chosen game, to start it from one */
@@ -674,7 +834,7 @@ void Frontend::probePicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 		host_.play(g, slot);
 		return;
 	}
-	const board::Look look = board::lookOf(g.name, g.id);
+	const board::Look look = lookFor(g);
 	const float x = 1920 - 64 - 470, y = 150, w = 470;
 	const float h = 28 + 13 + 16 + 50 + 20 + n * 62 + 40;
 	ink.rect(x, y, w, h, kPanel, 18);
@@ -693,6 +853,123 @@ void Frontend::probePicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 		cy += 62;
 	}
 	ink.text(f.mono, 14, 64, 1046, kDim, "\xE2\x96\xB2 \xE2\x96\xBC  PROBE      \xE2\x9C\x95  POWER ON FROM IT      \xE2\x97\x8B  BACK", .08f);
+}
+
+/* the game's cheats, as Gopher64 has them */
+void Frontend::readCheats(const Game &g)
+{
+	cheats_.clear();
+	if (g.crc.empty() || !host_.cheats_of)
+		return;
+	const std::string text = host_.cheats_of(g.crc);
+	auto split = [](const std::string &s, char sep) {
+		std::vector<std::string> out;
+		size_t p = 0;
+		for (;;) {
+			const size_t at = s.find(sep, p);
+			out.push_back(s.substr(p, at == std::string::npos ? std::string::npos : at - p));
+			if (at == std::string::npos)
+				return out;
+			p = at + 1;
+		}
+	};
+	for (const std::string &line : split(text, '\n')) {
+		const auto fields = split(line, '\t');
+		if (fields.size() < 5)
+			continue;
+		Cheat c;
+		c.name = fields[0];
+		c.note = fields[1];
+		if (!fields[2].empty())
+			c.options = split(fields[2], '|');
+		c.on = fields[3] == "1";
+		c.option = fields[4];
+		cheats_.push_back(c);
+	}
+}
+
+/* a cheat's name as a path: Gopher64's groups ("Infinite\Lives") shown as "Infinite › Lives" */
+static std::string cheatLabel(const std::string &name)
+{
+	std::string out;
+	for (const char c : name)
+		if (c == '\\')
+			out += " \xE2\x80\xBA ";
+		else
+			out += c;
+	return out;
+}
+
+void Frontend::cheatPicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f, const Game &g)
+{
+	Ink ink{ dl, u_ };
+	const int n = (int)cheats_.size();
+	if (pad.repeat(PAD_DOWN))
+		cheats_open_ = (cheats_open_ + 1) % n;
+	if (pad.repeat(PAD_UP))
+		cheats_open_ = (cheats_open_ + n - 1) % n;
+	if (pad.pressed & (PAD_CIRCLE | PAD_TRIANGLE)) {
+		cheats_open_ = -1;
+		return;
+	}
+	Cheat &c = cheats_[cheats_open_];
+	auto save = [&]() {
+		if (host_.cheat_set && !host_.cheat_set(g.crc, c.name, c.on, c.option))
+			host_.tell("Gopher64 did not take that cheat");
+	};
+	if (pad.pressed & PAD_CROSS) {
+		c.on = !c.on;
+		if (c.on && !c.options.empty() && c.option.empty())
+			c.option = c.options.front();
+		save();
+	}
+	const bool right = pad.repeat(PAD_RIGHT), left = !right && pad.repeat(PAD_LEFT);
+	if (c.on && !c.options.empty() && (right || left)) {
+		int at = 0;
+		for (size_t i = 0; i < c.options.size(); i++)
+			if (c.options[i] == c.option)
+				at = (int)i;
+		const int m = (int)c.options.size();
+		at = right ? (at + 1) % m : (at + m - 1) % m;
+		c.option = c.options[at];
+		save();
+	}
+	const board::Look look = lookFor(g);
+	const float x = 1920 - 64 - 560, y = 150, w = 560, rh = 48;
+	const int rows = 11;
+	const float h = 28 + 13 + 16 + 50 + 16 + rows * rh + 20 + 76 + 24;
+	ink.rect(x, y, w, h, kPanel, 18);
+	ink.frame(x, y, w, h, kLine, 18, 1);
+	int on = 0;
+	for (const Cheat &k : cheats_)
+		on += k.on;
+	char t[80];
+	snprintf(t, sizeof(t), "CHEATS \xC2\xB7 %d OF %d ON \xC2\xB7 FROM THE NEXT START", on, n);
+	ink.text(f.mono_bold, 13, x + 30, y + 28, board::colourOf(look), t, .2f);
+	ink.text(f.display, 40, x + 28, y + 52, kText, titleOf(g), -.03f);
+	float cy = y + 28 + 13 + 16 + 50 + 6;
+	const int first = std::clamp(cheats_open_ - rows / 2, 0, std::max(0, n - rows));
+	for (int i = first; i < std::min(n, first + rows); i++) {
+		const Cheat &k = cheats_[i];
+		const bool here = i == cheats_open_;
+		ink.rect(x + 24, cy, w - 48, rh - 6, here ? kText : IM_COL32(16, 34, 38, 255), 9);
+		const std::string state = k.on ? (k.option.empty() ? std::string("ON") : "\xE2\x97\x84 " + k.option + " \xE2\x96\xBA") : std::string("off");
+		const float state_w = ink.width(f.mono_bold, 13, state);
+		std::string label = cheatLabel(k.name);
+		while (label.size() > 4 && ink.width(f.mono_bold, 15, label) > w - 48 - 48 - state_w)
+			label = label.substr(0, label.size() - 4) + "\xE2\x80\xA6";
+		ink.text(f.mono_bold, 15, x + 40, cy + 12, here ? kInk : kText, label);
+		ink.text(f.mono_bold, 13, x + w - 40 - state_w, cy + 13, k.on ? (here ? kInk : kAmber) : (here ? kInk : kDim), state);
+		cy += rh;
+	}
+	/* the chosen one's note */
+	cy += 8;
+	for (const std::string &line : wrap(ink, f.mono, 13, c.note.empty() ? "No note." : c.note, w - 60, 4)) {
+		ink.text(f.mono, 13, x + 30, cy, kDim, line);
+		cy += 18;
+	}
+	ink.text(f.mono, 14, 64, 1046, kDim,
+	         "\xE2\x96\xB2 \xE2\x96\xBC  CHEAT      \xE2\x9C\x95  ON / OFF      \xE2\x97\x84 \xE2\x96\xBA  ITS OPTION      \xE2\x97\x8B  BACK", .08f);
 }
 
 /* ---------------------------------------------------------------- RACK */
@@ -824,7 +1101,7 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		dl->AddRectFilledMultiColor(S(56, y - 18), S(1300, y + SH + 6), IM_COL32(4, 11, 14, 255), IM_COL32(4, 11, 14, 255),
 		                            IM_COL32(10, 28, 34, 255), IM_COL32(10, 28, 34, 255));
 	}
-	const board::Look sel_look = g ? board::lookOf(g->name, g->id) : board::Look{};
+	const board::Look sel_look = g ? lookFor(*g) : board::Look{};
 	if (g) {
 		const float sx = RX + (rack_sel_ % COLS) * PITCH + 10, sy = RY + (sel_row - rack_scroll_) * SHELF + 50;
 		for (int i = 10; i >= 1; i--)
@@ -836,7 +1113,7 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		prev_letter = letterOf(games_[rack_[first_row * COLS - 1]]);
 	for (int k = first_row * COLS; k < std::min(n, last_row * COLS); k++) {
 		const Game &cg = games_[rack_[k]];
-		const board::Look look = board::lookOf(cg.name, cg.id);
+		const board::Look look = lookFor(cg);
 		const bool on = k == rack_sel_;
 		const float x = RX + (k % COLS) * PITCH, y = RY + (k / COLS - rack_scroll_) * SHELF - (on ? 34 : 0);
 		const float a = visible(k) ? 1 : .13f;

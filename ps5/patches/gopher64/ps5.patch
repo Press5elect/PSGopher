@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index d7459cd..a74ba08 100644
+index d7459cd..7f75814 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -22,7 +22,6 @@ sha2 = "0.11"
@@ -20,7 +20,7 @@ index d7459cd..a74ba08 100644
  slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "unstable-winit-030", "backend-winit", "renderer-femtovg-wgpu", "accessibility"], optional = true }
  rfd = {version = "0.18", optional = true }
  dirs = "7.0"
-@@ -48,6 +48,13 @@ open = { version = "5.3", optional = true }
+@@ -48,6 +48,14 @@ open = { version = "5.3", optional = true }
  sdl3-sys = { version = "0.7", features = ["build-from-source-static"] }
  sdl3-ttf-sys = { version = "0.7", features = ["build-static-vendored", "no-sdlttf-harfbuzz", "no-sdlttf-plutosvg"] }
  
@@ -28,6 +28,7 @@ index d7459cd..a74ba08 100644
 +# SDL3 and SDL3_ttf functions Gopher64 calls (ps5/sdl3), and there is no GUI.
 +[target.'cfg(target_vendor = "sie")'.dependencies]
 +dirs = "7.0"
++webpki-roots = "1.0"
 +sdl3-sys = { version = "0.7", default-features = false, features = ["no-link"] }
 +sdl3-ttf-sys = { version = "0.7", default-features = false, features = ["no-link", "no-sdlttf-harfbuzz", "no-sdlttf-plutosvg"] }
 +
@@ -90,15 +91,16 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..e5a6b58 100644
+index b741e0d..9899a3c 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,31 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,35 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
 +#ifdef PSGOPHER
 +#include <algorithm>
++#include <atomic>
 +#include <vector>
 +#include "psgopher_hdr_spirv.hpp"
 +#include "psgopher_overlay_spirv.hpp"
@@ -112,6 +114,9 @@ index b741e0d..e5a6b58 100644
 +static void render_frame(Vulkan::Device &device); // (the quick menu draws frames again)
 +static void psgopher_overlay_release();
 +static void psgopher_hdr_release();
++// PSGopher (PS5): the title's log (ps5/host/platform.c: the boot log and klog)
++extern "C" void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
++#define psgopher_say say
 +// PSGopher (PS5): the benchmark mode's counters (ps5/host/bench.c)
 +extern "C" void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns);
 +extern "C" void psgopher_bench_rdram_wait(uint64_t ns);
@@ -125,7 +130,22 @@ index b741e0d..e5a6b58 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -582,6 +607,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -496,6 +525,14 @@ static void rdp_new_processor() {
+ 
+   synchronous_rdram_uploads =
+       single_threaded && !processor->is_rdram_host_coherent();
++#ifdef PSGOPHER
++  // which way RDRAM reaches the GPU: shared (the driver imports the emulator's memory) or copied at
++  // each sync, which costs time every frame; into PSGopher's boot log, not only klog
++  psgopher_say("rdp: RDRAM %s; %s command processing; upscale %ux%s",
++               processor->is_rdram_host_coherent() ? "shared with the GPU (host memory imported)"
++                                                   : "copied to and from the GPU at each sync (no host memory import)",
++               single_threaded ? "single-threaded" : "threaded", gfx_info.upscale, gfx_info.ssaa ? ", supersampled" : "");
++#endif
+   // Staging uploads that run on this thread cannot race CPU writes, so track
+   // the blocks the GPU may write within each readback page in that mode.
+   rdram_tracker.reset(gfx_info.RDRAM_SIZE,
+@@ -582,6 +619,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -135,7 +155,7 @@ index b741e0d..e5a6b58 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -642,6 +670,10 @@ void rdp_close() {
+@@ -642,6 +682,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -146,7 +166,7 @@ index b741e0d..e5a6b58 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +765,275 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +777,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -286,6 +306,9 @@ index b741e0d..e5a6b58 100644
 +  int slot;   // for 1 and 2: the slot (0-9)
 +};
 +extern "C" int psgopher_quickmenu_wanted(void) __attribute__((weak));
++// the stats overlay: builds this frame's triangles (psgopher_overlay_set) and says whether it did
++extern "C" int psgopher_osd_frame(void) __attribute__((weak));
++extern "C" void psgopher_osd_release(void) __attribute__((weak));
 +extern "C" psgopher_quickmenu_answer psgopher_quickmenu_run(void) __attribute__((weak));
 +
 +static struct {
@@ -297,6 +320,8 @@ index b741e0d..e5a6b58 100644
 +} overlay;
 +
 +static void psgopher_overlay_release() {
++  if (psgopher_osd_release)
++    psgopher_osd_release(); // its textures go with these
 +  overlay.textures.clear();
 +  overlay.vertices = nullptr;
 +  overlay.command_count = 0;
@@ -375,6 +400,18 @@ index b741e0d..e5a6b58 100644
 +  cmd.set_scissor({{0, 0}, {uint32_t(w), uint32_t(h)}});
 +}
 +
++// The triangles to draw over this frame (the stats overlay's), without presenting
++extern "C" void psgopher_overlay_set(const psgopher_overlay_vertex *vertices, uint32_t vertex_count,
++                                     const uint32_t *indices, uint32_t index_count,
++                                     const psgopher_overlay_command *commands, uint32_t command_count) {
++  overlay.vertices = vertices;
++  overlay.vertex_count = vertex_count;
++  overlay.indices = indices;
++  overlay.index_count = index_count;
++  overlay.commands = commands;
++  overlay.command_count = command_count;
++}
++
 +// One frame of the menu: the game's last frame again (the emulation is paused) with the menu's
 +// triangles over it, then presented.
 +extern "C" void psgopher_overlay_present(const psgopher_overlay_vertex *vertices, uint32_t vertex_count,
@@ -422,7 +459,7 @@ index b741e0d..e5a6b58 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +1084,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1113,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -444,7 +481,7 @@ index b741e0d..e5a6b58 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +1134,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1163,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -461,12 +498,16 @@ index b741e0d..e5a6b58 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,8 +1170,15 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,8 +1199,19 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
 +#ifdef PSGOPHER
-+    psgopher_overlay_draw(device, *cmd); // the quick menu, while it is up
++    // the quick menu while it is up, else the stats overlay when it is on (ps5/host/quickmenu.cpp)
++    const bool osd = !overlay.vertices && psgopher_osd_frame && psgopher_osd_frame();
++    psgopher_overlay_draw(device, *cmd);
++    if (osd)
++      overlay.vertices = nullptr, overlay.command_count = 0;
 +#endif
  
      cmd->end_render_pass();
@@ -477,7 +518,7 @@ index b741e0d..e5a6b58 100644
    }
    device.submit(cmd);
  }
-@@ -870,9 +1201,16 @@ void rdp_update_screen() {
+@@ -870,9 +1234,16 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -494,7 +535,7 @@ index b741e0d..e5a6b58 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1242,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1275,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -510,6 +551,28 @@ index b741e0d..e5a6b58 100644
  }
  
  size_t rdp_state_size() {
+@@ -1264,7 +1641,21 @@ static void rdp_set_fps_callback(void *userdata) {
+   delete data;
+ }
+ 
++#ifdef PSGOPHER
++// Gopher64's own counts of the last second, for PSGopher's stats: pictures the game drew, VIs
++static std::atomic<uint32_t> psgopher_fps{0}, psgopher_vis{0};
++extern "C" void psgopher_rdp_rates(uint32_t *fps, uint32_t *vis, int *pal) {
++  *fps = psgopher_fps.load(std::memory_order_relaxed);
++  *vis = psgopher_vis.load(std::memory_order_relaxed);
++  *pal = gfx_info.PAL ? 1 : 0;
++}
++#endif
++
+ void rdp_set_fps(uint32_t fps, uint32_t vis) {
++#ifdef PSGOPHER
++  psgopher_fps.store(fps, std::memory_order_relaxed);
++  psgopher_vis.store(vis, std::memory_order_relaxed);
++#endif
+   if (display_fps) {
+     FPS_DATA *data = new FPS_DATA;
+     data->fps = fps;
 diff --git a/parallel-rdp/psgopher_hdr_spirv.hpp b/parallel-rdp/psgopher_hdr_spirv.hpp
 new file mode 100644
 index 0000000..9ea3936
@@ -856,10 +919,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..2c03937
+index 0000000..6563369
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,503 @@
+@@ -0,0 +1,783 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1190,6 +1253,98 @@ index 0000000..2c03937
 +    }
 +}
 +
++/// Gopher64's cheat database (data/cheats.json in the core), parsed once.
++fn cheat_database() -> &'static crate::cheats::Cheat {
++    static DATABASE: std::sync::OnceLock<crate::cheats::Cheat> = std::sync::OnceLock::new();
++    DATABASE.get_or_init(|| serde_json::from_slice(include_bytes!("../data/cheats.json")).unwrap_or_default())
++}
++
++fn c_text(text: *const std::ffi::c_char) -> String {
++    if text.is_null() {
++        return String::new();
++    }
++    unsafe { std::ffi::CStr::from_ptr(text) }.to_string_lossy().into_owned()
++}
++
++/// A game's cheats, for the front end, by Gopher64's key of the game (storage::get_game_crc:
++/// "CRC1-CRC2-C:country"): a line each, "name<TAB>note<TAB>options<TAB>on<TAB>option", options
++/// separated by '|' ("" when it has none), on 1 or 0, option the one chosen ("" none). The whole
++/// text's length (what did not fit in `size` is left out at a line's end).
++///
++/// # Safety
++/// `game` is a NUL-terminated string; `buffer` has room for `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_cheats_of(game: *const std::ffi::c_char, buffer: *mut std::ffi::c_char, size: usize) -> usize {
++    let game = c_text(game);
++    let text = std::panic::catch_unwind(|| {
++        let Some(cheats) = cheat_database().get(&game) else {
++            return String::new();
++        };
++        // read only: Cheats writes its file when dropped, so this copy is forgotten instead
++        let settings = crate::ui::config::Cheats::new();
++        let chosen = settings.cheats.get(&game).cloned().unwrap_or_default();
++        std::mem::forget(settings);
++        let clean = |s: &str| s.replace(['\t', '\n', '\r'], " ");
++        let mut out = String::new();
++        for (name, data) in cheats {
++            let options = data.options.as_ref().map(|o| o.keys().map(|k| clean(k)).collect::<Vec<_>>().join("|")).unwrap_or_default();
++            let (on, option) = match chosen.get(name) {
++                Some(option) => (1, option.clone().unwrap_or_default()),
++                None => (0, String::new()),
++            };
++            out += &format!("{}\t{}\t{}\t{}\t{}\n", clean(name), clean(&data.note), options, on, clean(&option));
++        }
++        out
++    })
++    .unwrap_or_default();
++    // whole lines only
++    let mut cut = text.len().min(size.saturating_sub(1));
++    if cut < text.len() {
++        cut = text[..cut].rfind('\n').map(|i| i + 1).unwrap_or(0);
++    }
++    copy_out(&text[..cut], buffer, size);
++    text.len()
++}
++
++/// A cheat on (with its option, "" none) or off for a game, kept in config/cheats.json as
++/// Gopher64's own cheats window keeps it; the game reads it when it starts. False for a cheat the
++/// database does not have.
++///
++/// # Safety
++/// The strings are NUL-terminated (`option` may be null).
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_cheat_set(
++    game: *const std::ffi::c_char,
++    name: *const std::ffi::c_char,
++    on: bool,
++    option: *const std::ffi::c_char,
++) -> bool {
++    let (game, name, option) = (c_text(game), c_text(name), c_text(option));
++    std::panic::catch_unwind(|| {
++        let Some(cheat) = cheat_database().get(&game).and_then(|c| c.get(&name)) else {
++            return false;
++        };
++        let option = if option.is_empty() { None } else { Some(option) };
++        if let (Some(o), Some(options)) = (&option, &cheat.options)
++            && !options.contains_key(o)
++        {
++            return false;
++        }
++        let mut settings = crate::ui::config::Cheats::new();
++        let game_cheats = settings.cheats.entry(game.clone()).or_default();
++        if on {
++            game_cheats.insert(name, option);
++        } else {
++            game_cheats.remove(&name);
++            if game_cheats.is_empty() {
++                settings.cheats.remove(&game);
++            }
++        }
++        true // (written as settings drops)
++    })
++    .unwrap_or(false)
++}
++
 +/// # Safety
 +/// `argv` holds `argc` NUL-terminated strings, as C's `main` receives them.
 +#[unsafe(no_mangle)]
@@ -1362,6 +1517,194 @@ index 0000000..2c03937
 +        "available_parallelism",
 +        format!("{:?}", std::thread::available_parallelism().map(|n| n.get())),
 +    );
++}
++
++/// GET https://host/path with rustls over a blocking socket (Tokio's sockets are refused on the
++/// console, so reqwest cannot be used; the roots are webpki-roots', the console has no store):
++/// the status (0 when the network or TLS failed) and the body.
++fn https_get(host: &str, path: &str, accept: &str, timeout: std::time::Duration) -> (u16, Vec<u8>) {
++    use std::io::{Read, Write};
++    crate::ui::install_default_crypto_provider();
++    static CONFIG: std::sync::OnceLock<std::sync::Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
++    let config = CONFIG
++        .get_or_init(|| {
++            let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
++            std::sync::Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth())
++        })
++        .clone();
++    let failed = |what: &str, why: String| {
++        log_line(&format!("web: {host}: {what}: {why}"));
++        (0u16, Vec::new())
++    };
++    let Ok(name) = rustls::pki_types::ServerName::try_from(host.to_string()) else {
++        return failed("name", "not a host name".into());
++    };
++    let address = match std::net::ToSocketAddrs::to_socket_addrs(&(host, 443)) {
++        Ok(mut list) => match list.find(|a| a.is_ipv4()) {
++            Some(a) => a,
++            None => return failed("address", "none for IPv4".into()),
++        },
++        Err(e) => return failed("address", e.to_string()),
++    };
++    let socket = match std::net::TcpStream::connect_timeout(&address, std::time::Duration::from_secs(10)) {
++        Ok(s) => s,
++        Err(e) => return failed("connect", e.to_string()),
++    };
++    let _ = socket.set_read_timeout(Some(timeout));
++    let _ = socket.set_write_timeout(Some(timeout));
++    let connection = match rustls::ClientConnection::new(config, name) {
++        Ok(c) => c,
++        Err(e) => return failed("TLS", e.to_string()),
++    };
++    let mut tls = rustls::StreamOwned::new(connection, socket);
++    let request = format!(
++        "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: PSGopher (PlayStation 5 homebrew)\r\nAccept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
++    );
++    if let Err(e) = tls.write_all(request.as_bytes()) {
++        return failed("request", e.to_string());
++    }
++    let mut data = Vec::new();
++    let mut chunk = [0u8; 16384];
++    loop {
++        match tls.read(&mut chunk) {
++            Ok(0) => break,
++            Ok(n) => {
++                data.extend_from_slice(&chunk[..n]);
++                if data.len() > 16 << 20 {
++                    return failed("answer", "longer than 16 MiB".into());
++                }
++            }
++            // (a server closing without TLS's close_notify: what came is kept, its length checked below)
++            Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
++            Err(e) => return failed("answer", e.to_string()),
++        }
++    }
++    let Some(end) = data.windows(4).position(|w| w == b"\r\n\r\n") else {
++        return failed("answer", "no HTTP head".into());
++    };
++    let head = String::from_utf8_lossy(&data[..end]).to_ascii_lowercase();
++    let status: u16 = head.split_whitespace().nth(1).and_then(|s| s.parse().ok()).unwrap_or(0);
++    let raw = &data[end + 4..];
++    let body = if head.contains("\r\ntransfer-encoding: chunked") {
++        let mut plain = Vec::new();
++        let mut at = 0;
++        let mut whole = false;
++        while at < raw.len() {
++            let Some(le) = raw[at..].windows(2).position(|w| w == b"\r\n") else { break };
++            let line = String::from_utf8_lossy(&raw[at..at + le]);
++            let Ok(len) = usize::from_str_radix(line.split(';').next().unwrap_or("").trim(), 16) else { break };
++            if len == 0 {
++                whole = true;
++                break;
++            }
++            let start = at + le + 2;
++            if len > raw.len().saturating_sub(start) {
++                break;
++            }
++            plain.extend_from_slice(&raw[start..start + len]);
++            at = start + len + 2;
++        }
++        if !whole {
++            return failed("answer", "cut short".into());
++        }
++        plain
++    } else {
++        let mut body = raw.to_vec();
++        if let Some(at) = head.find("\r\ncontent-length:") {
++            let want: usize = head[at + 17..].split("\r\n").next().unwrap_or("").trim().parse().unwrap_or(0);
++            if body.len() < want {
++                return failed("answer", "cut short".into());
++            }
++            body.truncate(want);
++        }
++        body
++    };
++    (status, body)
++}
++
++fn url_encode(text: &str) -> String {
++    let mut out = String::new();
++    for b in text.bytes() {
++        if b.is_ascii_alphanumeric() || b"-_.~".contains(&b) {
++            out.push(b as char);
++        } else {
++            out.push_str(&format!("%{b:02X}"));
++        }
++    }
++    out
++}
++
++/// A game's description from Wikipedia (as OGBox finds one: the first of five search results
++/// whose description says "video game", then its summary): the status (200: "title\ntext" in
++/// `buffer`; 404: no article about the game; anything else: no answer, try later).
++///
++/// # Safety
++/// `name` is a NUL-terminated string; `buffer` has room for `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_about(name: *const std::ffi::c_char, buffer: *mut std::ffi::c_char, size: usize) -> i32 {
++    let name = c_text(name);
++    let timeout = std::time::Duration::from_secs(30);
++    let (status, body) = https_get(
++        "en.wikipedia.org",
++        &format!("/w/rest.php/v1/search/page?q={}&limit=5", url_encode(&format!("{name} video game"))),
++        "application/json",
++        timeout,
++    );
++    if status != 200 {
++        return status as i32;
++    }
++    let Ok(found) = serde_json::from_slice::<serde_json::Value>(&body) else { return 404 };
++    let key = found["pages"].as_array().and_then(|pages| {
++        pages.iter().find_map(|page| {
++            let about = page["description"].as_str().unwrap_or("").to_ascii_lowercase();
++            if about.contains("video game") { page["key"].as_str().map(str::to_string) } else { None }
++        })
++    });
++    let Some(key) = key else { return 404 };
++    let (status, body) = https_get("en.wikipedia.org", &format!("/api/rest_v1/page/summary/{}", url_encode(&key)), "application/json", timeout);
++    if status != 200 {
++        return status as i32;
++    }
++    let Ok(summary) = serde_json::from_slice::<serde_json::Value>(&body) else { return 404 };
++    let Some(text) = summary["extract"].as_str().filter(|t| !t.is_empty()) else { return 404 };
++    let title = summary["title"].as_str().unwrap_or(&key);
++    copy_out(&format!("{title}\n{text}"), buffer, size);
++    200
++}
++
++/// A cartridge's box art from libretro's thumbnails (libretro-thumbnails' Nintendo 64 set, as
++/// thumbnails.libretro.com serves it, read from its GitHub repository: the server answered 404 for
++/// every N64 name when this was written), by its No-Intro name, written to `file`: the status
++/// (200 kept; 404 libretro has none; anything else: no answer, try later).
++///
++/// # Safety
++/// `name` and `file` are NUL-terminated strings.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_cover(name: *const std::ffi::c_char, file: *const std::ffi::c_char) -> i32 {
++    // libretro's names: these characters are '_' in its file names
++    let name: String = c_text(name).chars().map(|c| if "&*/:`<>?\\|\"".contains(c) { '_' } else { c }).collect();
++    let file = c_text(file);
++    let (status, body) = https_get(
++        "raw.githubusercontent.com",
++        &format!("/libretro-thumbnails/Nintendo_-_Nintendo_64/master/Named_Boxarts/{}.png", url_encode(&name)),
++        "image/png",
++        std::time::Duration::from_secs(30),
++    );
++    if status != 200 {
++        return status as i32;
++    }
++    if !body.starts_with(b"\x89PNG\r\n\x1a\n") {
++        return 404;
++    }
++    if !body.ends_with(b"IEND\xAE\x42\x60\x82") {
++        return 0; // (cut off before its end: asked again, not kept)
++    }
++    let part = format!("{file}.part");
++    if std::fs::write(&part, &body).is_err() || std::fs::rename(&part, &file).is_err() {
++        let _ = std::fs::remove_file(&part);
++        return 500;
++    }
++    200
 +}
 diff --git a/src/ui.rs b/src/ui.rs
 index d23f148..e51f562 100644

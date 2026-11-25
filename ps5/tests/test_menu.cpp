@@ -11,6 +11,7 @@
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
 #include "library.h"
+#include "web.h"
 #include "menu.h"
 
 #include <chrono>
@@ -147,6 +148,29 @@ extern "C" bool psgopher_rom_facts(const uint8_t *rom, size_t len, PsgopherRomFa
 	return len >= 0x1000;
 }
 
+/* the core's cheats, covers and descriptions, stood in for */
+extern "C" size_t psgopher_cheats_of(const char *, char *buffer, size_t size)
+{
+	static const char text[] = "Infinite Lives\tStays at 3.\t\t1\t\nStart on Level\t\t1|2|3\t0\t\n";
+	snprintf(buffer, size, "%s", text);
+	return sizeof(text) - 1;
+}
+extern "C" bool psgopher_cheat_set(const char *, const char *, bool, const char *) { return true; }
+/* the played game has a cover (the title's logo stands in), the others none */
+extern "C" int psgopher_cover(const char *name, const char *file)
+{
+	if (strcmp(name, "Kart Champs (U)") != 0)
+		return 404;
+	return std::system(("cp '" PSGOPHER_SOURCE "/ps5/art/logo.png' '" + std::string(file) + "'").c_str()) == 0 ? 200 : 500;
+}
+extern "C" int psgopher_about(const char *name, char *buffer, size_t size)
+{
+	snprintf(buffer, size, "%s\n%s is a racing video game for the Nintendo 64, stood in for by the tests: a description of "
+	         "the kind Wikipedia's summaries give, long enough to wrap over the three lines the panel shows of it and "
+	         "then some more.", name, name);
+	return 200;
+}
+
 /* ---------------------------------------------------------------- ps5vfs, stood in for (no shares) */
 
 extern "C" void ps5vfs_set_shadow_path(const char *) {}
@@ -204,6 +228,7 @@ int main(int argc, char **argv)
 			state[i] = (char)((i * 2654435761u >> (slot * 3)) & 0xff);
 		write(work + "/data/psgopher/data/states/BOMB SQUAD 64-0123.state" + std::to_string(slot), state);
 	}
+	psgopher::webStart(work + "/data/psgopher/cache/covers");
 	psgopher::libraryUseRoot(work + "/data");
 	psgopher::library().load();
 	psgopher::library().rescan();

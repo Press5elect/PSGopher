@@ -16,6 +16,7 @@ struct TitleSettings {
 	bool hdr{ false };           // HDR10 when the console's output is HDR: from the next game
 	int hdrWhite{ 203 };         // nits, 80..400
 	int hdrPeak{ 1000 };         // nits, 0 (off) or up to 4000
+	bool stats{ false };         // the stats overlay in a game
 	std::string file;            // "" is /data/psgopher/config/psgopher.ini (the host tests give another)
 
 	/* Reads the file (written with the defaults when it is missing). */

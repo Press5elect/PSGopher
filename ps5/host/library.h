@@ -31,6 +31,7 @@ struct Game {
 	uint32_t cic{ 0 };  // 6101..6106, 5167; 0 unknown
 	uint32_t save{ 0 }; // bits: 1 EEPROM 4K, 2 EEPROM 16K, 4 SRAM, 8 SRAM 768K, 16 SRAM 1M, 32 Flash
 	bool rumble{ false }; // the controllers hold a Rumble Pak by default (else a Controller Pak)
+	std::string crc;    // Gopher64's key of the game ("CRC1-CRC2-C:country": its cheats, by storage::get_game_crc)
 };
 
 /* "EEPROM 4K", "Flash", "EEPROM 4K or SRAM" (Gopher64's choice for a game it does not list), "None" */

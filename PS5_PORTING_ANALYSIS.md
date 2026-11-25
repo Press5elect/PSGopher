@@ -7,7 +7,7 @@ Every statement carries one of these labels:
 
 | Label | Meaning |
 | --- | --- |
-| **[source]** | Read in the code at the pinned revision (Gopher64 `439e6c11f69d`, master of 2026-11-24, v1.2.4) |
+| **[source]** | Read in the code at the pinned revision (Gopher64 `5cf32936c8b4`, master of 2026-11-25, v1.2.4) |
 | **[console: X]** | Measured on a PS5 by project X, with its evidence named; not yet re-measured by PSGopher |
 | **[here]** | Measured or built in this repository, on the build PC (not on a console) |
 | **[hypothesis]** | Reasoned, not measured; to be tested |

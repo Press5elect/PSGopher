@@ -53,12 +53,15 @@ struct Look {
 	uint32_t seed = 0;  // from the game's name
 	float hue = 0;      // 0..360
 	std::string code;   // what the label's band says ("NCKE")
+	/* the cartridge's box art (libretro's), drawn in the label's place when there is one */
+	ImTextureID cover = ImTextureID_Invalid;
+	float cover_aspect = 0; // its width / height
 };
 Look lookOf(const std::string &name, const std::string &code);
 ImU32 hsl(float h, float s, float l, float a = 1.0f); // h 0..360, s and l 0..1
 ImU32 colourOf(const Look &look, float lightness = 0.62f);
 
-/* A label (the design's 236x208 picture) drawn into rect a..b through `to` (label pixels to the
+/* A label (the design's 236x208 picture, or the cover filling it) drawn into rect a..b through `to` (label pixels to the
  * screen: flat for a strip, the projector for the slot). font for the band's code. */
 using Transform = std::function<ImVec2(ImVec2)>;
 void drawLabel(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to);

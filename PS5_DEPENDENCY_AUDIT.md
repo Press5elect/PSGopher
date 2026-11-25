@@ -1,6 +1,6 @@
 # PSGopher: dependency and platform audit
 
-Every dependency of Gopher64 at the pin (`439e6c11f69d`), what it needs from the platform, and
+Every dependency of Gopher64 at the pin (`5cf32936c8b4`), what it needs from the platform, and
 what happens to it on the PS5. "Compiles" means [here]: it built for `x86_64-sie-ps5` on
 2026-11-24 with Rust nightly 2026-11-23 and the payload SDK fork `88d6e41`. Nothing in this table
 has run on a console.
@@ -71,10 +71,11 @@ and wraps them, kept local.
 | `sha2`, `rand` 0.10, `rustc-hash`, `regex`, `encoding_rs`, `fatfs`, `time` | `getrandom` (rand's `SysRng`), `localtime_r` | compiles; `getrandom` has no console stub: PSGopher defines it over the platform's `arc4random_buf` |
 | `clap` | none | compiles; `psgopher_main` passes its argv |
 | `dirs` | `$HOME`, `getpwuid_r` | compiles; bypassed: folders are fixed (D8) |
-| `reqwest`, `rustls`, `ring`, `tokio-tungstenite`, `hyper`, `h2` | sockets, TLS | compiles (`ring`'s C/asm through the SDK); never started (D10) |
+| `reqwest`, `tokio-tungstenite`, `hyper`, `h2` | sockets, TLS | compiles; never started (D10) |
+| `rustls`, `ring`, `webpki-roots` 1.0 | TLS | `ring`'s C/asm through the SDK; rustls over a blocking `std::net::TcpStream` fetches the covers and descriptions (`psgopher.rs`), webpki-roots (added for the PS5 target) being its certificates: the console has no store |
 | `matchbox_socket`, `ggrs`, webrtc stack | UDP, WebRTC | compiles; never started (D10) |
 | `discord-rich-presence` | Unix socket to Discord | compiles; never started |
-| `jni`, `webpki-roots` | Android | not built |
+| `jni` | Android | not built |
 | `objc2*` | macOS | not built |
 
 ## The core's imports

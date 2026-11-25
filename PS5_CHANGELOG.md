@@ -35,6 +35,25 @@ console logs, 2026-11-25).
   (`ps5/host/rust_abi.c`), checked against the SDK's structures at compile time and against Rust's
   libc's own offsets by a host test.
 
+- Changed: Gopher64's pin moved to `5cf32936c8b4` (master of 2026-11-25: a Transfer Pak clock fix).
+- Added: covers and descriptions. Each cartridge's label is its box art from libretro's thumbnails
+  (the libretro-thumbnails N64 set, read from its GitHub repository over HTTPS: thumbnails.libretro.com
+  answered 404 for every N64 name when this was written), on the strip, the rack's panel and the
+  cartridge in the slot; the panel shows three lines of the game's Wikipedia summary (found as
+  OGBox finds one). Both are fetched as they are shown, on a thread of their own, and kept in
+  `/data/psgopher/cache/covers` (none found: asked again after 30 days). The fetches are rustls over
+  a blocking socket in the core (Tokio's sockets are refused on the console), with webpki-roots'
+  certificates. Untested on a console.
+- Added: the region's flag: on each cartridge of the strip and in the panel's REGION fact (from the
+  header's country code).
+- Added: cheats: HOME's △ opens Gopher64's cheats of the chosen game (its own cheat database, by
+  its CRC key), each on or off with its option; they apply from the next start of the game.
+- Added: the stats overlay (as Crux2's): the quick menu's "Stats overlay" shows the VIs a second,
+  speed, the game's own frame rate, CPU and present time a frame, the RDRAM syncs, the audio queue
+  and a frame-time graph over the game (kept in `psgopher.ini`, `stats = on`). The `video:` line in
+  the log every 10 s says the same, and the log says which RDRAM path parallel-rdp took.
+- Fixed: the quick menu moved two places for one press (the pad's state was made again each frame,
+  so a press was seen twice).
 - Added: the boot log, `psgopher-boot.log` in the title folder (the run before kept), as OGBox and
   Crux2; it has Gopher64's own messages and panics, which went nowhere before (Rust writes to
   descriptor 2, which klog's capture cannot move). A game that does not start says why in the list.
