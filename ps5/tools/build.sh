@@ -28,7 +28,7 @@ fi
 sdk=$("$root/ps5/tools/setup-sdk.sh")
 [[ -d $root/vendor/gopher64 ]] || "$root/ps5/tools/fetch-gopher64.sh"
 "$root/ps5/tools/build-core.sh"
-core="$root/build/core/x86_64-sie-ps5/release/libgopher64.a"
+core="$root/build/core/x86_64-sie-ps5/${PSGOPHER_PROFILE:-psgopher}/libgopher64.a"
 
 work="$root/build/ps5"
 mkdir -p "$work/obj"

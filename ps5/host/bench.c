@@ -63,9 +63,27 @@ static _Atomic uint64_t live_rdram_ns, live_rdram_waits;
 static _Atomic uint64_t live_rdp_ticks, live_rdp_part_ticks[3];
 static uint64_t live_tsc_start;
 
+/* the RSP's tasks (on the emulation thread only: no atomics needed for the nesting) */
+static uint64_t rsp_begin_tsc, live_rsp_ticks, live_rdp_in_rsp_ticks;
+static int in_rsp;
+
+void psgopher_bench_rsp_begin(void)
+{
+   in_rsp = 1;
+   rsp_begin_tsc = __rdtsc();
+}
+
+void psgopher_bench_rsp_end(void)
+{
+   live_rsp_ticks += __rdtsc() - rsp_begin_tsc;
+   in_rsp = 0;
+}
+
 void psgopher_bench_rdp(uint64_t ticks)
 {
    atomic_fetch_add_explicit(&live_rdp_ticks, ticks, memory_order_relaxed);
+   if (in_rsp)
+      live_rdp_in_rsp_ticks += ticks;
 }
 
 static _Atomic uint64_t live_dispatch_general, live_dispatch_special, compiles_asked, compiles_done, compiles_ticks;
@@ -125,6 +143,7 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
       live_cpu_start = cpu;
       live_tsc_start = __rdtsc();
       atomic_store(&live_rdp_ticks, 0);
+      live_rsp_ticks = live_rdp_in_rsp_ticks = 0;
       for (int i = 0; i < 3; i++)
          atomic_store(&live_rdp_part_ticks[i], 0);
       return;
@@ -143,6 +162,11 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
       const uint64_t tsc = __rdtsc(), rdp_ticks = atomic_exchange(&live_rdp_ticks, 0);
       const double ticks_per_ns = (double)(tsc - live_tsc_start) / (double)span;
       live_now.rdp_ms = ticks_per_ns > 0 ? (double)rdp_ticks / ticks_per_ns / 1e6 / (double)live_frames : -1.0;
+      {
+         const uint64_t rsp = live_rsp_ticks > live_rdp_in_rsp_ticks ? live_rsp_ticks - live_rdp_in_rsp_ticks : 0;
+         live_now.rsp_ms = ticks_per_ns > 0 ? (double)rsp / ticks_per_ns / 1e6 / (double)live_frames : -1.0;
+         live_rsp_ticks = live_rdp_in_rsp_ticks = 0;
+      }
       {
          const uint64_t g = atomic_exchange(&live_dispatch_general, 0), sp = atomic_exchange(&live_dispatch_special, 0);
          live_now.general_share = g + sp ? (double)g / (double)(g + sp) : -1.0;
@@ -212,12 +236,12 @@ static void video_heartbeat(uint64_t end_ns)
       const struct psgopher_live l = live_now;
       psgopher_sdl3_audio_stats audio;
       psgopher_sdl3_audio_stats_read(&audio);
-      say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms (RDP %.2f: draw %.2f, sync %.2f, frame %.2f), present wait %.2f ms, "
+      say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms (RSP %.2f, RDP %.2f: draw %.2f, sync %.2f, frame %.2f), present wait %.2f ms, "
           "RDRAM sync %.2f ms (%.1f); shading %.0f%% general (%llu compiled, %.0f ms each, %llu waiting); "
           "audio queue %llu, %llu underrun(s) in 10 s",
           (unsigned long long)video_count, (double)span / 1e9, (double)video_count * 1e9 / (double)span,
           l.target_vis ? (double)video_count * 1e9 / (double)span / l.target_vis * 100.0 : 0.0, l.game_fps, l.cpu_ms,
-          l.rdp_ms, l.rdp_part_ms[0], l.rdp_part_ms[1], l.rdp_part_ms[2], l.present_ms, l.rdram_ms, l.rdram_waits,
+          l.rsp_ms, l.rdp_ms, l.rdp_part_ms[0], l.rdp_part_ms[1], l.rdp_part_ms[2], l.present_ms, l.rdram_ms, l.rdram_waits,
           l.general_share < 0 ? 0.0 : l.general_share * 100.0, l.compiles_done, l.compile_ms, l.compiles_waiting, (unsigned long long)audio.queued_frames,
           (unsigned long long)(audio.underrun_grains - video_underruns_at));
       video_underruns_at = audio.underrun_grains;

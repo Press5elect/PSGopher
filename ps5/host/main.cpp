@@ -44,6 +44,7 @@ int psgopher_main(int argc, const char *const *argv);
 void psgopher_probe(void);
 size_t psgopher_last_error(char *buffer, size_t size);
 void psgopher_crash_install(void);
+int64_t psgopher_setting_get(const char *name);
 }
 
 static const char ROOT[] = "/data/psgopher";
@@ -199,6 +200,11 @@ static int play(const std::string &rom, int load_state = -1)
    if (load_state < 0)
       argv[2] = rom.c_str();
    say("starting Gopher64 with %s%s", rom.c_str(), load_state >= 0 ? (" from probe " + slot).c_str() : "");
+   /* what costs speed, beside the video line (Gopher64's config.json) */
+   say("settings: upscale %lldx%s, overclock %s, rewind %s, expansion pak %s",
+       (long long)psgopher_setting_get("video.upscale"), psgopher_setting_get("video.ssaa") == 1 ? " supersampled" : "",
+       psgopher_setting_get("emulation.overclock") == 1 ? "on" : "off", psgopher_setting_get("emulation.rewind") == 1 ? "on" : "off",
+       psgopher_setting_get("emulation.disable_expansion_pak") == 1 ? "off" : "on");
    psgopher_video_reset();
    const int status = psgopher_main(argc, argv);
    say("Gopher64 returned %d", status);

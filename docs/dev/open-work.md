@@ -7,7 +7,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | Problem | Evidence | Next step |
 | --- | --- | --- |
-| 8x upscale slows demanding games | one NTSC game: 64% at 8x, 93-100% at 1x (parallel-rdp 7.8 ms a VI against 0.5-1.2: the emulation thread waits for a GPU more than 32 render passes behind) ([`performance.md`](performance.md#first-console-observations)) | the next log's `shading x% general`: Gopher64 compiles each state's specialised shading pipeline on one thread and shades with the slower general one meanwhile; BENCH's `4 threads` and `At once` against `1 thread` at 8x. Then GPU timestamps if that is not it. The core's 11-15 ms a VI in that game: PGO |
+| A demanding game runs below full speed at any upscale | one NTSC game at 82-84% at 2x with parallel-rdp at 1.7 ms of 20 ms a VI, shading 0% general ([`performance.md`](performance.md#first-console-observations)): Gopher64's interpreters take the time | the next log's `RSP` share against the rest (the CPU's interpreter), with the fat-LTO core; then PGO of the core (Crux2's method) |
 | The front end's remaining defects | [`../frontend-audit/BUGS.md`](../frontend-audit/BUGS.md) (FE-001 to FE-004 and FE-031 fixed, see `CHANGELOG.md`) | in the order of [`../frontend-audit/ROADMAP.md`](../frontend-audit/ROADMAP.md), FE-005 next |
 | The USB search uses its whole budget (60,000 entries) at every start | boot logs 2026-11-25 (5.7-34.7 s before the share is searched) | measure which folders take it; skip known non-game folders or search places in parallel |
 | The first search of a large share is slow (1,424 ROMs: 55.6 s, headers read over SMB) | boot log 2026-11-25 | later starts read `library.tsv`; measure again before changing anything |

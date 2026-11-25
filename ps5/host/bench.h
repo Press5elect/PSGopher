@@ -25,6 +25,9 @@ void psgopher_bench_rdp_part(int part, uint64_t tsc_ticks); /* 0 drawing command
 void psgopher_bench_shading_dispatch(int general);
 void psgopher_bench_shader_compile_asked(void);
 void psgopher_bench_shader_compiled(uint64_t tsc_ticks);
+/* an RSP task on the emulation thread (the core, psgopher.rs) */
+void psgopher_bench_rsp_begin(void);
+void psgopher_bench_rsp_end(void);
 
 /* PSGopher: the quick menu's live figures, the last whole second's: frames shown a second, the
  * emulation thread's CPU time a frame (its waits are none), the present's wait a frame
@@ -34,6 +37,7 @@ struct psgopher_live {
    double rdram_ms, rdram_waits;  /* RDRAM syncs' wait a VI, and how many */
    double rdp_ms;                 /* of the CPU time, parallel-rdp's (commands, the frame's render); -1 unknown */
    double rdp_part_ms[3];         /* of that: drawing commands, SyncFull's submissions, the frame's render */
+   double rsp_ms;                 /* of the CPU time, the RSP's (less the RDP work its tasks start); -1 unknown */
    double general_share;          /* shading dispatches with the general pipeline, 0..1 (-1 none) */
    unsigned long long compiles_done, compiles_waiting; /* specialised pipelines: compiled, still asked for */
    double compile_ms;             /* their average compile time */

@@ -69,7 +69,7 @@ ps5/tools/build.sh
 | sources current? | `ps5/tools/check-sources.sh` | stops if a pin is behind (`PSGOPHER_ALLOW_STALE=1` builds anyway) |
 | the SDK at its pin | `ps5/tools/setup-sdk.sh` | `.deps/native/ps5-payload-sdk` |
 | Gopher64 at its pin + patch | `ps5/tools/fetch-gopher64.sh` | `vendor/gopher64` |
-| the core | `ps5/tools/build-core.sh` | `build/core/x86_64-sie-ps5/release/libgopher64.a` |
+| the core | `ps5/tools/build-core.sh` | `build/core/x86_64-sie-ps5/psgopher/libgopher64.a` (the `psgopher` profile: release with fat LTO and one codegen unit) |
 | libsmb2, libnfs, Dear ImGui, the fonts (Bricolage Grotesque, JetBrains Mono) at their pins | `ps5/tools/build-deps.sh` | `.deps/src`, `.deps/ports` |
 | the sandbox exit's helper | `ps5/tools/build-elevator.sh` | `build/sandbox-elevator.elf` |
 | the PS5 code | `build.sh` | `build/ps5/obj/*.o`, the fonts as headers `build/ps5/gen/font_*.h` |

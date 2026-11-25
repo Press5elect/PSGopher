@@ -95,6 +95,16 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### From the fifth console log (2026-11-25)
+
+- Measured: shading with the general pipeline is 0% at 8x, and at 2x parallel-rdp takes 1.7 ms of
+  20 ms a VI: the emulation itself (Gopher64's interpreters of the N64's CPU and RSP) takes the
+  time in that game. The `video:` line now splits the CPU time into the RSP's and parallel-rdp's,
+  and each game's start logs the settings that cost speed (upscale, overclock, rewind, expansion pak).
+- Changed: the core is built whole-program optimised (the `psgopher` profile: release with fat LTO
+  and one codegen unit; the title is 45 MB, was 53 MB).
+- Changed: Gopher64's pin moved to `4b824cb8f629` (upstream's touch overlay fix).
+
 ### From the fourth console log (2026-11-25)
 
 - Fixed: a cartridge got the description of a later game of the same name: an article whose title

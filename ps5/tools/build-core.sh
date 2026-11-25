@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # PSGopher - Gopher64's core (vendor/gopher64, the library) as a static library for the PS5.
 #
-#   ps5/tools/build-core.sh            -> build/core/x86_64-sie-ps5/release/libgopher64.a
+#   ps5/tools/build-core.sh            -> build/core/x86_64-sie-ps5/psgopher/libgopher64.a (fat LTO)
 #   PSGOPHER_PROFILE=release-with-debug ps5/tools/build-core.sh
 #
 # Rust's standard library is built again for the console's target (ps5/rust/x86_64-sie-ps5.json:
@@ -14,7 +14,7 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 toolchain=${PSGOPHER_RUST:-nightly}
-profile=${PSGOPHER_PROFILE:-release}
+profile=${PSGOPHER_PROFILE:-psgopher}
 sdk=$("$root/ps5/tools/setup-sdk.sh")
 spec="$root/ps5/rust/x86_64-sie-ps5.json"
 src="$root/vendor/gopher64"

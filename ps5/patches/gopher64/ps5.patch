@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index d7459cd..7f75814 100644
+index d7459cd..d0e7372 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -22,7 +22,6 @@ sha2 = "0.11"
@@ -35,6 +35,20 @@ index d7459cd..7f75814 100644
  [target.'cfg(target_os = "android")'.dependencies]
  slint = { version = "1.16", default-features = false, features = ["compat-1-2", "std", "backend-android-activity-06", "accessibility"], optional = true }
  jni = "0.22"
+@@ -69,6 +77,13 @@ cc = { version = "1.2", features = ["parallel"] }
+ lto = "thin"
+ strip = true
+ 
++# PSGopher (PS5): the console's build, whole-program optimised (one unit, fat LTO): the core is an
++# interpreter on one Zen 2 core, where inlining across modules is worth most
++[profile.psgopher]
++inherits = "release"
++lto = "fat"
++codegen-units = 1
++
+ [profile.release-with-debug]
+ inherits = "release"
+ debug = true
 diff --git a/build.rs b/build.rs
 index d4bd4a1..2b35144 100644
 --- a/build.rs
@@ -947,6 +961,22 @@ index f35085d..d610980 100644
              device.cart.cic_seed = CIC_SEED_5167;
              device.cart.sc64.cfg[device::cart::sc64::SC64_ROM_WRITE_ENABLE as usize] = 1;
          }
+diff --git a/src/device/rsp_interface.rs b/src/device/rsp_interface.rs
+index 2823aef..6e84597 100644
+--- a/src/device/rsp_interface.rs
++++ b/src/device/rsp_interface.rs
+@@ -509,7 +509,11 @@ fn do_task(device: &mut device::Device) {
+     if device.rsp.regs[SP_DMA_BUSY_REG] == 1 {
+         device.rsp.run_after_dma = true
+     } else {
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::rsp_begin();
+         let timer = device::rsp_cpu::run(device);
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::rsp_end();
+ 
+         device::events::create_event(device, device::events::EVENT_TYPE_SP, timer)
+     }
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..7caeeb3 100644
 --- a/src/lib.rs
@@ -988,10 +1018,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..7314f8b
+index 0000000..33e5d21
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,898 @@
+@@ -0,0 +1,914 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1117,6 +1147,22 @@ index 0000000..7314f8b
 +unsafe extern "C" {
 +    /// The title's logger (ps5/host/platform.c): the boot log and klog, whatever descriptor 2 is.
 +    fn say(format: *const std::ffi::c_char, ...);
++}
++
++unsafe extern "C" {
++    /// The boot log's video line: the RSP's time on the emulation thread (ps5/host/bench.c)
++    fn psgopher_bench_rsp_begin();
++    fn psgopher_bench_rsp_end();
++}
++
++/// An RSP task begins and ends (its time, less the RDP work started inside it, is the line's RSP).
++#[inline]
++pub fn rsp_begin() {
++    unsafe { psgopher_bench_rsp_begin() }
++}
++#[inline]
++pub fn rsp_end() {
++    unsafe { psgopher_bench_rsp_end() }
 +}
 +
 +/// A line to the boot log through the title's logger.
