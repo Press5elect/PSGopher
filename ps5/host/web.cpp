@@ -146,7 +146,7 @@ void doCover(Web &w, const std::string &name)
 
 void doAbout(Web &w, const std::string &name)
 {
-	const std::string base = w.folder + "/about2-" + safeName(name); /* (about2: matched by title) */
+	const std::string base = w.folder + "/about3-" + safeName(name); /* (about3: matched by title, any word order) */
 	std::string text;
 	bool done = true;
 	if (readText(base + ".txt", text)) {
@@ -174,8 +174,9 @@ void doAbout(Web &w, const std::string &name)
 			say("about: %s: Wikipedia: %s", name.c_str(),
 			    status <= 0 ? "no answer (the network?)" : ("HTTP " + std::to_string(status)).c_str());
 		}
-		/* Wikipedia's API asked politely: one every half second at most */
-		std::this_thread::sleep_for(std::chrono::milliseconds(500));
+		/* Wikipedia's API asked politely: one lookup (two requests) every 1.5 s at most; at one
+		 * every half second it answered 429 after about ten (boot logs 2026-11-25) */
+		std::this_thread::sleep_for(std::chrono::milliseconds(1500));
 	}
 	std::lock_guard lock(w.mutex);
 	Entry &e = w.entries[name];
@@ -226,18 +227,18 @@ void webStart(const std::string &folder)
 	if (w.on)
 		return;
 	mkdir(folder.c_str(), 0777);
-	/* the first descriptions (about-<name>) took any game's article the search offered: some
-	 * were another game's; they go, and are asked again as about2- (matched by title) */
+	/* the earlier descriptions go and are asked again: about- took any game's article the search
+	 * offered (some were another game's), about2- missed titles with the words in another order */
 	if (DIR *dir = opendir(folder.c_str())) {
 		std::vector<std::string> old;
 		while (struct dirent *e = readdir(dir))
-			if (strncmp(e->d_name, "about-", 6) == 0)
+			if (strncmp(e->d_name, "about-", 6) == 0 || strncmp(e->d_name, "about2-", 7) == 0)
 				old.push_back(folder + "/" + e->d_name);
 		closedir(dir);
 		for (const std::string &path : old)
 			unlink(path.c_str());
 		if (!old.empty())
-			say("about: %zu description(s) of the first matching let go: asked again", old.size());
+			say("about: %zu description(s) of an earlier matching let go: asked again", old.size());
 	}
 	w.folder = folder;
 	w.on = true;

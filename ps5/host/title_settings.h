@@ -17,6 +17,7 @@ struct TitleSettings {
 	int hdrWhite{ 203 };         // nits, 80..400
 	int hdrPeak{ 1000 };         // nits, 0 (off) or up to 4000
 	bool stats{ false };         // the stats overlay in a game
+	int audioBuffer{ 4 };        // the audio Gopher64 keeps queued, in VIs (2 is its own; 4, 6, 8)
 	std::string file;            // "" is /data/psgopher/config/psgopher.ini (the host tests give another)
 
 	/* Reads the file (written with the defaults when it is missing). */
@@ -26,7 +27,8 @@ struct TitleSettings {
 	/* The driver's display switches: once, before anything opens the display. title_dir is where
 	 * the title folder is now (its sce_sys/param.json declares 119.88 Hz). */
 	void applyDisplay(const std::string &titleDir) const;
-	/* parallel-rdp's HDR10 switches: before each game (vendor/gopher64/parallel-rdp/interface.cpp). */
+	/* parallel-rdp's HDR10 switches and the audio buffer: before each game
+	 * (vendor/gopher64/parallel-rdp/interface.cpp, src/ui/audio.rs). */
 	void applyHdr() const;
 };
 

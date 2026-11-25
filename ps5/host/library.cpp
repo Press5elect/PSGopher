@@ -293,8 +293,10 @@ void save(const std::vector<Game> &games)
 	}
 }
 
-void search(const Place &place, std::vector<Game> &found, std::vector<std::string> &seen)
+/* false when the place itself could not be listed (its games are then the last list's) */
+bool search(const Place &place, std::vector<Game> &found, std::vector<std::string> &seen)
 {
+	bool listed = false;
 	const bool share = place.tab == TabNetwork;
 	unsigned budget = share ? kShareBudget : kLocalBudget;
 	struct Folder {
@@ -313,8 +315,15 @@ void search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 			std::lock_guard lock(state().mutex);
 			state().status = folder.path;
 		}
-		if (!listFolder(folder.path, entries))
+		/* a share's listing is asked twice: on the console one timed out once
+		 * (SMB2_STATUS_IO_TIMEOUT, boot log 2026-11-25) and the list came back empty */
+		bool ok = listFolder(folder.path, entries);
+		if (!ok && share)
+			ok = listFolder(folder.path, entries);
+		if (!ok)
 			continue;
+		if (folder.path == place.path)
+			listed = true;
 		const bool n64Folder = lower(folder.path).find("n64") != std::string::npos ||
 			folder.path.rfind(g_root + "/psgopher/roms", 0) == 0;
 		for (const Entry &e : entries) {
@@ -351,6 +360,7 @@ void search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 	if (budget == 0)
 		say("library: %s: searched as far as its budget goes (%u entries)", place.path.c_str(),
 			share ? kShareBudget : kLocalBudget);
+	return listed;
 }
 
 } // namespace
@@ -439,8 +449,33 @@ void Library::rescan()
 		const auto started = std::chrono::steady_clock::now();
 		std::vector<Game> found;
 		std::vector<std::string> seen;
-		for (const Place &p : places())
-			search(p, found, seen);
+		std::vector<std::string> unlisted;
+		for (const Place &p : places()) {
+			/* (a place inside one searched before is seen already: not a failure) */
+			const bool already = std::find(seen.begin(), seen.end(), p.path) != seen.end();
+			if (!search(p, found, seen) && !already)
+				unlisted.push_back(p.path);
+		}
+		/* a place that could not be listed keeps what the last list had there, with its facts,
+		 * rather than losing every game on it to one failed listing */
+		if (!unlisted.empty()) {
+			std::vector<Game> known;
+			{
+				std::lock_guard lock(state().mutex);
+				known = state().games;
+			}
+			for (const std::string &place : unlisted) {
+				size_t kept = 0;
+				for (const Game &g : known)
+					if (g.path.size() > place.size() && g.path.compare(0, place.size(), place) == 0 &&
+						g.path[place.size()] == '/' &&
+						std::none_of(found.begin(), found.end(), [&](const Game &f) { return f.path == g.path; })) {
+						found.push_back(g);
+						kept++;
+					}
+				say("library: %s could not be listed: the last list's %zu game(s) there are kept", place.c_str(), kept);
+			}
+		}
 		/* each ROM's header once: what the last list knew for the same file (path and size) stays */
 		{
 			std::vector<Game> known;

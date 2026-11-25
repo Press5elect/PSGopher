@@ -30,7 +30,7 @@ storage, and on network shares.
 - **BENCH**: the board's parts are the settings, Gopher64's own (the crystal: overclock; the video
   stage: resolution, supersampling; AV out: CRT look, widescreen, integer scaling; the expansion
   slot; the ports; rewind and the USB link) and PSGopher's (refresh: 59.94 Hz, 119.88 Hz or
-  variable refresh; HDR10 and its brightness), and "This console": network shares, the sandbox,
+  variable refresh; HDR10 and its brightness; in AV out, the sound buffer: 33 to 133 ms, 67 by default), and "This console": network shares, the sandbox,
   searching again, closing. ▲ ▼ part, ◄ ► or ✕ change.
 
 L1/R1 change the view. **In a game**, tap the touch pad for the quick menu: resume, take a probe

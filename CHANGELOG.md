@@ -95,6 +95,25 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### Console fixes (from the third console log, 2026-11-25)
+
+- Fixed: a share whose listing failed (the NAS answered `SMB2_STATUS_IO_TIMEOUT` after the USB
+  search) emptied the library and lost every cartridge's header facts, which were then read again
+  over the network. A share's listing is asked twice, and a place that cannot be listed keeps the
+  last list's games. A host test covers one and two failures.
+- Added (Crux2's): network shares are woken at the title's start: a little of a cartridge on each
+  is read on a thread of its own, so a NAS's disks are turning before the library lists it
+  (`vfs: share ... woken` in the boot log).
+- Added: the sound buffer, BENCH's AV out (`audio_buffer` in `psgopher.ini`): how much sound
+  Gopher64 keeps queued, 33 ms (2 VIs, Gopher64's own) to 133 ms; 67 ms by default, about Crux2's
+  (PCSX2's 50 ms buffer and 20 ms output latency). More room means fewer gaps near full speed and
+  more delay; below full speed no buffer is enough (Crux2 also stretches the sound in time).
+- Fixed: a description was missed when the article's title had the cartridge's words in another
+  order; descriptions are asked of Wikipedia every 1.5 s at most (it answered 429 at one lookup
+  every half second), and the earlier ones are asked again.
+- Changed: the `video:` line splits parallel-rdp's time into drawing commands, SyncFull's GPU
+  submissions and the frame's render (`RDP y: draw a, sync b, frame c`).
+
 ### Platform and build
 
 - Changed: Gopher64's pin moved to `5cf32936c8b4` (master of 2026-11-25: a Transfer Pak clock fix).

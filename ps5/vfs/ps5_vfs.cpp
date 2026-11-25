@@ -27,6 +27,8 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include <thread>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #ifndef PS5VFS_SHADOW_PATH
@@ -1655,3 +1657,92 @@ extern "C" int __wrap_fstat(int fd, struct stat* st)
   return 0;
 }
 #endif /* PS5VFS_DISC */
+
+/* ---- waking the shares (Crux2's, from its ps5_vfs.cpp): each read a little at the title's start,
+ * so that a NAS's disks are turning when the library lists it ---- */
+
+/* From OGBox 0.0.9: a file of at least 8 MB (a disc image) within `depth` folders below; "" for none. */
+static std::string FirstLargeFile(const std::string& folder, int depth)
+{
+  ps5vfs_dir* const dir = ps5vfs_opendir(folder.c_str());
+  if (!dir)
+    return std::string();
+  std::vector<std::string> subs;
+  std::string found;
+  struct ps5vfs_dirent e;
+  for (unsigned n = 0; found.empty() && n < 400 && ps5vfs_readdir(dir, &e) == 1; n++)
+  {
+    if (!e.name || e.name[0] == '.')
+      continue;
+    if (e.is_directory)
+      subs.push_back(folder + "/" + e.name);
+    else if (e.size >= (8 << 20))
+      found = folder + "/" + e.name;
+  }
+  ps5vfs_closedir(dir);
+  for (size_t i = 0; found.empty() && depth > 0 && i < subs.size() && i < 16; i++)
+    found = FirstLargeFile(subs[i], depth - 1);
+  return found;
+}
+
+std::string ps5vfs_wake_file(const std::string& mount_point, const std::vector<std::string>& preferred)
+{
+  for (const std::string& path : preferred)
+  {
+    if (path.size() > mount_point.size() + 1 && path.compare(0, mount_point.size() + 1, mount_point + "/") == 0)
+      return path;
+  }
+  return FirstLargeFile(mount_point, 2);
+}
+
+size_t ps5vfs_wake_one(const std::string& mount_point, const std::vector<std::string>& preferred, std::string* file)
+{
+  *file = ps5vfs_wake_file(mount_point, preferred);
+  if (file->empty())
+    return 0;
+  size_t got = 0;
+  if (FILE* const fp = ps5vfs_fopen(file->c_str(), "rb"))
+  {
+    std::vector<char> buffer(64 * 1024);
+    got = ps5vfs_fread(buffer.data(), 1, buffer.size(), fp);
+    /* And somewhere inside: what the server keeps in its memory doesn't wake its disks. */
+    struct stat st;
+    if (ps5vfs_fstat(fp, &st) == 1 && st.st_size > static_cast<off_t>(4 * buffer.size()))
+    {
+      uint64_t mix = static_cast<uint64_t>(NowMs()) * 0x9E3779B97F4A7C15ull;
+      mix ^= mix >> 29;
+      const off_t at = static_cast<off_t>(mix % static_cast<uint64_t>(st.st_size - static_cast<off_t>(buffer.size())));
+      if (ps5vfs_fseeko(fp, at & ~static_cast<off_t>(4095), SEEK_SET) == 0)
+        got += ps5vfs_fread(buffer.data(), 1, buffer.size(), fp);
+    }
+    ps5vfs_fclose(fp);
+  }
+  return got;
+}
+
+void ps5vfs_wake_mounts(std::vector<std::string> preferred)
+{
+  std::vector<std::string> mounts;
+  for (unsigned i = 0;; i++)
+  {
+    const char* const point = ps5vfs_mount_point(i);
+    if (!point)
+      break;
+    mounts.emplace_back(point);
+  }
+  if (mounts.empty())
+    return;
+  std::thread([mounts = std::move(mounts), preferred = std::move(preferred)]() {
+    for (const std::string& m : mounts)
+    {
+      const int64_t t0 = NowMs();
+      std::string file;
+      const size_t got = ps5vfs_wake_one(m, preferred, &file);
+      if (file.empty())
+        Log("vfs: share %s: no large file on it to read (to wake its disks)", m.c_str());
+      else
+        Log("vfs: share %s woken: %zu KiB of %s read in %.1f s", m.c_str(), got / 1024, file.c_str(),
+            static_cast<double>(NowMs() - t0) / 1000.0);
+    }
+  }).detach();
+}

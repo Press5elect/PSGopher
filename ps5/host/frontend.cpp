@@ -1281,11 +1281,14 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	callouts.push_back({ "Video stage \xC2\xB7 sharpness", "How much finer than the original the picture is drawn before it reaches your TV.", "rdp", 1000, 140, 330,
 		                 { choose("video.upscale", { { "1\xC3\x97 original", 1 }, { "2\xC3\x97", 2 }, { "4\xC3\x97", 4 }, { "8\xC3\x97", 8 } }),
 		                   choose("video.ssaa", { { "Sharp", 0 }, { "Supersampled", 1 } }) } });
-	callouts.push_back({ "AV out \xC2\xB7 the screen", "What is plugged into the AV multi out, and how the picture fills it.", "vdac", 1413, 300, 330,
+	callouts.push_back({ "AV out \xC2\xB7 the screen", "What is plugged into the AV multi out, how the picture fills it, and how much sound is kept ready (more: fewer gaps, more delay).", "vdac", 1413, 300, 330,
 		                 { choose("video.crt", { { "Flat panel", 0 }, { "Tube TV look", 1 } }),
 		                   choose("video.widescreen", { { "4:3", 0 }, { "16:9 stretch", 1 } }),
-		                   choose("video.integer_scaling", { { "Any size", 0 }, { "Whole steps", 1 } }) } });
-	callouts.push_back({ "TV link \xC2\xB7 the console's output", "The refresh (from the next start) and HDR10 (from the next game). Untested on a console yet.", "vdac", 1413, 560, 330,
+		                   choose("video.integer_scaling", { { "Any size", 0 }, { "Whole steps", 1 } }),
+		                   title_row({ { "33 ms", 2 }, { "67 ms", 4 }, { "100 ms", 6 }, { "133 ms", 8 } },
+		                             [](TitleSettings &t) -> int64_t { return t.audioBuffer; },
+		                             [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)v; }) } });
+	callouts.push_back({ "TV link \xC2\xB7 the console's output", "The refresh (from the next start) and HDR10 (from the next game). Untested on a console yet.", "vdac", 1413, 590, 330,
 		                 { title_row({ { "59.94 Hz", 0 }, { "119.88 Hz", 1 }, { "VRR", 2 } },
 		                             [](TitleSettings &t) -> int64_t { return t.display == "120" ? 1 : t.display == "vrr" ? 2 : 0; },
 		                             [](TitleSettings &t, int64_t v) { t.display = v == 1 ? "120" : v == 2 ? "vrr" : "60"; }),

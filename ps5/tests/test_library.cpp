@@ -65,8 +65,13 @@ struct ps5vfs_dir {
 	DIR *d;
 	std::string name;
 };
+static int g_share_fails = 0; /* the share's own folder fails to list this many times */
 extern "C" ps5vfs_dir *ps5vfs_opendir(const char *path)
 {
+	if (g_share_fails > 0 && std::string(path) == "/smb/nas") {
+		g_share_fails--;
+		return nullptr;
+	}
 	DIR *d = opendir(real(path).c_str());
 	return d ? new ps5vfs_dir{ d, {} } : nullptr;
 }
@@ -300,6 +305,19 @@ int main(int argc, char **argv)
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 	CHECK(g_facts_calls == 3);
 	CHECK(find(lib.games(), "beta") && find(lib.games(), "beta")->cic == 6105);
+	/* a share that cannot be listed (twice: the retry fails too) keeps the last list's games;
+	 * one failure is covered by the retry */
+	for (int fails : { 2, 1 }) {
+		g_share_fails = fails;
+		lib.rescan();
+		for (int i = 0; i < 500 && lib.scanning(); i++)
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		CHECK(g_share_fails == 0);
+		CHECK(find(lib.games(), "Delta") && find(lib.games(), "Delta")->tab == psgopher::TabNetwork);
+		CHECK(find(lib.games(), "shared"));
+		CHECK(lib.games().size() == games.size());
+		CHECK(g_facts_calls == 3); /* no header read again */
+	}
 
 	/* probes: Gopher64's states of the game by its header's name, newest first */
 	folders(data + "/psgopher/data/states");
@@ -339,16 +357,17 @@ int main(int argc, char **argv)
 	psgopher::TitleSettings t;
 	t.file = data + "/psgopher/config/psgopher.ini";
 	t.load();
-	CHECK(access(t.file.c_str(), F_OK) == 0 && t.display == "60" && !t.hdr && t.hdrWhite == 203 && t.hdrPeak == 1000);
+	CHECK(access(t.file.c_str(), F_OK) == 0 && t.display == "60" && !t.hdr && t.hdrWhite == 203 && t.hdrPeak == 1000 && t.audioBuffer == 4);
 	t.display = "vrr";
 	t.hdr = true;
 	t.hdrWhite = 250;
 	t.hdrPeak = 1500;
+	t.audioBuffer = 8;
 	CHECK(t.save());
 	psgopher::TitleSettings u;
 	u.file = t.file;
 	u.load();
-	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500);
+	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8);
 	write(t.file, "display = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\n");
 	psgopher::TitleSettings v;
 	v.file = t.file;

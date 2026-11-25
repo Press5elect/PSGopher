@@ -42,6 +42,8 @@ void TitleSettings::load()
 			hdrPeak = std::clamp(atoi(value), 0, 4000);
 		else if (!strcmp(key, "stats"))
 			stats = !strcmp(value, "on");
+		else if (!strcmp(key, "audio_buffer"))
+			audioBuffer = std::clamp(atoi(value), 2, 8) / 2 * 2;
 	}
 	fclose(f);
 }
@@ -68,8 +70,12 @@ bool TitleSettings::save() const
 		"hdr_peak = %d\n"
 		"\n"
 		"# stats: on shows the stats overlay in a game (VIs, speed, CPU, waits, audio, frame times)\n"
-		"stats = %s\n",
-		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off");
+		"stats = %s\n"
+		"\n"
+		"# audio_buffer: the sound Gopher64 keeps queued, in VIs (a 60th of a second each): 2 is\n"
+		"# Gopher64's own (the least delay), 4 about Crux2's, 6 and 8 for more room (more delay)\n"
+		"audio_buffer = %d\n",
+		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer);
 	/* one write of a small file, beside it first */
 	const std::string path = file.empty() ? kTitleSettingsFile : file;
 	const std::string temporary = path + ".new";
@@ -111,6 +117,9 @@ void TitleSettings::applyDisplay(const std::string &titleDir) const
 
 void TitleSettings::applyHdr() const
 {
+	/* (the audio buffer goes with it: the same moment, before each game) */
+	setenv("PSGOPHER_AUDIO_VIS", std::to_string(audioBuffer).c_str(), 1);
+	say("audio: %d VIs of sound kept queued (psgopher.ini: audio_buffer)", audioBuffer);
 	if (!hdr) {
 		unsetenv("PSGOPHER_HDR");
 		return;

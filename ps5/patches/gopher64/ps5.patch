@@ -91,10 +91,10 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..9899a3c 100644
+index b741e0d..daffec3 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,35 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,54 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
@@ -125,12 +125,31 @@ index b741e0d..9899a3c 100644
 +  clock_gettime(CLOCK_MONOTONIC, &t);
 +  return uint64_t(t.tv_sec) * 1000000000u + uint64_t(t.tv_nsec);
 +}
++// the time the emulation thread spends in parallel-rdp (its command processing and the frame's
++// render), in TSC ticks: the boot log's video line splits the thread's CPU time with it (bench.c
++// turns ticks into time); the TSC because a clock call can be a system call on the console and
++// this runs for every command list
++extern "C" void psgopher_bench_rdp(uint64_t ticks);
++// and three parts of it: 0 the drawing commands (parallel-rdp's enqueue_command), 1 a SyncFull's
++// signal (the GPU work submitted), 2 the frame's render
++extern "C" void psgopher_bench_rdp_part(int part, uint64_t ticks);
++#include <x86intrin.h>
++struct PsgopherRdpTime {
++  uint64_t begin = __rdtsc();
++  ~PsgopherRdpTime() { psgopher_bench_rdp(__rdtsc() - begin); }
++};
++struct PsgopherRdpPart {
++  int part;
++  uint64_t begin = __rdtsc();
++  explicit PsgopherRdpPart(int p) : part(p) {}
++  ~PsgopherRdpPart() { psgopher_bench_rdp_part(part, __rdtsc() - begin); }
++};
 +#endif
 +
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -496,6 +525,14 @@ static void rdp_new_processor() {
+@@ -496,6 +544,14 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -145,7 +164,7 @@ index b741e0d..9899a3c 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -582,6 +619,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -582,6 +638,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -155,7 +174,7 @@ index b741e0d..9899a3c 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -642,6 +682,10 @@ void rdp_close() {
+@@ -642,6 +701,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -166,7 +185,7 @@ index b741e0d..9899a3c 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +777,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +796,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -459,7 +478,7 @@ index b741e0d..9899a3c 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +1113,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1132,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -481,7 +500,7 @@ index b741e0d..9899a3c 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +1163,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1182,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -498,7 +517,7 @@ index b741e0d..9899a3c 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,8 +1199,19 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,8 +1218,19 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -518,7 +537,18 @@ index b741e0d..9899a3c 100644
    }
    device.submit(cmd);
  }
-@@ -870,9 +1234,16 @@ void rdp_update_screen() {
+@@ -857,6 +1240,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
+ }
+ 
+ void rdp_render_frame() {
++#ifdef PSGOPHER
++  PsgopherRdpTime rdp_time;
++  PsgopherRdpPart rdp_part(2);
++#endif
+   auto &device = wsi->get_device();
+   render_frame(device);
+ }
+@@ -870,9 +1257,16 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -535,7 +565,7 @@ index b741e0d..9899a3c 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1275,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1298,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -551,7 +581,46 @@ index b741e0d..9899a3c 100644
  }
  
  size_t rdp_state_size() {
-@@ -1264,7 +1641,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1076,6 +1476,9 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+ }
+ 
+ uint64_t rdp_process_commands(uint64_t now) {
++#ifdef PSGOPHER
++  PsgopherRdpTime rdp_time;
++#endif
+   uint64_t interrupt_timer = 0;
+ 
+   // the RDP starts on this batch once it has finished any earlier work
+@@ -1132,9 +1535,13 @@ uint64_t rdp_process_commands(uint64_t now) {
+       return interrupt_timer;
+     }
+ 
+-    if (command >= 8)
++    if (command >= 8) {
++#ifdef PSGOPHER
++      PsgopherRdpPart rdp_part(0);
++#endif
+       processor->enqueue_command(cmd_length * 2,
+                                  &rdp_device.cmd_data[2 * rdp_device.cmd_cur]);
++    }
+ 
+     if (command >= 0x26 && command <= 0x29) { // Sync{Load,Pipe,Tile,Full}
+       rdp_add_busy(RDP_SYNC_CLOCKS);
+@@ -1233,8 +1640,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+       rdp_device.frame_buffer_info.depth_update =
+           depth_allowed && (w2 & (1u << 5));
+     } break;
+-    case RDP::Op::SyncFull:
++    case RDP::Op::SyncFull: {
++#ifdef PSGOPHER
++      PsgopherRdpPart rdp_part(1);
++#endif
+       processor->signal_timeline();
++    }
+       // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
+       interrupt_timer = rdp_device.busy_until - now;
+       break;
+@@ -1264,7 +1675,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  
@@ -919,10 +988,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..fdc814c
+index 0000000..38b150f
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,859 @@
+@@ -0,0 +1,871 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1724,7 +1793,17 @@ index 0000000..fdc814c
 +    let title = title.find(" (").map_or(title, |at| &title[..at]);
 +    let (a, b) = (wiki_compact(name), wiki_compact(title));
 +    let (short, long) = if a.len() <= b.len() { (a, b) } else { (b, a) };
-+    !short.is_empty() && long.contains(&short) && short.len() * 10 >= long.len() * 6
++    if !short.is_empty() && long.contains(&short) && short.len() * 10 >= long.len() * 6 {
++        return true;
++    }
++    // the same words in another order: No-Intro's "007 - GoldenEye", the article's "GoldenEye 007"
++    let words = |text: &str| {
++        let mut w: Vec<String> = text.split(|c: char| !c.is_alphanumeric()).map(wiki_compact).filter(|w| !w.is_empty()).collect();
++        w.sort();
++        w
++    };
++    let (x, y) = (words(name), words(title));
++    !x.is_empty() && x == y
 +}
 +
 +#[cfg(test)]
@@ -1745,6 +1824,8 @@ index 0000000..fdc814c
 +        assert!(!wiki_title_matches("2048", "Wipeout 2048"));
 +        assert!(!wiki_title_matches("[BIOS] Nintendo 64 - PIF", "Video games in the United States"));
 +        assert!(!wiki_title_matches("", "Anything"));
++        assert!(wiki_title_matches("007 - GoldenEye", "GoldenEye 007 (1997 video game)"));
++        assert!(!wiki_title_matches("Mario Kart", "Kart Mario Party"));
 +    }
 +}
 +
@@ -1799,6 +1880,82 @@ index d23f148..e51f562 100644
      {
          let exe_path = std::env::current_exe().unwrap();
          let portable_dir = exe_path.parent();
+diff --git a/src/ui/audio.rs b/src/ui/audio.rs
+index 6e73c6d..c52448b 100644
+--- a/src/ui/audio.rs
++++ b/src/ui/audio.rs
+@@ -6,6 +6,23 @@ const BYTES_PER_FRAME: usize = 4; // Stereo, signed 16-bit samples.
+ const TARGET_FRAMES: f64 = 2.0;
+ const MAX_FRAMES: f64 = 12.0;
+ 
++// PSGopher (PS5): the queue's target is the title's setting (psgopher.ini's audio_buffer, in VIs;
++// PSGOPHER_AUDIO_VIS, set before each game), read when the game's audio starts; the cap keeps
++// Gopher64's proportion (six times the target). Elsewhere Gopher64's own 2 and 12.
++#[cfg(target_vendor = "sie")]
++static TARGET_VIS: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(2);
++#[cfg(target_vendor = "sie")]
++fn target_frames() -> f64 {
++    TARGET_VIS.load(std::sync::atomic::Ordering::Relaxed) as f64
++}
++#[cfg(not(target_vendor = "sie"))]
++fn target_frames() -> f64 {
++    TARGET_FRAMES
++}
++fn max_frames() -> f64 {
++    MAX_FRAMES.max(target_frames() * 6.0)
++}
++
+ pub fn init(device: &mut device::Device) {
+     ui::sdl_init(sdl3_sys::init::SDL_INIT_AUDIO);
+     init_game_audio(device);
+@@ -13,7 +30,7 @@ pub fn init(device: &mut device::Device) {
+ 
+ // Correct clock drift before it causes starvation or excessive latency. Slew at most 0.05% per second of submitted audio.
+ fn frequency_ratio(current: f64, queued_frames: f64, seconds: f64) -> f64 {
+-    let target = (1.0 + (queued_frames - TARGET_FRAMES) * 0.001).clamp(0.995, 1.005);
++    let target = (1.0 + (queued_frames - target_frames()) * 0.001).clamp(0.995, 1.005);
+     let step = seconds * 0.0005;
+     (current + (target - current).clamp(-step, step)).clamp(0.995, 1.005)
+ }
+@@ -48,6 +65,11 @@ fn reset_stream(audio: &mut ui::Audio) {
+ }
+ 
+ pub fn init_game_audio(device: &mut device::Device) {
++    #[cfg(target_vendor = "sie")]
++    {
++        let vis = std::env::var("PSGOPHER_AUDIO_VIS").ok().and_then(|v| v.parse::<u32>().ok()).unwrap_or(TARGET_FRAMES as u32).clamp(2, 8);
++        TARGET_VIS.store(vis, std::sync::atomic::Ordering::Relaxed);
++    }
+     device.ui.audio.frequency_ratio = 1.0;
+     let game_audio_spec = sdl3_sys::audio::SDL_AudioSpec {
+         format: sdl3_sys::audio::SDL_AUDIO_S16LE,
+@@ -159,7 +181,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
+ 
+     let incoming = std::mem::size_of_val(audio.primary_buffer.as_slice());
+     let target_bytes =
+-        (bytes_per_video_frame * TARGET_FRAMES) as usize / BYTES_PER_FRAME * BYTES_PER_FRAME;
++        (bytes_per_video_frame * target_frames()) as usize / BYTES_PER_FRAME * BYTES_PER_FRAME;
+     // The incoming block contributes to the recovery reserve. Only pad its
+     // shortfall, so a full block can restart playback without added silence.
+     let padding = target_bytes.saturating_sub(incoming);
+@@ -182,7 +204,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
+             let starved = available == 0;
+             // Test the existing backlog: a large arriving DMA block alone is
+             // not evidence that playback has fallen behind.
+-            let overrun = queued_frames > MAX_FRAMES;
++            let overrun = queued_frames > max_frames();
+             if overrun {
+                 // Prefer current game audio over playing an increasingly stale
+                 // backlog (particularly after fast-forward or a host stall).
+@@ -204,7 +226,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
+                 frequency_ratio(
+                     audio.frequency_ratio,
+                     if overrun {
+-                        TARGET_FRAMES
++                        target_frames()
+                     } else if starved {
+                         // Retained resampler input isn't playable audio. An
+                         // underrun must slow consumption even if this block
 diff --git a/src/ui/config.rs b/src/ui/config.rs
 index ccced72..a9950e5 100644
 --- a/src/ui/config.rs

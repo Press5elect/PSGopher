@@ -33,6 +33,7 @@
 #include "menu.h"
 #include "title_settings.h"
 #include "web.h"
+#include "ps5_vfs.h"
 
 extern "C" {
 #include "bench.h"
@@ -277,6 +278,16 @@ int main()
    /* the covers and descriptions the front end shows, fetched as it shows them */
    psgopher::webStart(std::string(ROOT) + "/cache/covers");
    psgopher::library().load();
+   {
+      /* each share woken (Crux2's): read a little of a cartridge the last list had on it, so a
+       * NAS's disks are turning before the search lists it (on the console a listing timed out
+       * after the USB search, and the list came back empty) */
+      std::vector<std::string> preferred;
+      for (const psgopher::Game &g : psgopher::library().games())
+         if (g.tab == psgopher::TabNetwork && g.size >= (8u << 20))
+            preferred.push_back(g.path);
+      ps5vfs_wake_mounts(std::move(preferred));
+   }
    psgopher::library().rescan();
 
    std::string notice;
