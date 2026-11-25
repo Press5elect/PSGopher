@@ -23,6 +23,12 @@ typedef struct psgopher_sdl3_audio_stats {
 
 /* The event watches registered (parallel-rdp's interface adds one at rdp_init) */
 int psgopher_sdl3_watch_count(void);
+/* The quick menu: whether a touch pad tap was seen since the last call (and forgets it); player 1's
+ * pad for the menu (the tap watched there too); the pads at rest for the game until all is let go. */
+int psgopher_sdl3_take_tap(void);
+struct pad;
+void psgopher_sdl3_menu_pad(struct pad *pad);
+void psgopher_sdl3_hold_until_released(void);
 
 void psgopher_sdl3_audio_stats_read(psgopher_sdl3_audio_stats *stats);
 

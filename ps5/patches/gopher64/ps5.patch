@@ -90,22 +90,27 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..870499a 100644
+index b741e0d..e5a6b58 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,26 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,31 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
 +#ifdef PSGOPHER
 +#include <algorithm>
++#include <vector>
 +#include "psgopher_hdr_spirv.hpp"
++#include "psgopher_overlay_spirv.hpp"
 +// PSGopher (PS5): HDR10 output through Crux2's RADV (its ps5/patches/mesa-27/0020): the driver retypes
 +// the framebuffers as HDR10 and reads the output's dynamic range. Weak: another driver has none.
 +extern "C" int wsi_videoout_set_hdr10(int enable) __attribute__((weak));
 +extern "C" int wsi_videoout_hdr10(void) __attribute__((weak));
 +extern "C" int wsi_videoout_output_range(void) __attribute__((weak));
 +static void psgopher_hdr_init();    // (below render_frame's HDR10 frame)
++static void psgopher_overlay_draw(Vulkan::Device &device, Vulkan::CommandBuffer &cmd);
++static void render_frame(Vulkan::Device &device); // (the quick menu draws frames again)
++static void psgopher_overlay_release();
 +static void psgopher_hdr_release();
 +// PSGopher (PS5): the benchmark mode's counters (ps5/host/bench.c)
 +extern "C" void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns);
@@ -120,7 +125,7 @@ index b741e0d..870499a 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -582,6 +602,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -582,6 +607,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -130,17 +135,18 @@ index b741e0d..870499a 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -642,6 +665,9 @@ void rdp_close() {
+@@ -642,6 +670,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
 +#ifdef PSGOPHER
 +  psgopher_hdr_release();
++  psgopher_overlay_release();
 +#endif
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +759,125 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +765,275 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -261,12 +267,162 @@ index b741e0d..870499a 100644
 +  cmd.draw(3);
 +  cmd.end_render_pass();
 +}
++
++// The in-game quick menu (PSGopher, ps5/host/quickmenu.cpp): the title draws it with Dear ImGui and
++// hands its triangles here, to be drawn over the game's frame with parallel-rdp's own device. It
++// runs on the emulation thread from rdp_update_screen, so the game is paused while it is up; its
++// answer becomes Gopher64's own callbacks (save and load state, reset, quit), as a hotkey's would.
++struct psgopher_overlay_vertex {
++  float x, y, u, v;
++  uint32_t rgba;
++};
++struct psgopher_overlay_command {
++  float clip[4]; // x0, y0, x1, y1 in pixels
++  uint32_t texture, first_index, index_count;
++  int32_t vertex_offset;
++};
++struct psgopher_quickmenu_answer {
++  int action; // 0 resume, 1 save state, 2 load state, 3 reset, 4 quit
++  int slot;   // for 1 and 2: the slot (0-9)
++};
++extern "C" int psgopher_quickmenu_wanted(void) __attribute__((weak));
++extern "C" psgopher_quickmenu_answer psgopher_quickmenu_run(void) __attribute__((weak));
++
++static struct {
++  std::vector<Vulkan::ImageHandle> textures; // by id (0 none)
++  const psgopher_overlay_vertex *vertices = nullptr;
++  const uint32_t *indices = nullptr;
++  const psgopher_overlay_command *commands = nullptr;
++  uint32_t vertex_count = 0, index_count = 0, command_count = 0;
++} overlay;
++
++static void psgopher_overlay_release() {
++  overlay.textures.clear();
++  overlay.vertices = nullptr;
++  overlay.command_count = 0;
++}
++
++// A texture (RGBA8, w x h) at id (from 1), made again when it changes; 0 on success.
++extern "C" int psgopher_overlay_texture(uint32_t id, int width, int height, const void *rgba) {
++  if (!wsi || id == 0 || id > 4096 || width <= 0 || height <= 0)
++    return -1;
++  auto &device = wsi->get_device();
++  auto info = Vulkan::ImageCreateInfo::immutable_2d_image(unsigned(width), unsigned(height), VK_FORMAT_R8G8B8A8_UNORM);
++  Vulkan::ImageInitialData initial = {rgba, 0, 0};
++  auto image = device.create_image(info, &initial);
++  if (!image)
++    return -1;
++  if (overlay.textures.size() <= id)
++    overlay.textures.resize(id + 1);
++  overlay.textures[id] = image;
++  return 0;
++}
++
++extern "C" void psgopher_overlay_texture_free(uint32_t id) {
++  if (id < overlay.textures.size())
++    overlay.textures[id].reset();
++}
++
++// The display's size in pixels, which the menu is laid out in.
++extern "C" void psgopher_overlay_size(int *width, int *height) {
++  SDL_GetWindowSizeInPixels(window, width, height);
++}
++
++static void psgopher_overlay_draw(Vulkan::Device &device, Vulkan::CommandBuffer &cmd) {
++  if (!overlay.vertices || !overlay.command_count)
++    return;
++  Vulkan::ResourceLayout vertex_layout = {};
++  vertex_layout.input_mask = 0x7;
++  vertex_layout.push_constant_size = 4 * sizeof(float);
++  Vulkan::ResourceLayout fragment_layout = {};
++  fragment_layout.output_mask = 1 << 0;
++  fragment_layout.sets[0].sampled_image_mask = 1 << 0;
++  auto *program = device.request_program(psgopher_overlay_vertex_spirv, sizeof(psgopher_overlay_vertex_spirv),
++                                         psgopher_overlay_fragment_spirv, sizeof(psgopher_overlay_fragment_spirv),
++                                         &vertex_layout, &fragment_layout);
++  int w = 0, h = 0;
++  SDL_GetWindowSizeInPixels(window, &w, &h);
++  cmd.set_program(program);
++  cmd.set_transparent_sprite_state();
++  cmd.set_blend_factors(VK_BLEND_FACTOR_SRC_ALPHA, VK_BLEND_FACTOR_ONE, VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA,
++                        VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA);
++  cmd.set_depth_test(false, false);
++  cmd.set_cull_mode(VK_CULL_MODE_NONE);
++  cmd.set_primitive_topology(VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST);
++  cmd.set_viewport({0.0f, 0.0f, float(w), float(h), 0.0f, 1.0f});
++  const float screen[4] = {2.0f / float(w), 2.0f / float(h), -1.0f, -1.0f};
++  cmd.push_constants(screen, 0, sizeof(screen));
++  auto *v = static_cast<psgopher_overlay_vertex *>(
++      cmd.allocate_vertex_data(0, overlay.vertex_count * sizeof(psgopher_overlay_vertex), sizeof(psgopher_overlay_vertex)));
++  memcpy(v, overlay.vertices, overlay.vertex_count * sizeof(psgopher_overlay_vertex));
++  cmd.set_vertex_attrib(0, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(psgopher_overlay_vertex, x));
++  cmd.set_vertex_attrib(1, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(psgopher_overlay_vertex, u));
++  cmd.set_vertex_attrib(2, 0, VK_FORMAT_R8G8B8A8_UNORM, offsetof(psgopher_overlay_vertex, rgba));
++  auto *i = static_cast<uint32_t *>(cmd.allocate_index_data(overlay.index_count * sizeof(uint32_t), VK_INDEX_TYPE_UINT32));
++  memcpy(i, overlay.indices, overlay.index_count * sizeof(uint32_t));
++  for (uint32_t c = 0; c < overlay.command_count; c++) {
++    const auto &command = overlay.commands[c];
++    if (command.texture >= overlay.textures.size() || !overlay.textures[command.texture])
++      continue;
++    const int x0 = std::clamp(int(command.clip[0]), 0, w), y0 = std::clamp(int(command.clip[1]), 0, h);
++    const int x1 = std::clamp(int(command.clip[2]), 0, w), y1 = std::clamp(int(command.clip[3]), 0, h);
++    if (x1 <= x0 || y1 <= y0)
++      continue;
++    cmd.set_scissor({{x0, y0}, {uint32_t(x1 - x0), uint32_t(y1 - y0)}});
++    cmd.set_texture(0, 0, overlay.textures[command.texture]->get_view(), Vulkan::StockSampler::LinearClamp);
++    cmd.draw_indexed(command.index_count, 1, command.first_index, command.vertex_offset);
++  }
++  cmd.set_scissor({{0, 0}, {uint32_t(w), uint32_t(h)}});
++}
++
++// One frame of the menu: the game's last frame again (the emulation is paused) with the menu's
++// triangles over it, then presented.
++extern "C" void psgopher_overlay_present(const psgopher_overlay_vertex *vertices, uint32_t vertex_count,
++                                         const uint32_t *indices, uint32_t index_count,
++                                         const psgopher_overlay_command *commands, uint32_t command_count) {
++  overlay.vertices = vertices;
++  overlay.vertex_count = vertex_count;
++  overlay.indices = indices;
++  overlay.index_count = index_count;
++  overlay.commands = commands;
++  overlay.command_count = command_count;
++  render_frame(wsi->get_device());
++  overlay.vertices = nullptr;
++  overlay.command_count = 0;
++  wsi->end_frame();
++  wsi->begin_frame();
++}
++
++// Called after each frame is presented: the menu, when the title asks for it (a touch pad tap).
++static void psgopher_quickmenu_check() {
++  if (!psgopher_quickmenu_wanted || !psgopher_quickmenu_run || !psgopher_quickmenu_wanted())
++    return;
++  const psgopher_quickmenu_answer answer = psgopher_quickmenu_run();
++  switch (answer.action) {
++  case 1:
++  case 2:
++    callback.save_state_slot = uint32_t(std::clamp(answer.slot, 0, 9));
++    if (answer.action == 1)
++      callback.save_state = true;
++    else
++      callback.load_state = true;
++    break;
++  case 3:
++    callback.reset_game = true;
++    break;
++  case 4:
++    callback.emu_running = false;
++    break;
++  default:
++    break;
++  }
++}
 +#endif
 +
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +928,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1084,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -288,7 +444,7 @@ index b741e0d..870499a 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +978,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1134,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -305,8 +461,13 @@ index b741e0d..870499a 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -848,6 +1016,10 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,8 +1170,15 @@ static void render_frame(Vulkan::Device &device) {
+     if (messages.empty() && display_fps && fps_image) {
+       draw_fps(cmd, vp);
      }
++#ifdef PSGOPHER
++    psgopher_overlay_draw(device, *cmd); // the quick menu, while it is up
++#endif
  
      cmd->end_render_pass();
 +#ifdef PSGOPHER
@@ -316,7 +477,7 @@ index b741e0d..870499a 100644
    }
    device.submit(cmd);
  }
-@@ -870,9 +1042,15 @@ void rdp_update_screen() {
+@@ -870,9 +1201,16 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -328,11 +489,12 @@ index b741e0d..870499a 100644
      wsi->begin_frame();
 +#ifdef PSGOPHER
 +    psgopher_bench_present(present_begin, psgopher_now_ns());
++    psgopher_quickmenu_check();
 +#endif
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1082,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1242,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -350,11 +512,11 @@ index b741e0d..870499a 100644
  size_t rdp_state_size() {
 diff --git a/parallel-rdp/psgopher_hdr_spirv.hpp b/parallel-rdp/psgopher_hdr_spirv.hpp
 new file mode 100644
-index 0000000..bc02942
+index 0000000..9ea3936
 --- /dev/null
 +++ b/parallel-rdp/psgopher_hdr_spirv.hpp
 @@ -0,0 +1,164 @@
-+// PSGopher: ps5/shaders/psgopher_hdr.frag compiled by ps5/tools/make-hdr-shader.sh (Glslang Version: 11:15.1.0).
++// PSGopher: ps5/shaders compiled by ps5/tools/make-shaders.sh (Glslang Version: 11:15.1.0).
 +// Generated: do not edit. SPDX-License-Identifier: GPL-3.0-or-later
 +#pragma once
 +
@@ -518,6 +680,87 @@ index 0000000..bc02942
 +    0x0007000c, 0x00000007, 0x00000033, 0x00000001, 0x0000001a, 0x00000030, 0x00000032, 0x000200fe,
 +    0x00000033, 0x00010038,
 +};
+diff --git a/parallel-rdp/psgopher_overlay_spirv.hpp b/parallel-rdp/psgopher_overlay_spirv.hpp
+new file mode 100644
+index 0000000..fdb8cb9
+--- /dev/null
++++ b/parallel-rdp/psgopher_overlay_spirv.hpp
+@@ -0,0 +1,75 @@
++// PSGopher: ps5/shaders compiled by ps5/tools/make-shaders.sh (Glslang Version: 11:15.1.0).
++// Generated: do not edit. SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++
++static const uint32_t psgopher_overlay_vertex_spirv[] = {
++    0x07230203, 0x00010300, 0x0008000b, 0x0000002e, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
++    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
++    0x000b000f, 0x00000000, 0x00000004, 0x6e69616d, 0x00000000, 0x00000009, 0x0000000b, 0x0000000f,
++    0x00000011, 0x00000018, 0x0000001b, 0x00030003, 0x00000002, 0x000001c2, 0x00040005, 0x00000004,
++    0x6e69616d, 0x00000000, 0x00040005, 0x00000009, 0x76755f76, 0x00000000, 0x00030005, 0x0000000b,
++    0x00007675, 0x00050005, 0x0000000f, 0x6f635f76, 0x72756f6c, 0x00000000, 0x00040005, 0x00000011,
++    0x6f6c6f63, 0x00007275, 0x00060005, 0x00000016, 0x505f6c67, 0x65567265, 0x78657472, 0x00000000,
++    0x00060006, 0x00000016, 0x00000000, 0x505f6c67, 0x7469736f, 0x006e6f69, 0x00070006, 0x00000016,
++    0x00000001, 0x505f6c67, 0x746e696f, 0x657a6953, 0x00000000, 0x00070006, 0x00000016, 0x00000002,
++    0x435f6c67, 0x4470696c, 0x61747369, 0x0065636e, 0x00070006, 0x00000016, 0x00000003, 0x435f6c67,
++    0x446c6c75, 0x61747369, 0x0065636e, 0x00030005, 0x00000018, 0x00000000, 0x00050005, 0x0000001b,
++    0x69736f70, 0x6e6f6974, 0x00000000, 0x00040005, 0x0000001d, 0x65726353, 0x00006e65, 0x00050006,
++    0x0000001d, 0x00000000, 0x6c616373, 0x00000065, 0x00060006, 0x0000001d, 0x00000001, 0x6e617274,
++    0x74616c73, 0x00000065, 0x00040005, 0x0000001f, 0x65726373, 0x00006e65, 0x00040047, 0x00000009,
++    0x0000001e, 0x00000000, 0x00040047, 0x0000000b, 0x0000001e, 0x00000001, 0x00040047, 0x0000000f,
++    0x0000001e, 0x00000001, 0x00040047, 0x00000011, 0x0000001e, 0x00000002, 0x00030047, 0x00000016,
++    0x00000002, 0x00050048, 0x00000016, 0x00000000, 0x0000000b, 0x00000000, 0x00050048, 0x00000016,
++    0x00000001, 0x0000000b, 0x00000001, 0x00050048, 0x00000016, 0x00000002, 0x0000000b, 0x00000003,
++    0x00050048, 0x00000016, 0x00000003, 0x0000000b, 0x00000004, 0x00040047, 0x0000001b, 0x0000001e,
++    0x00000000, 0x00030047, 0x0000001d, 0x00000002, 0x00050048, 0x0000001d, 0x00000000, 0x00000023,
++    0x00000000, 0x00050048, 0x0000001d, 0x00000001, 0x00000023, 0x00000008, 0x00020013, 0x00000002,
++    0x00030021, 0x00000003, 0x00000002, 0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007,
++    0x00000006, 0x00000002, 0x00040020, 0x00000008, 0x00000003, 0x00000007, 0x0004003b, 0x00000008,
++    0x00000009, 0x00000003, 0x00040020, 0x0000000a, 0x00000001, 0x00000007, 0x0004003b, 0x0000000a,
++    0x0000000b, 0x00000001, 0x00040017, 0x0000000d, 0x00000006, 0x00000004, 0x00040020, 0x0000000e,
++    0x00000003, 0x0000000d, 0x0004003b, 0x0000000e, 0x0000000f, 0x00000003, 0x00040020, 0x00000010,
++    0x00000001, 0x0000000d, 0x0004003b, 0x00000010, 0x00000011, 0x00000001, 0x00040015, 0x00000013,
++    0x00000020, 0x00000000, 0x0004002b, 0x00000013, 0x00000014, 0x00000001, 0x0004001c, 0x00000015,
++    0x00000006, 0x00000014, 0x0006001e, 0x00000016, 0x0000000d, 0x00000006, 0x00000015, 0x00000015,
++    0x00040020, 0x00000017, 0x00000003, 0x00000016, 0x0004003b, 0x00000017, 0x00000018, 0x00000003,
++    0x00040015, 0x00000019, 0x00000020, 0x00000001, 0x0004002b, 0x00000019, 0x0000001a, 0x00000000,
++    0x0004003b, 0x0000000a, 0x0000001b, 0x00000001, 0x0004001e, 0x0000001d, 0x00000007, 0x00000007,
++    0x00040020, 0x0000001e, 0x00000009, 0x0000001d, 0x0004003b, 0x0000001e, 0x0000001f, 0x00000009,
++    0x00040020, 0x00000020, 0x00000009, 0x00000007, 0x0004002b, 0x00000019, 0x00000024, 0x00000001,
++    0x0004002b, 0x00000006, 0x00000028, 0x00000000, 0x0004002b, 0x00000006, 0x00000029, 0x3f800000,
++    0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8, 0x00000005, 0x0004003d,
++    0x00000007, 0x0000000c, 0x0000000b, 0x0003003e, 0x00000009, 0x0000000c, 0x0004003d, 0x0000000d,
++    0x00000012, 0x00000011, 0x0003003e, 0x0000000f, 0x00000012, 0x0004003d, 0x00000007, 0x0000001c,
++    0x0000001b, 0x00050041, 0x00000020, 0x00000021, 0x0000001f, 0x0000001a, 0x0004003d, 0x00000007,
++    0x00000022, 0x00000021, 0x00050085, 0x00000007, 0x00000023, 0x0000001c, 0x00000022, 0x00050041,
++    0x00000020, 0x00000025, 0x0000001f, 0x00000024, 0x0004003d, 0x00000007, 0x00000026, 0x00000025,
++    0x00050081, 0x00000007, 0x00000027, 0x00000023, 0x00000026, 0x00050051, 0x00000006, 0x0000002a,
++    0x00000027, 0x00000000, 0x00050051, 0x00000006, 0x0000002b, 0x00000027, 0x00000001, 0x00070050,
++    0x0000000d, 0x0000002c, 0x0000002a, 0x0000002b, 0x00000028, 0x00000029, 0x00050041, 0x0000000e,
++    0x0000002d, 0x00000018, 0x0000001a, 0x0003003e, 0x0000002d, 0x0000002c, 0x000100fd, 0x00010038,
++};
++
++static const uint32_t psgopher_overlay_fragment_spirv[] = {
++    0x07230203, 0x00010300, 0x0008000b, 0x00000018, 0x00000000, 0x00020011, 0x00000001, 0x0006000b,
++    0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e, 0x00000000, 0x00000001,
++    0x0008000f, 0x00000004, 0x00000004, 0x6e69616d, 0x00000000, 0x00000009, 0x0000000b, 0x00000014,
++    0x00030010, 0x00000004, 0x00000007, 0x00030003, 0x00000002, 0x000001c2, 0x00040005, 0x00000004,
++    0x6e69616d, 0x00000000, 0x00040005, 0x00000009, 0x6f6c6f63, 0x00007275, 0x00050005, 0x0000000b,
++    0x6f635f76, 0x72756f6c, 0x00000000, 0x00030005, 0x00000010, 0x00786574, 0x00040005, 0x00000014,
++    0x76755f76, 0x00000000, 0x00040047, 0x00000009, 0x0000001e, 0x00000000, 0x00040047, 0x0000000b,
++    0x0000001e, 0x00000001, 0x00040047, 0x00000010, 0x00000021, 0x00000000, 0x00040047, 0x00000010,
++    0x00000022, 0x00000000, 0x00040047, 0x00000014, 0x0000001e, 0x00000000, 0x00020013, 0x00000002,
++    0x00030021, 0x00000003, 0x00000002, 0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007,
++    0x00000006, 0x00000004, 0x00040020, 0x00000008, 0x00000003, 0x00000007, 0x0004003b, 0x00000008,
++    0x00000009, 0x00000003, 0x00040020, 0x0000000a, 0x00000001, 0x00000007, 0x0004003b, 0x0000000a,
++    0x0000000b, 0x00000001, 0x00090019, 0x0000000d, 0x00000006, 0x00000001, 0x00000000, 0x00000000,
++    0x00000000, 0x00000001, 0x00000000, 0x0003001b, 0x0000000e, 0x0000000d, 0x00040020, 0x0000000f,
++    0x00000000, 0x0000000e, 0x0004003b, 0x0000000f, 0x00000010, 0x00000000, 0x00040017, 0x00000012,
++    0x00000006, 0x00000002, 0x00040020, 0x00000013, 0x00000001, 0x00000012, 0x0004003b, 0x00000013,
++    0x00000014, 0x00000001, 0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8,
++    0x00000005, 0x0004003d, 0x00000007, 0x0000000c, 0x0000000b, 0x0004003d, 0x0000000e, 0x00000011,
++    0x00000010, 0x0004003d, 0x00000012, 0x00000015, 0x00000014, 0x00050057, 0x00000007, 0x00000016,
++    0x00000011, 0x00000015, 0x00050085, 0x00000007, 0x00000017, 0x0000000c, 0x00000016, 0x0003003e,
++    0x00000009, 0x00000017, 0x000100fd, 0x00010038,
++};
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..7caeeb3 100644
 --- a/src/lib.rs
@@ -559,10 +802,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..ad98075
+index 0000000..18382dc
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,410 @@
+@@ -0,0 +1,448 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -800,6 +1043,44 @@ index 0000000..ad98075
 +    }
 +}
 +
++/// The game running now, for the quick menu: its name in the ROM's header and its save states'
++/// path without the slot's digit (data/states/<name>-<hash>.state).
++static GAME: std::sync::Mutex<(String, String)> = std::sync::Mutex::new((String::new(), String::new()));
++
++pub fn set_game(name: &str, states: &std::path::Path) {
++    if let Ok(mut game) = GAME.lock() {
++        *game = (name.to_string(), states.to_string_lossy().into_owned());
++    }
++}
++
++fn copy_out(text: &str, buffer: *mut std::ffi::c_char, size: usize) -> usize {
++    if buffer.is_null() || size == 0 {
++        return 0;
++    }
++    let n = text.len().min(size - 1);
++    unsafe {
++        std::ptr::copy_nonoverlapping(text.as_ptr(), buffer as *mut u8, n);
++        *buffer.add(n) = 0;
++    }
++    n
++}
++
++/// The running game's header name and states' path stem (see set_game); their lengths.
++///
++/// # Safety
++/// Each buffer has room for its size.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_game_info(
++    name: *mut std::ffi::c_char,
++    name_size: usize,
++    states: *mut std::ffi::c_char,
++    states_size: usize,
++) -> usize {
++    let (n, st) = GAME.lock().map(|g| g.clone()).unwrap_or_default();
++    copy_out(&n, name, name_size);
++    copy_out(&st, states, states_size)
++}
++
 +/// # Safety
 +/// `argv` holds `argc` NUL-terminated strings, as C's `main` receives them.
 +#[unsafe(no_mangle)]
@@ -1012,3 +1293,17 @@ index ccced72..a9950e5 100644
      {
          eprintln!("Error writing config: {}", e);
      }
+diff --git a/src/ui/storage.rs b/src/ui/storage.rs
+index 0fe2469..5fbdb7b 100644
+--- a/src/ui/storage.rs
++++ b/src/ui/storage.rs
+@@ -256,6 +256,9 @@ pub fn init(ui: &mut ui::Ui, rom: &[u8]) {
+         "{}-{}.state{}",
+         prefix, ui.game_hash, ui.storage.save_state_slot
+     ));
++    // PSGopher (PS5): the quick menu lists this game's states (psgopher::set_game)
++    #[cfg(psgopher)]
++    crate::psgopher::set_game(&game_name, &states_path.join(format!("{}-{}.state", prefix, ui.game_hash)));
+ }
+ 
+ pub fn load_saves(ui: &mut ui::Ui, netplay: &mut Option<netplay::Netplay>, cic_seed: u8) {

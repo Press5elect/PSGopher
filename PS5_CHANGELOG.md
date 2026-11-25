@@ -14,6 +14,12 @@ console logs, 2026-11-25).
   log before the console closes the title. A `video:` line says when a game's first frame is shown,
   then its frames every 10 s.
 - Changed: the list's footer says how to leave a game (hold the touch pad + Options).
+- Added: the in-game quick menu, the Live Board's LIVE panel: a touch pad tap pauses the game and
+  shows Resume, Take a memory probe and Load a probe (save states in slots 1-5, with their times),
+  Press reset and Eject cartridge (back to the list), with the live frame rate, the emulation
+  thread's CPU time a frame, the present's wait and the audio queue. Drawn with Dear ImGui over the
+  game's frame by parallel-rdp's own device (`ps5/host/quickmenu.cpp`; the overlay in
+  `ps5.patch`); touch pad + a button stays Gopher64's hotkey.
 - Fixed: Rust read the console's `stat`, `dirent` and `kevent` with FreeBSD 12's layouts (its std's
   libc is 12's; the console's is 11's), so every folder looked like no folder ("File exists" at
   Gopher64's start) and Tokio's poller got the wrong event size (likely its "Operation not

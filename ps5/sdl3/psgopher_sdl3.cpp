@@ -417,6 +417,36 @@ static int player_of(SDL_JoystickID id)
    return player >= 0 && player < PAD_PLAYERS && pad_connected[player] ? player : -1;
 }
 
+/* PSGopher's quick menu (ps5/host/quickmenu.cpp): a touch pad tap of any player, pressed and let go
+ * within half a second with no other button pressed meanwhile (with one, it is Gopher64's hotkey) */
+static bool tap_down, tap_clean, tap_seen;
+static uint64_t tap_since_us;
+static void watch_tap(const pad_reading *readings, int count)
+{
+   for (int i = 0; i < count; i++) {
+      const uint32_t b = readings[i].buttons;
+      if (b & PAD_INTERCEPTED)
+         continue;
+      const bool touch = (b & PAD_TOUCH_PAD) != 0;
+      if (touch && !tap_down) {
+         tap_down = true;
+         tap_clean = (b & ~PAD_TOUCH_PAD) == 0;
+         tap_since_us = readings[i].timestamp_us;
+      } else if (touch) {
+         if (b & ~PAD_TOUCH_PAD)
+            tap_clean = false;
+      } else if (tap_down) {
+         tap_down = false;
+         if (tap_clean && readings[i].timestamp_us - tap_since_us < 500000)
+            tap_seen = true;
+      }
+   }
+}
+
+/* after the menu: the game sees the pads at rest until every button is let go (the Cross that
+ * chose Resume is not the game's A) */
+static bool hold_until_released;
+
 static void poll_pads()
 {
    if (!pads_open)
@@ -424,11 +454,20 @@ static void poll_pads()
    struct pad first;
    pad_poll(&first);
    const uint32_t present = pad_players();
+   uint32_t held_any = 0;
    for (int player = 0; player < PAD_PLAYERS; player++) {
       const bool connected = (present >> player) & 1;
       const pad_reading *readings = nullptr;
       const int count = connected ? pad_player_readings(player, &readings) : 0;
-      if (count > 0) {
+      watch_tap(readings, count);
+      if (count > 0)
+         held_any |= readings[count - 1].buttons & ~PAD_INTERCEPTED;
+      if (count > 0 && hold_until_released) {
+         pad_now[player] = pad_reading{};
+         pad_now[player].left_x = pad_now[player].left_y = 128;
+         pad_now[player].right_x = pad_now[player].right_y = 128;
+         pad_now[player].connected = true;
+      } else if (count > 0) {
          const pad_reading &last = readings[count - 1];
          /* while the shell has the pad (home screen, a dialog) the title sees it at rest */
          if (last.buttons & PAD_INTERCEPTED) {
@@ -455,6 +494,28 @@ static void poll_pads()
          pad_player_vibrate(player, 0, 0);
       }
    }
+   if (hold_until_released && held_any == 0)
+      hold_until_released = false;
+}
+
+extern "C" int psgopher_sdl3_take_tap(void)
+{
+   const bool seen = tap_seen;
+   tap_seen = false;
+   return seen;
+}
+
+extern "C" void psgopher_sdl3_menu_pad(struct pad *pad)
+{
+   pad_poll(pad);
+   const pad_reading *readings = nullptr;
+   watch_tap(readings, pad_player_readings(0, &readings));
+}
+
+extern "C" void psgopher_sdl3_hold_until_released(void)
+{
+   hold_until_released = true;
+   tap_seen = tap_down = false;
 }
 
 extern "C" void SDL_PumpEvents(void)

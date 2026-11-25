@@ -51,12 +51,46 @@ static uint64_t now_ns(clockid_t clock)
 
 /* PSGopher: the boot log's video line, whatever the benchmark mode: the first frame shown, then
  * the frames of each 10 s (one line; a game that stops showing frames stops it) */
+/* PSGopher: the quick menu's live figures, each the last whole second's (always on: one thread
+ * CPU clock read a frame; waiting, in present or the speed limiter, is no CPU time) */
+static struct psgopher_live live_now;
+static uint64_t live_since_ns, live_frames, live_present_ns, live_cpu_start;
+
+void psgopher_live_read(struct psgopher_live *out)
+{
+   *out = live_now;
+}
+
+static void live_frame(uint64_t begin_ns, uint64_t end_ns)
+{
+   const uint64_t cpu = now_ns(CLOCK_THREAD_CPUTIME_ID);
+   if (!live_since_ns) {
+      live_since_ns = end_ns;
+      live_cpu_start = cpu;
+      return;
+   }
+   live_frames++;
+   live_present_ns += end_ns - begin_ns;
+   const uint64_t span = end_ns - live_since_ns;
+   if (span >= 1000000000ull) {
+      live_now.frames_per_second = (double)live_frames * 1e9 / (double)span;
+      live_now.present_ms = (double)live_present_ns / 1e6 / (double)live_frames;
+      live_now.cpu_ms = cpu == UINT64_MAX || live_cpu_start == UINT64_MAX
+                           ? -1.0 : (double)(cpu - live_cpu_start) / 1e6 / (double)live_frames;
+      live_since_ns = end_ns;
+      live_cpu_start = cpu;
+      live_frames = live_present_ns = 0;
+   }
+}
+
 static uint64_t video_since_ns, video_count, video_total;
 
 /* a new game: its first frame is said again */
 void psgopher_video_reset(void)
 {
    video_since_ns = video_count = video_total = 0;
+   live_since_ns = live_frames = live_present_ns = 0;
+   live_now = (struct psgopher_live){ 0 };
 }
 
 static void video_heartbeat(uint64_t end_ns)
@@ -79,6 +113,7 @@ static void video_heartbeat(uint64_t end_ns)
 void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns)
 {
    video_heartbeat(end_ns);
+   live_frame(begin_ns, end_ns);
    if (!atomic_load_explicit(&enabled, memory_order_relaxed))
       return;
    const uint64_t cpu = now_ns(CLOCK_THREAD_CPUTIME_ID);

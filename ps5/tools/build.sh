@@ -44,18 +44,22 @@ ports=$("$root/ps5/tools/build-deps.sh")
 imgui="$root/.deps/src/imgui"
 "$root/ps5/tools/build-elevator.sh" > /dev/null
 mkdir -p "$work/gen"
-font="$imgui/misc/fonts/Roboto-Medium.ttf"
-if [[ ! -f $work/gen/menu_font.h || $font -nt $work/gen/menu_font.h ]]; then
-    python3 - "$font" "$work/gen/menu_font.h" <<'PY'
-import sys
+# the list's and the quick menu's fonts as headers: Roboto Medium (Apache-2.0) and Cousine
+# (Apache-2.0, the monospace labels), from Dear ImGui's misc/fonts
+font_header() { # ttf, header, symbol
+    [[ -f $2 && ! $1 -nt $2 ]] && return
+    python3 - "$1" "$2" "$3" <<'PY'
+import sys, os
 data = open(sys.argv[1], 'rb').read()
-lines = ["/* Roboto Medium (Christian Robertson, Apache License 2.0), from Dear ImGui's misc/fonts:",
-         " * the game list's font. Made by ps5/tools/build.sh. */", "#pragma once",
-         "static const unsigned int psgopher_font_size = %d;" % len(data), "static const unsigned char psgopher_font[] = {"]
+name = sys.argv[3]
+lines = ["/* %s (Apache License 2.0), from Dear ImGui's misc/fonts. Made by ps5/tools/build.sh. */" % os.path.basename(sys.argv[1]),
+         "#pragma once", "static const unsigned int %s_size = %d;" % (name, len(data)), "static const unsigned char %s[] = {" % name]
 lines += ["  " + ",".join(str(b) for b in data[i:i + 32]) + "," for i in range(0, len(data), 32)]
 open(sys.argv[2], "w").write("\n".join(lines + ["};", ""]))
 PY
-fi
+}
+font_header "$imgui/misc/fonts/Roboto-Medium.ttf" "$work/gen/menu_font.h" psgopher_font
+font_header "$imgui/misc/fonts/Cousine-Regular.ttf" "$work/gen/menu_mono.h" psgopher_mono
 rdp="$root/vendor/gopher64/parallel-rdp/parallel-rdp-standalone"
 list=(-I"$root/ps5/vfs" -I"$ports/include" -I"$imgui" -I"$imgui/backends" -I"$work/gen" -I"$rdp/volk"
     -I"$rdp/vulkan-headers/include" -DIMGUI_IMPL_VULKAN_USE_VOLK -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS
@@ -81,6 +85,7 @@ compile -std=c++20 title_settings.o "$root/ps5/host/title_settings.cpp"
 compile -std=c++20 library.o "$root/ps5/host/library.cpp" "${list[@]}"
 compile -std=c++20 shares.o "$root/ps5/host/shares.cpp" "${list[@]}"
 compile -std=c++20 menu.o "$root/ps5/host/menu.cpp" "${list[@]}" -Wno-missing-field-initializers
+compile -std=c++20 quickmenu.o "$root/ps5/host/quickmenu.cpp" "${list[@]}" -Wno-missing-field-initializers
 for vfs in ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp; do
     compile -std=c++20 "$vfs.o" "$root/ps5/vfs/$vfs.cpp" "${list[@]}" -Wno-missing-field-initializers -Wno-sign-compare
 done
@@ -94,7 +99,7 @@ echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
 objects=()
-for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings library shares menu \
+for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings library shares menu quickmenu \
     ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp imgui_imgui imgui_imgui_draw imgui_imgui_tables imgui_imgui_widgets \
     imgui_imgui_impl_vulkan; do
     objects+=("$work/obj/$object.o")

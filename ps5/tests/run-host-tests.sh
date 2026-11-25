@@ -30,7 +30,8 @@ imgui="$root/.deps/src/imgui"
 rdp="$root/vendor/gopher64/parallel-rdp/parallel-rdp-standalone"
 if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/menu_font.h ]]; then
     menu_flags=(-std=c++20 -O1 -g -fsanitize=address,undefined -DPSGOPHER_MENU_HOST -DPSGOPHER_SHARES_HOST_TEST
-        -DIMGUI_IMPL_VULKAN_USE_VOLK -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS -I"$root/ps5/host" -I"$root/ps5/vfs"
+        -DIMGUI_IMPL_VULKAN_USE_VOLK -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS
+        -I"$root/ps5/host" -I"$root/ps5/vfs"
         -I"$imgui" -I"$imgui/backends" -I"$rdp/volk" -I"$rdp/vulkan-headers/include" -I"$root/build/ps5/gen")
     ${CC:-gcc} -O1 -g -fsanitize=address,undefined -I"$rdp/vulkan-headers/include" -c "$rdp/volk/volk.c" -o "$out/volk.o"
     for source in imgui imgui_draw imgui_tables imgui_widgets backends/imgui_impl_vulkan; do
@@ -44,9 +45,16 @@ if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/menu_
         "$out/volk.o" "$out"/imgui_*.o -o "$out/test_menu" -lpthread -ldl
     [[ -f $lavapipe ]] && export VK_ICD_FILENAMES=$lavapipe
     "$out/test_menu" "$out/menu-work" "$out/menu-pictures"
+    # the in-game quick menu, over a stand-in frame by a small software rasterizer
+    ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
+        -fsanitize=address,undefined -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$imgui" \
+        -I"$root/build/ps5/gen" "$root/ps5/tests/test_quickmenu.cpp" "$root/ps5/host/quickmenu.cpp" \
+        "$out"/imgui_imgui.o "$out"/imgui_imgui_draw.o "$out"/imgui_imgui_tables.o "$out"/imgui_imgui_widgets.o \
+        -o "$out/test_quickmenu"
+    "$out/test_quickmenu" "$out/quickmenu-work" "$out/menu-pictures/quickmenu"
     if python3 -c 'import PIL' 2>/dev/null; then
         python3 -c 'import sys, glob, PIL.Image as I
-for p in glob.glob(sys.argv[1] + "/*.ppm"): I.open(p).save(p[:-4] + ".png")' "$out/menu-pictures"
+for p in glob.glob(sys.argv[1] + "/**/*.ppm", recursive=True): I.open(p).save(p[:-4] + ".png")' "$out/menu-pictures"
     fi
 else
     echo "test_menu: skipped (needs .deps/src/imgui, vendor/gopher64 and a build's build/ps5/gen/menu_font.h)"
