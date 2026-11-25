@@ -96,7 +96,8 @@ The owner's standing rules. They hold for every session and every agent.
 | `ps5/tools/check-sources.sh` | Every pin against its upstream (rule 1) |
 | `ps5/tools/build.sh [--compile]` | The title into `dist/PPSA99280/` |
 | `ps5/tools/fetch-gopher64.sh [--export\|--check]` | Gopher64 at the pin with `ps5.patch` and `parallel-rdp.patch`; both written back; checked on a fresh checkout |
-| `ps5/tools/build-core.sh` | The core alone (`build/core/.../libgopher64.a`) |
+| `ps5/tools/build-core.sh` | The core alone (`build/core/.../libgopher64.a`); `PSGOPHER_PGO=generate\|use\|off` |
+| `ps5/tools/merge-profiles.sh` | The console's `.profraw` files into `ps5/pgo/core.profdata` ([`building.md`](building.md#profile-guided-builds)) |
 | `ps5/tools/build-deps.sh` | libsmb2, libnfs, Dear ImGui, the fonts at their pins |
 | `ps5/tools/make-board-art.mjs` | The board's picture from `ps5/art/live-board.html` |
 | `ps5/tools/make-shaders.sh` | The overlay and HDR shaders' SPIR-V |

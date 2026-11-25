@@ -77,6 +77,25 @@ ps5/tools/build.sh
 
 `ps5/tools/build.sh --compile` stops before the link.
 
+## Profile-guided builds
+
+The core can be compiled with what it does on the console (Crux2's method, its
+`docs/dev/building.md`). Three steps, the middle one on the console:
+
+1. `PSGOPHER_PGO=generate ps5/tools/build.sh`: a profiling build. Gopher64's crate alone is
+   instrumented (`-Cprofile-generate` through cargo's per-package profile flags: the standard
+   library's crates cannot take it). LLVM's profile runtime is built for the console by
+   `ps5/tools/build-profile-runtime.sh` from compiler-rt at **rustc's** LLVM release (23.1.6 when this
+   was written; the raw format is that release's) with Crux2's stand-ins (no build IDs, no `uname`,
+   `procctl`, `getpagesize`), and linked by `link-title.sh`, which also places the counters with
+   the writable data.
+2. Play the games the build should be good at. After each game the title writes its counts to
+   `/data/psgopher/pgo/core-<time>-<n>.profraw` (the boot log's `pgo:` lines): the title never
+   returns from `main`, so the runtime's own write at exit never happens.
+3. `ps5/tools/merge-profiles.sh <files or folders>` merges them into `ps5/pgo/core.profdata` with
+   rustc's own `llvm-profdata` (rustup's `llvm-tools`). Every build uses it from then on
+   (`PSGOPHER_PGO=use`, the default when the file is there; `off` builds without).
+
 ## Pins
 
 Every source is followed at its newest revision (the owner's rule: [`workflow.md`](workflow.md#the-rules)).

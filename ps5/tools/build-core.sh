@@ -42,9 +42,36 @@ export CARGO_TARGET_DIR="$out"
 # (build scripts and proc macros run on this machine, with its own compilers)
 export CC=clang CXX=clang++ AR=llvm-ar
 
+# Profile-guided optimisation (Crux2's method, docs/dev/building.md): PSGOPHER_PGO=generate builds
+# a profiling core (the title writes its counts to /data/psgopher/pgo after each game), =use one
+# laid out by ps5/pgo/core.profdata (the default when it is there), =off neither. The flags are
+# RUSTFLAGS, which replace .cargo/config.toml's for the target: its target-cpu is kept here.
+pgo=${PSGOPHER_PGO:-}
+profdata="$root/ps5/pgo/core.profdata"
+[[ -z $pgo ]] && { [[ -f $profdata ]] && pgo=use || pgo=off; }
+std=std,panic_unwind
+rustflags=(-Ctarget-cpu=x86-64-v3)
+# (Gopher64's crate alone is instrumented and laid out, through cargo's per-package profile flags:
+# instrumenting the standard library's own crates fails, core cannot link the profiler)
+pgo_args=()
+case $pgo in
+    generate)
+        export LLVM_PROFILER_RT_LIB=$("$root/ps5/tools/build-profile-runtime.sh" "$sdk")
+        pgo_args=(-Zprofile-rustflags --config "profile.$profile.package.gopher64.rustflags=['-Cprofile-generate=/data/psgopher/pgo']")
+        std+=,profiler_builtins ;;
+    use)
+        [[ -f $profdata ]] || { echo "build-core.sh: PSGOPHER_PGO=use without $profdata" >&2; exit 1; }
+        pgo_args=(-Zprofile-rustflags --config
+            "profile.$profile.package.gopher64.rustflags=['-Cprofile-use=$profdata', '-Cllvm-args=-pgo-warn-mismatch=false']") ;;
+    off) ;;
+    *) echo "build-core.sh: PSGOPHER_PGO is generate, use or off" >&2; exit 2 ;;
+esac
+export CARGO_ENCODED_RUSTFLAGS=$(IFS=$'\x1f'; echo "${rustflags[*]}")
+echo "==> the core's PGO: $pgo" >&2
+
 cd "$src"
-cargo "+$toolchain" rustc --lib --profile "$profile" --crate-type staticlib \
-    -Zjson-target-spec -Zbuild-std=std,panic_unwind --target "$spec" --no-default-features "$@"
+cargo "+$toolchain" rustc --lib --profile "$profile" --crate-type staticlib ${pgo_args[@]+"${pgo_args[@]}"} \
+    -Zjson-target-spec -Zbuild-std=$std --target "$spec" --no-default-features "$@"
 lib="$out/x86_64-sie-ps5/${profile/dev/debug}/libgopher64.a"
 # Rust's libc is FreeBSD 12's, the console's FreeBSD 11's: the core's calls of the four functions
 # whose structures differ go to ps5/host/rust_abi.c's converters (no C object in the core calls

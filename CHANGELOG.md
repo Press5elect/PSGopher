@@ -95,6 +95,15 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### From the eighth console log (2026-11-25)
+
+- Measured: neither 32-wide waves nor parallel-rdp's 8/16-bit arithmetic changes the depth-blend
+  pass (1.21 ms a pass at 8x either way); they stay off. The emulation thread alone takes ~21.5 ms
+  a VI in that game at these settings (the RSP's interpreter 9 ms).
+- Added: profile-guided builds of the core (Crux2's method): `PSGOPHER_PGO=generate` makes a
+  profiling build whose counts the title writes to `/data/psgopher/pgo` after each game;
+  `ps5/tools/merge-profiles.sh` makes `ps5/pgo/core.profdata`, which builds then use.
+
 ### From the seventh console log (2026-11-25)
 
 - Measured: at 8x the GPU spends 15-16 ms a frame in parallel-rdp's depth-blending pass (of ~18 ms),

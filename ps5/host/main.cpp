@@ -45,6 +45,10 @@ void psgopher_probe(void);
 size_t psgopher_last_error(char *buffer, size_t size);
 void psgopher_crash_install(void);
 int64_t psgopher_setting_get(const char *name);
+/* the core's profiling build (PSGOPHER_PGO=generate): LLVM's profile runtime, linked only then */
+int __llvm_profile_write_file(void) __attribute__((weak));
+void __llvm_profile_set_filename(const char *name) __attribute__((weak));
+void __llvm_profile_reset_counters(void) __attribute__((weak));
 }
 
 static const char ROOT[] = "/data/psgopher";
@@ -207,6 +211,19 @@ static int play(const std::string &rom, int load_state = -1)
        psgopher_setting_get("emulation.disable_expansion_pak") == 1 ? "off" : "on");
    psgopher_video_reset();
    const int status = psgopher_main(argc, argv);
+   /* a profiling build: this game's counts to /data/psgopher/pgo (the title never returns from main,
+    * so the runtime's own write at exit never happens; Crux2's way), then counted afresh */
+   if (__llvm_profile_write_file && __llvm_profile_set_filename) {
+      mkdir("/data/psgopher/pgo", 0777);
+      static int written;
+      char file[160];
+      snprintf(file, sizeof(file), "/data/psgopher/pgo/core-%lld-%d.profraw", (long long)time(nullptr), ++written);
+      __llvm_profile_set_filename(file);
+      const int result = __llvm_profile_write_file();
+      if (__llvm_profile_reset_counters)
+         __llvm_profile_reset_counters();
+      say("pgo: %s %s", file, result == 0 ? "written" : "could not be written");
+   }
    say("Gopher64 returned %d", status);
    return status;
 }

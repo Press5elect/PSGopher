@@ -71,6 +71,25 @@ bindings=(accept4=ps5_accept4 gai_strerror=ps5_gai_strerror realpath=ps5_realpat
 } > "$work/link/psgopher-local.map"
 radv_link_flags+=(--version-script "$work/link/psgopher-local.map")
 
+# The core's profiling build (PSGOPHER_PGO=generate, build-core.sh): its counters and the records
+# that point at them are written while the title runs, so they go with the writable data (Crux2's
+# link-title.sh: left to the linker they followed .got.plt into the region the native tool keeps
+# for the process parameters)
+if [[ ${PSGOPHER_PGO:-} == generate ]]; then
+    cat > "$work/link/pgo-sections.ld" <<'EOF_LD'
+SECTIONS {
+    __llvm_prf_cnts : { KEEP(*(__llvm_prf_cnts)) } : data
+    __llvm_prf_bits : { KEEP(*(__llvm_prf_bits)) } : data
+    __llvm_prf_data : { KEEP(*(__llvm_prf_data)) } : data
+    __llvm_prf_vals : { KEEP(*(__llvm_prf_vals)) } : data
+    __llvm_prf_vnds : { KEEP(*(__llvm_prf_vnds)) } : data
+} INSERT AFTER .data;
+EOF_LD
+    radv_linker_script+=(-T "$work/link/pgo-sections.ld")
+    # and LLVM's profile runtime itself (rustc's profiler_builtins does not bundle it into the core)
+    objects+=("$("$root/ps5/tools/build-profile-runtime.sh" "$sdk")")
+fi
+
 # Mesa's dispatch tables name entry points through weak references: an undefined weak symbol must
 # not become an import the native tool cannot resolve (Crux2's and PS5_RetroArch's flags; the
 # FreeBSD target defaults to -z dynamic-undefined-weak, PS5_Vulkan's check-vulkan-runtime.sh)

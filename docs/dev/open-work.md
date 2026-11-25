@@ -7,7 +7,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | Problem | Evidence | Next step |
 | --- | --- | --- |
-| A demanding game runs below full speed at 8x | one NTSC game: the GPU's depth-blending pass takes 15-16 ms a frame at 8x (GPU timing), the RSP's interpreter 6-9 ms, the CPU's 2-4 ms (overclocked); at 1x 93-100% ([`performance.md`](performance.md#first-console-observations)) | the depth-blend pass with Compute waves 32 and 8/16-bit maths (BENCH, Video), GPU timing on; then the shader itself. The RSP's interpreter: PGO of the core |
+| A demanding game runs below full speed at 8x | one NTSC game: depth-blending 1.2 ms a pass on the GPU, 10-12 passes a frame at 8x (wave32 and 8/16-bit arithmetic change nothing); the emulation thread ~21.5 ms a VI, the RSP's interpreter 9 ms ([`performance.md`](performance.md#first-console-observations)) | the core's PGO: profiles from the profiling build, then a build that uses them, measured against these logs |
 | The front end's remaining defects | [`../frontend-audit/BUGS.md`](../frontend-audit/BUGS.md) (FE-001 to FE-004 and FE-031 fixed, see `CHANGELOG.md`) | in the order of [`../frontend-audit/ROADMAP.md`](../frontend-audit/ROADMAP.md), FE-005 next |
 | The USB search uses its whole budget (60,000 entries) at every start | boot logs 2026-11-25 (5.7-34.7 s before the share is searched) | measure which folders take it; skip known non-game folders or search places in parallel |
 | The first search of a large share is slow (1,424 ROMs: 55.6 s, headers read over SMB) | boot log 2026-11-25 | later starts read `library.tsv`; measure again before changing anything |
@@ -21,7 +21,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 | The two-controller tap | `93a4309` | hold the touch pad with a second controller connected: no quick menu |
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
 | Shader compiles on 4 threads or at once; the driver's own thread | `2ab7c1d` (ran: no change at 8x) | the `video:` line's shading share and speed at 8x with each |
-| Compute waves 32 wide, parallel-rdp's 8/16-bit arithmetic | this commit | the `gpu:` line's depth-blending at 8x with each |
+| The core's profiling build (`PSGOPHER_PGO=generate`) | this commit | `pgo:` lines after each game; `.profraw` files in `/data/psgopher/pgo` |
 | The configurable hotkeys and their new actions, the quick menu tap switch | `892ab0a` (the `hotkeys:` line has run) | each action in a game with the activator held; `hotkeys:` line at a game's start |
 | Binding a profile's input by pressing it, the Transfer Pak's file picker, port controller assignment | `892ab0a` | Profiles and Controllers in BENCH, then a game |
 | Cheats applied to a game | `33c8907` | a cheat on, the game started from the board |
