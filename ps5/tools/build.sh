@@ -71,6 +71,7 @@ compile -std=c11 platform.o "$root/ps5/host/platform.c"
 compile -std=c11 rust_stubs.o "$root/ps5/host/rust_stubs.c"
 compile -std=c11 bench.o "$root/ps5/host/bench.c"
 compile -std=c11 libc_gaps.o "$root/ps5/host/libc_gaps.c"
+compile -std=gnu11 rust_abi.o "$root/ps5/host/rust_abi.c" # (sys/event.h takes the BSD types)
 compile -std=c++20 main.o "$root/ps5/host/main.cpp"
 compile -std=c++20 videoout_hooks.o "$root/ps5/host/videoout_hooks.cpp"
 compile -std=c++20 psgopher_sdl3.o "$root/ps5/sdl3/psgopher_sdl3.cpp" -Wno-unused-function -Wno-missing-field-initializers
@@ -92,7 +93,7 @@ echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
 objects=()
-for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps videoout_hooks sandbox title_settings library shares menu \
+for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi videoout_hooks sandbox title_settings library shares menu \
     ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp imgui_imgui imgui_imgui_draw imgui_imgui_tables imgui_imgui_widgets \
     imgui_imgui_impl_vulkan; do
     objects+=("$work/obj/$object.o")

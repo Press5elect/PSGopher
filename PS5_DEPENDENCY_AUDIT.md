@@ -22,6 +22,19 @@ has run on a console.
 | parallel-rdp + Granite's Vulkan layer + `interface.cpp` | compiles with `-march=x86-64-v3 -flto=thin` (upstream's flags; Zen 2 code runs [console: Crux2]) |
 | rcheevos + `retroachievements.c` | compiles |
 
+## FreeBSD 11 under Rust's FreeBSD 12
+
+The console's libc has FreeBSD 11's structures (the SDK's `sys/stat.h`: 32-bit `ino_t` and `dev_t`,
+16-bit `nlink_t`; `struct dirent` without `d_off`; `struct kevent` without `ext`). Rust's std and
+the libc crate are built for FreeBSD 12 (libc 0.2.191 defaults to 12; built for 11, std itself no
+longer compiles: `d_fileno` is `u32` there). [console 2026-11-25] Read as 12's, a folder's `stat` did
+not say "folder" (Gopher64's `create_dir_all` failed with EEXIST) and Tokio's runtime was refused
+with EOPNOTSUPP. `build-core.sh` renames the Rust objects' calls of `stat`, `fstat`, `readdir` and
+`kevent` (the only ones of the changed functions the core makes; it stops if a C object calls them
+or a call is left) to `ps5/host/rust_abi.c`, which converts. Its 11 structures are checked against
+the SDK's at compile time, its 12 ones against Rust's libc by `test_rust_abi` (offsets reported by
+a no_std library built for `x86_64-unknown-freebsd`).
+
 ## The title's own libraries (the game list and the shares)
 
 Fetched and built by `ps5/tools/build-deps.sh` into `.deps/` (each at its master, as the owner's rule

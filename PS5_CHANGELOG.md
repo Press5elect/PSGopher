@@ -10,6 +10,12 @@ console logs, 2026-11-25).
   and timers only when that happens (all Gopher64 uses on the console), logs which of kqueue and an
   AF_UNIX socket pair was refused, and keeps the USB cartridge's TCP link off without it.
 - Changed: a panic is written to the boot log with its message, place and thread.
+- Fixed: Rust read the console's `stat`, `dirent` and `kevent` with FreeBSD 12's layouts (its std's
+  libc is 12's; the console's is 11's), so every folder looked like no folder ("File exists" at
+  Gopher64's start) and Tokio's poller got the wrong event size (likely its "Operation not
+  supported"). Rust's calls of `stat`, `fstat`, `readdir` and `kevent` now go through converters
+  (`ps5/host/rust_abi.c`), checked against the SDK's structures at compile time and against Rust's
+  libc's own offsets by a host test.
 
 - Added: the boot log, `psgopher-boot.log` in the title folder (the run before kept), as OGBox and
   Crux2; it has Gopher64's own messages and panics, which went nowhere before (Rust writes to

@@ -46,5 +46,31 @@ cd "$src"
 cargo "+$toolchain" rustc --lib --profile "$profile" --crate-type staticlib \
     -Zjson-target-spec -Zbuild-std=std,panic_unwind --target "$spec" --no-default-features "$@"
 lib="$out/x86_64-sie-ps5/${profile/dev/debug}/libgopher64.a"
-echo "==> $(du -h "$lib" | cut -f1) ${lib#$root/}"
+# Rust's libc is FreeBSD 12's, the console's FreeBSD 11's: the core's calls of the four functions
+# whose structures differ go to ps5/host/rust_abi.c's converters (no C object in the core calls
+# them; the check below stops the build if one ever does, or if a call is left)
+abi=(stat fstat readdir kevent)
+nm="$sdk/bin/llvm-nm"
+callers=$("$nm" -A -u "$lib" 2>/dev/null | awk -v names=" ${abi[*]} " 'index(names, " " $NF " ") { split($1, a, ":"); print a[2] }' | sort -u)
+if [[ -n $callers ]] && grep -qv 'rcgu\.o$' <<< "$callers"; then
+    echo "build-core.sh: a C object in the core calls ${abi[*]}: $(grep -v 'rcgu\.o$' <<< "$callers" | tr '\n' ' ')" >&2
+    exit 1
+fi
+if [[ -n $callers ]]; then
+    # member by member: the archive also holds LLVM bitcode (volk, parallel-rdp: thin LTO), which
+    # llvm-objcopy does not take; Rust's member names are unique, so each is replaced in place
+    renames=()
+    for name in "${abi[@]}"; do renames+=(--redefine-sym "$name=psgopher_fb12_$name"); done
+    members="$out/abi-members"
+    rm -rf "$members" && mkdir -p "$members"
+    while read -r member; do
+        (cd "$members" && "$sdk/bin/llvm-ar" x "$lib" "$member")
+        "$sdk/bin/llvm-objcopy" "${renames[@]}" "$members/$member"
+        (cd "$members" && "$sdk/bin/llvm-ar" r "$lib" "$member")
+    done <<< "$callers"
+    rm -rf "$members"
+fi
+left=$("$nm" -u "$lib" 2>/dev/null | awk -v names=" ${abi[*]} " 'index(names, " " $NF " ")' | wc -l)
+[[ $left == 0 ]] || { echo "build-core.sh: $left calls of ${abi[*]} left in the core" >&2; exit 1; }
+echo "==> $(du -h "$lib" | cut -f1) ${lib#$root/} (stat, fstat, readdir, kevent: FreeBSD 12 converters)"
 rustc "+$toolchain" --version > "$out/toolchain.txt"

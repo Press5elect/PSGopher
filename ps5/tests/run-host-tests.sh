@@ -51,3 +51,15 @@ for p in glob.glob(sys.argv[1] + "/*.ppm"): I.open(p).save(p[:-4] + ".png")' "$o
 else
     echo "test_menu: skipped (needs .deps/src/imgui, vendor/gopher64 and a build's build/ps5/gen/menu_font.h)"
 fi
+
+# the FreeBSD 12 converters for Rust (ps5/host/rust_abi.c) against Rust's libc's own offsets, which
+# a no_std library built for x86_64-unknown-freebsd reports (rustup target add x86_64-unknown-freebsd)
+if rustup +nightly target list --installed 2>/dev/null | grep -qx x86_64-unknown-freebsd; then
+    (cd "$root/ps5/tests/rust_abi_offsets" && CARGO_TARGET_DIR="$root/build/rust-abi-offsets" \
+        cargo +nightly build -q --release --target x86_64-unknown-freebsd)
+    ${CC:-gcc} -std=c11 -O1 -g -Wall -Wextra -fsanitize=address,undefined "$root/ps5/tests/test_rust_abi.c" \
+        "$root/build/rust-abi-offsets/x86_64-unknown-freebsd/release/librust_abi_offsets.a" -o "$out/test_rust_abi"
+    "$out/test_rust_abi"
+else
+    echo "test_rust_abi: skipped (rustup target add x86_64-unknown-freebsd --toolchain nightly)"
+fi
