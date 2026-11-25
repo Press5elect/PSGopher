@@ -44,13 +44,17 @@ void TitleSettings::load()
 			stats = !strcmp(value, "on");
 		else if (!strcmp(key, "audio_buffer"))
 			audioBuffer = std::clamp(atoi(value), 2, 8) / 2 * 2;
+		else if (!strcmp(key, "shader_compile"))
+			shaderCompile = (!strcmp(value, "4") || !strcmp(value, "now")) ? value : "1";
+		else if (!strcmp(key, "driver_thread"))
+			driverThread = !strcmp(value, "on");
 	}
 	fclose(f);
 }
 
 bool TitleSettings::save() const
 {
-	char text[2048];
+	char text[4096];
 	snprintf(text, sizeof(text),
 		"# PSGopher's own settings (Gopher64's are in config.json). The game list's Settings write\n"
 		"# this file; editing it over FTP works too.\n"
@@ -74,8 +78,16 @@ bool TitleSettings::save() const
 		"\n"
 		"# audio_buffer: the sound Gopher64 keeps queued, in VIs (a 60th of a second each): 2 is\n"
 		"# Gopher64's own (the least delay), 4 about Crux2's, 6 and 8 for more room (more delay)\n"
-		"audio_buffer = %d\n",
-		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer);
+		"audio_buffer = %d\n"
+		"\n"
+		"# shader_compile: parallel-rdp's shading pipelines for each state, until compiled drawn with\n"
+		"# the slower general one: 1 one background thread (Gopher64's), 4 four, now compiled when first\n"
+		"# needed (a short pause the first time; kept in the shader cache for the next start)\n"
+		"shader_compile = %s\n"
+		"# driver_thread: on records and submits the graphics commands on a thread of their own (Crux2's)\n"
+		"driver_thread = %s\n",
+		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
+		shaderCompile.c_str(), driverThread ? "on" : "off");
 	/* one write of a small file, beside it first */
 	const std::string path = file.empty() ? kTitleSettingsFile : file;
 	const std::string temporary = path + ".new";
@@ -120,6 +132,21 @@ void TitleSettings::applyHdr() const
 	/* (the audio buffer goes with it: the same moment, before each game) */
 	setenv("PSGOPHER_AUDIO_VIS", std::to_string(audioBuffer).c_str(), 1);
 	say("audio: %d VIs of sound kept queued (psgopher.ini: audio_buffer)", audioBuffer);
+	/* parallel-rdp's shading pipelines and the driver's thread: read when the game's device starts */
+	if (shaderCompile == "now") {
+		setenv("PARALLEL_RDP_FORCE_SYNC_SHADER", "1", 1);
+		unsetenv("PSGOPHER_RDP_COMPILE_THREADS");
+	} else {
+		unsetenv("PARALLEL_RDP_FORCE_SYNC_SHADER");
+		setenv("PSGOPHER_RDP_COMPILE_THREADS", shaderCompile.c_str(), 1);
+	}
+	if (driverThread)
+		setenv("RADV_THREADED_RECORDING", "1", 1);
+	else
+		unsetenv("RADV_THREADED_RECORDING");
+	say("rdp: shading pipelines %s; the driver %s", shaderCompile == "now" ? "compiled when first needed" :
+	    shaderCompile == "4" ? "compiled by four background threads" : "compiled by one background thread (Gopher64's)",
+	    driverThread ? "records on a thread of its own" : "records on the emulation thread");
 	if (!hdr) {
 		unsetenv("PSGOPHER_HDR");
 		return;

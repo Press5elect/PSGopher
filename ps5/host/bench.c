@@ -68,6 +68,24 @@ void psgopher_bench_rdp(uint64_t ticks)
    atomic_fetch_add_explicit(&live_rdp_ticks, ticks, memory_order_relaxed);
 }
 
+static _Atomic uint64_t live_dispatch_general, live_dispatch_special, compiles_asked, compiles_done, compiles_ticks;
+
+void psgopher_bench_shading_dispatch(int general)
+{
+   atomic_fetch_add_explicit(general ? &live_dispatch_general : &live_dispatch_special, 1, memory_order_relaxed);
+}
+
+void psgopher_bench_shader_compile_asked(void)
+{
+   atomic_fetch_add_explicit(&compiles_asked, 1, memory_order_relaxed);
+}
+
+void psgopher_bench_shader_compiled(uint64_t ticks)
+{
+   atomic_fetch_add_explicit(&compiles_ticks, ticks, memory_order_relaxed);
+   atomic_fetch_add_explicit(&compiles_done, 1, memory_order_relaxed);
+}
+
 void psgopher_bench_rdp_part(int part, uint64_t ticks)
 {
    if (part >= 0 && part < 3)
@@ -125,6 +143,14 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
       const uint64_t tsc = __rdtsc(), rdp_ticks = atomic_exchange(&live_rdp_ticks, 0);
       const double ticks_per_ns = (double)(tsc - live_tsc_start) / (double)span;
       live_now.rdp_ms = ticks_per_ns > 0 ? (double)rdp_ticks / ticks_per_ns / 1e6 / (double)live_frames : -1.0;
+      {
+         const uint64_t g = atomic_exchange(&live_dispatch_general, 0), sp = atomic_exchange(&live_dispatch_special, 0);
+         live_now.general_share = g + sp ? (double)g / (double)(g + sp) : -1.0;
+         const uint64_t asked = atomic_load(&compiles_asked), done = atomic_load(&compiles_done);
+         live_now.compiles_done = done;
+         live_now.compiles_waiting = asked > done ? asked - done : 0;
+         live_now.compile_ms = done && ticks_per_ns > 0 ? (double)atomic_load(&compiles_ticks) / ticks_per_ns / 1e6 / (double)done : 0.0;
+      }
       for (int i = 0; i < 3; i++) {
          const uint64_t part = atomic_exchange(&live_rdp_part_ticks[i], 0);
          live_now.rdp_part_ms[i] = ticks_per_ns > 0 ? (double)part / ticks_per_ns / 1e6 / (double)live_frames : -1.0;
@@ -160,6 +186,11 @@ void psgopher_video_reset(void)
    atomic_store(&live_rdp_ticks, 0);
    for (int i = 0; i < 3; i++)
       atomic_store(&live_rdp_part_ticks[i], 0);
+   atomic_store(&live_dispatch_general, 0);
+   atomic_store(&live_dispatch_special, 0);
+   atomic_store(&compiles_asked, 0);
+   atomic_store(&compiles_done, 0);
+   atomic_store(&compiles_ticks, 0);
    history_at = history_n = 0;
    live_now = (struct psgopher_live){ 0 };
    psgopher_sdl3_audio_stats audio;
@@ -182,10 +213,12 @@ static void video_heartbeat(uint64_t end_ns)
       psgopher_sdl3_audio_stats audio;
       psgopher_sdl3_audio_stats_read(&audio);
       say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms (RDP %.2f: draw %.2f, sync %.2f, frame %.2f), present wait %.2f ms, "
-          "RDRAM sync %.2f ms (%.1f); audio queue %llu, %llu underrun(s) in 10 s",
+          "RDRAM sync %.2f ms (%.1f); shading %.0f%% general (%llu compiled, %.0f ms each, %llu waiting); "
+          "audio queue %llu, %llu underrun(s) in 10 s",
           (unsigned long long)video_count, (double)span / 1e9, (double)video_count * 1e9 / (double)span,
           l.target_vis ? (double)video_count * 1e9 / (double)span / l.target_vis * 100.0 : 0.0, l.game_fps, l.cpu_ms,
-          l.rdp_ms, l.rdp_part_ms[0], l.rdp_part_ms[1], l.rdp_part_ms[2], l.present_ms, l.rdram_ms, l.rdram_waits, (unsigned long long)audio.queued_frames,
+          l.rdp_ms, l.rdp_part_ms[0], l.rdp_part_ms[1], l.rdp_part_ms[2], l.present_ms, l.rdram_ms, l.rdram_waits,
+          l.general_share < 0 ? 0.0 : l.general_share * 100.0, l.compiles_done, l.compile_ms, l.compiles_waiting, (unsigned long long)audio.queued_frames,
           (unsigned long long)(audio.underrun_grains - video_underruns_at));
       video_underruns_at = audio.underrun_grains;
       video_since_ns = end_ns;

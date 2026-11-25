@@ -1,0 +1,94 @@
+diff --git a/parallel-rdp/rdp_renderer.cpp b/parallel-rdp/rdp_renderer.cpp
+index b6d755f..61c8711 100644
+--- a/parallel-rdp/rdp_renderer.cpp
++++ b/parallel-rdp/rdp_renderer.cpp
+@@ -36,6 +36,14 @@
+ #include "shaders/slangmosh.hpp"
+ #endif
+ 
++#ifdef PSGOPHER
++// PSGopher (PS5): the boot log's shading figures (ps5/host/bench.c)
++#include <x86intrin.h>
++extern "C" void psgopher_bench_shading_dispatch(int general);
++extern "C" void psgopher_bench_shader_compile_asked(void);
++extern "C" void psgopher_bench_shader_compiled(uint64_t tsc_ticks);
++#endif
++
+ namespace RDP
+ {
+ Renderer::Renderer(CommandProcessor &processor_)
+@@ -71,6 +79,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
+ 			Granite::Global::create_thread_context(), { device }));
+ #else
+ 	pipeline_worker.reset(new WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>({ device }));
++#ifdef PSGOPHER
++	if (const char *threads = getenv("PSGOPHER_RDP_COMPILE_THREADS"))
++	{
++		const long n = std::min(8l, std::max(1l, strtol(threads, nullptr, 0)));
++		for (long i = 1; i < n; i++)
++			psgopher_workers.emplace_back(new WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>({ device }));
++	}
++#endif
+ #endif
+ 
+ #ifdef PARALLEL_RDP_SHADER_DIR
+@@ -1906,11 +1922,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+ 			if (pending_async_pipelines.count(compile.hash) == 0)
+ 			{
+ 				pending_async_pipelines.insert(compile.hash);
++#ifdef PSGOPHER
++				psgopher_bench_shader_compile_asked();
++				const unsigned worker = psgopher_next_worker++ % unsigned(psgopher_workers.size() + 1);
++				if (worker == 0)
++					pipeline_worker->push(std::move(compile));
++				else
++					psgopher_workers[worker - 1]->push(std::move(compile));
++#else
+ 				pipeline_worker->push(std::move(compile));
++#endif
+ 			}
++#ifdef PSGOPHER
++			psgopher_bench_shading_dispatch(1);
++#endif
+ 			cmd.set_specialization_constant_mask(7);
+ 			cmd.set_specialization_constant(2, scale_log2_bit);
+ 		}
++#ifdef PSGOPHER
++		else
++			psgopher_bench_shading_dispatch(0);
++#endif
+ 
+ 		cmd.dispatch_indirect(*indirect_dispatch_buffer, 4 * sizeof(uint32_t) * i);
+ 	}
+@@ -3677,8 +3709,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
+ 
+ void Renderer::PipelineExecutor::perform_work(const Vulkan::DeferredPipelineCompile &compile) const
+ {
++#ifdef PSGOPHER
++	const uint64_t psgopher_begin = __rdtsc();
++#endif
+ 	auto start_ts = device->write_calibrated_timestamp();
+ 	Vulkan::CommandBuffer::build_compute_pipeline(device, compile, Vulkan::CommandBuffer::CompileMode::AsyncThread);
++#ifdef PSGOPHER
++	psgopher_bench_shader_compiled(__rdtsc() - psgopher_begin);
++#endif
+ 	auto end_ts = device->write_calibrated_timestamp();
+ 	device->register_time_interval("RDP Pipeline", std::move(start_ts), std::move(end_ts),
+ 	                               "pipeline-compilation");
+diff --git a/parallel-rdp/rdp_renderer.hpp b/parallel-rdp/rdp_renderer.hpp
+index c31b1ac..e43fcde 100644
+--- a/parallel-rdp/rdp_renderer.hpp
++++ b/parallel-rdp/rdp_renderer.hpp
+@@ -478,6 +478,12 @@ private:
+ 	};
+ 
+ 	std::unique_ptr<WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>> pipeline_worker;
++#ifdef PSGOPHER
++	// PSGopher (PS5): more compile threads (PSGOPHER_RDP_COMPILE_THREADS, 1-8), the compiles handed
++	// round; until a specialised shading pipeline is compiled its dispatches take the general one
++	std::vector<std::unique_ptr<WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>>> psgopher_workers;
++	unsigned psgopher_next_worker = 0;
++#endif
+ 
+ 	void resolve_coherency_host_to_gpu(Vulkan::CommandBuffer &cmd);
+ 	void resolve_coherency_gpu_to_host(CoherencyOperation &op, Vulkan::CommandBuffer &cmd);

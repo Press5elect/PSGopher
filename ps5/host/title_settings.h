@@ -18,6 +18,9 @@ struct TitleSettings {
 	int hdrPeak{ 1000 };         // nits, 0 (off) or up to 4000
 	bool stats{ false };         // the stats overlay in a game
 	int audioBuffer{ 4 };        // the audio Gopher64 keeps queued, in VIs (2 is its own; 4, 6, 8)
+	std::string shaderCompile{ "1" }; // parallel-rdp's specialised shading pipelines: "1" one background
+	                                  // thread (Gopher64's), "4" four, "now" compiled when first needed
+	bool driverThread{ false };  // RADV records and submits on a thread of its own (Crux2's switch)
 	std::string file;            // "" is /data/psgopher/config/psgopher.ini (the host tests give another)
 
 	/* Reads the file (written with the defaults when it is missing). */

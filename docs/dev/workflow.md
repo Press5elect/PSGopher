@@ -21,9 +21,10 @@ The owner's standing rules. They hold for every session and every agent.
    (it is in `.gitignore`), no links to chat sessions in commits or documents.
 5. **No game titles** in commits, changelog entries, release notes or documents: cartridge IDs only
    (the header's game code, e.g. `NXXE`). **No model identifiers** in anything pushed.
-6. **Gopher64 is a pinned revision plus one patch.** `vendor/gopher64` is gitignored. Edit it, then
-   `ps5/tools/fetch-gopher64.sh --export` and `--check` (the patch applies to a fresh checkout at
-   the pin). A change to `vendor/gopher64` that is not exported is lost.
+6. **Gopher64 is a pinned revision plus its patches**: `ps5.patch`, and `parallel-rdp.patch` for the
+   parallel-rdp submodule. `vendor/gopher64` is gitignored. Edit it, then
+   `ps5/tools/fetch-gopher64.sh --export` and `--check` (both apply to a fresh checkout at the pin).
+   A change to `vendor/gopher64` that is not exported is lost.
 7. **Keep the attributions**: `NOTICE` (OGBox and Crux2 by Press5elect, section 7(b)), the credits
    in the README, the font licences shipped in `licenses/`.
 8. **No games, BIOS, saves or keys** in the repository or a package; files the owner uploads are
@@ -94,7 +95,7 @@ The owner's standing rules. They hold for every session and every agent.
 | --- | --- |
 | `ps5/tools/check-sources.sh` | Every pin against its upstream (rule 1) |
 | `ps5/tools/build.sh [--compile]` | The title into `dist/PPSA99280/` |
-| `ps5/tools/fetch-gopher64.sh [--export\|--check]` | Gopher64 at the pin with `ps5.patch`; the patch written back; checked on a fresh checkout |
+| `ps5/tools/fetch-gopher64.sh [--export\|--check]` | Gopher64 at the pin with `ps5.patch` and `parallel-rdp.patch`; both written back; checked on a fresh checkout |
 | `ps5/tools/build-core.sh` | The core alone (`build/core/.../libgopher64.a`) |
 | `ps5/tools/build-deps.sh` | libsmb2, libnfs, Dear ImGui, the fonts at their pins |
 | `ps5/tools/make-board-art.mjs` | The board's picture from `ps5/art/live-board.html` |

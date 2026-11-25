@@ -7,7 +7,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | Problem | Evidence | Next step |
 | --- | --- | --- |
-| 8x upscale slows demanding games | one NTSC game: 64% at 8x, 93-100% at 1x (parallel-rdp 7.8 ms a VI against 0.5-1.2) ([`performance.md`](performance.md#first-console-observations)) | measure 2x and 4x; the core takes 11-15 ms a VI in that game, so PGO is the next candidate for it. Time-stretched sound (Crux2's) for what stays below full speed |
+| 8x upscale slows demanding games | one NTSC game: 64% at 8x, 93-100% at 1x (parallel-rdp 7.8 ms a VI against 0.5-1.2: the emulation thread waits for a GPU more than 32 render passes behind) ([`performance.md`](performance.md#first-console-observations)) | the next log's `shading x% general`: Gopher64 compiles each state's specialised shading pipeline on one thread and shades with the slower general one meanwhile; BENCH's `4 threads` and `At once` against `1 thread` at 8x. Then GPU timestamps if that is not it. The core's 11-15 ms a VI in that game: PGO |
 | The front end's remaining defects | [`../frontend-audit/BUGS.md`](../frontend-audit/BUGS.md) (FE-001 to FE-004 and FE-031 fixed, see `CHANGELOG.md`) | in the order of [`../frontend-audit/ROADMAP.md`](../frontend-audit/ROADMAP.md), FE-005 next |
 | The USB search uses its whole budget (60,000 entries) at every start | boot logs 2026-11-25 (5.7-34.7 s before the share is searched) | measure which folders take it; skip known non-game folders or search places in parallel |
 | The first search of a large share is slow (1,424 ROMs: 55.6 s, headers read over SMB) | boot log 2026-11-25 | later starts read `library.tsv`; measure again before changing anything |
@@ -21,6 +21,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 | The two-controller tap | `93a4309` | hold the touch pad with a second controller connected: no quick menu |
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
 | Descriptions of the N64's years only | this commit | the 1997 game's description for its cartridge |
+| Shader compiles on 4 threads or at once; the driver's own thread | this commit | the `video:` line's shading share and speed at 8x with each |
 | Cheats applied to a game | `33c8907` | a cheat on, the game started from the board |
 | The stats overlay | `33c8907` | the quick menu's Stats overlay in a game (the `video:` and `rdp:` lines have run) |
 | The quick menu's reset, and loading a probe from it | `d7010d1` | the quick menu in a game (resume, eject, taking a probe and starting from one on the board have run) |

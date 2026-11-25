@@ -107,5 +107,7 @@ ps5/tools/fetch-gopher64.sh --export
 ps5/tools/fetch-gopher64.sh --check
 ```
 
-The first writes `ps5/patches/gopher64/ps5.patch`, the second applies it to a fresh checkout at the
-pin. A change that is not exported is lost at the next fetch.
+The first writes `ps5/patches/gopher64/ps5.patch`, and `parallel-rdp.patch` for the changes inside
+the parallel-rdp submodule (`parallel-rdp/parallel-rdp-standalone`, at the commit Gopher64's pin
+records; `ps5.patch` leaves it out); the second applies both to a fresh checkout at the pin. A
+change that is not exported is lost at the next fetch.

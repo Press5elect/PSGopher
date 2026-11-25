@@ -20,6 +20,11 @@ void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns);
 void psgopher_bench_rdram_wait(uint64_t ns);
 void psgopher_bench_rdp(uint64_t tsc_ticks); /* the emulation thread's time in parallel-rdp */
 void psgopher_bench_rdp_part(int part, uint64_t tsc_ticks); /* 0 drawing commands, 1 syncs, 2 the frame */
+/* parallel-rdp's shading: a dispatch with its specialised pipeline (0) or the general one while that
+ * compiles (1); a compile asked for; one done and its time */
+void psgopher_bench_shading_dispatch(int general);
+void psgopher_bench_shader_compile_asked(void);
+void psgopher_bench_shader_compiled(uint64_t tsc_ticks);
 
 /* PSGopher: the quick menu's live figures, the last whole second's: frames shown a second, the
  * emulation thread's CPU time a frame (its waits are none), the present's wait a frame
@@ -29,6 +34,9 @@ struct psgopher_live {
    double rdram_ms, rdram_waits;  /* RDRAM syncs' wait a VI, and how many */
    double rdp_ms;                 /* of the CPU time, parallel-rdp's (commands, the frame's render); -1 unknown */
    double rdp_part_ms[3];         /* of that: drawing commands, SyncFull's submissions, the frame's render */
+   double general_share;          /* shading dispatches with the general pipeline, 0..1 (-1 none) */
+   unsigned long long compiles_done, compiles_waiting; /* specialised pipelines: compiled, still asked for */
+   double compile_ms;             /* their average compile time */
    double speed;                  /* VIs a second against the console's 50 or 60, in % */
    unsigned game_fps, target_vis; /* pictures the game drew a second (Gopher64's count); 50 or 60 */
    unsigned long long audio_queue, audio_underruns;

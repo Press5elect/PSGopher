@@ -100,8 +100,16 @@ console: the cheats, variable refresh, HDR10.
 - Fixed: a cartridge got the description of a later game of the same name: an article whose title
   or description gives a year outside the N64's (1995-2004) is not taken; the earlier ones are
   asked again.
-- Changed: BENCH's video stage says what the log showed: 8x costs the console the most and a
-  demanding game can slow down (64% at 8x, 93-100% at 1x in one game).
+- Added: how parallel-rdp makes its shading pipelines (BENCH's video stage, `shader_compile`): until
+  a state's specialised pipeline is compiled, its pixels are shaded by the slower general one, and
+  Gopher64 compiles them on one background thread; four threads, or each compiled when first
+  needed, are the choices (one thread stays the default). The `video:` line gives the share of
+  shading done with the general pipeline and the compiles (done, time each, waiting). One game ran
+  at 64% at 8x and 93-100% at 1x; this says whether the general pipeline is why.
+- Added: the driver's own recording thread (BENCH, `driver_thread`; Crux2's `RADV_THREADED_RECORDING`),
+  off by default.
+- Changed: `fetch-gopher64.sh` exports the parallel-rdp submodule's changes as
+  `ps5/patches/gopher64/parallel-rdp.patch` (`ps5.patch` leaves the submodule out).
 
 ### Console fixes (from the third console log, 2026-11-25)
 

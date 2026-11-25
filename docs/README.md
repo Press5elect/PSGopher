@@ -47,5 +47,5 @@ The multi-agent audit of the front end (2026-11-25). Its bug IDs (`FE-nnn`) are 
 | Where | What |
 | --- | --- |
 | `ps5/art/live-board.html` | The front end's design: the specification D17 follows |
-| `ps5/patches/gopher64/ps5.patch` | Every change to Gopher64 ([`dev/building.md`](dev/building.md#pins)) |
+| `ps5/patches/gopher64/ps5.patch`, `parallel-rdp.patch` | Every change to Gopher64, and to its parallel-rdp submodule ([`dev/building.md`](dev/building.md#pins)) |
 | `NOTICE` | Attributions (OGBox and Crux2 by Press5elect) and every other author |
