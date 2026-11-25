@@ -8,6 +8,9 @@
 #             link that one).
 #   libnfs    NFS shares for ps5vfs: its master, with Crux2's flags (Crux2 pins 7613236, 8.0.0+4).
 #   imgui     Dear ImGui, the game list's drawing (ps5/host/menu.cpp), with its Vulkan backend: master.
+#   fonts     the Live Board's faces (SIL Open Font License 1.1), only their TTF files: Bricolage
+#             Grotesque ExtraBold (ateliertriay/bricolage) and JetBrains Mono Regular, SemiBold and
+#             ExtraBold (JetBrains/JetBrainsMono), each at its head
 #
 # Newest of each, as the owner's rule asks; check-sources.sh says when one moved on.
 #
@@ -24,6 +27,8 @@ mkdir -p "$src" "$sys/include" "$sys/lib" "$bld"
 libsmb2_revision=5fdd128012b384ed2a79293611d7f7dbaaa84cc7   # master, 2026-11-25
 libnfs_revision=3fb4f2a299cef533115d1658fe8261144b2f3e18    # master, 2026-11-25
 imgui_revision=667c01946451f71f7852aeda8acbdf41d1b9f36a     # master, 2026-11-25 (after v1.93.0)
+bricolage_revision=84745e5b96261ae5f8c6c856e262fe78d1d6efdd # HEAD, 2026-11-25
+jetbrains_mono_revision=19371302b95d218af43299bce79ddbddd0bc364d # HEAD, 2026-11-25
 
 step() { echo "==> [deps] $1" >&2; }
 fetch() { # name url revision
@@ -39,6 +44,24 @@ fetch() { # name url revision
     echo "$revision" > "$src/$name/.psgopher-revision"
     rm -f "$bld/$name.done"
 }
+# a repository's files only (blobs fetched on demand): name url revision paths...
+fetch_files() {
+    local name=$1 url=$2 revision=$3
+    shift 3
+    if [[ $(cat "$src/$name/.psgopher-revision" 2>/dev/null) == "$revision" ]]; then return; fi
+    step "fetching $name ${revision:0:12} ($*)"
+    rm -rf "${src:?}/$name"
+    mkdir -p "$src/$name"
+    git -C "$src/$name" init -q
+    git -C "$src/$name" remote add origin "$url"
+    git -C "$src/$name" fetch -q --depth 1 --filter=blob:none origin "$revision"
+    git -C "$src/$name" -c advice.detachedHead=false checkout -q FETCH_HEAD -- "$@"
+    echo "$revision" > "$src/$name/.psgopher-revision"
+}
+fetch_files bricolage https://github.com/ateliertriay/bricolage "$bricolage_revision" \
+    fonts/ttf/BricolageGrotesque-ExtraBold.ttf OFL.txt
+fetch_files jetbrains-mono https://github.com/JetBrains/JetBrainsMono "$jetbrains_mono_revision" \
+    fonts/ttf/JetBrainsMono-Regular.ttf fonts/ttf/JetBrainsMono-SemiBold.ttf fonts/ttf/JetBrainsMono-ExtraBold.ttf OFL.txt
 fetch libsmb2 https://github.com/sahlberg/libsmb2 "$libsmb2_revision"
 fetch libnfs https://github.com/sahlberg/libnfs "$libnfs_revision"
 fetch imgui https://github.com/ocornut/imgui "$imgui_revision"

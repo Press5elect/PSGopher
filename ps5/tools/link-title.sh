@@ -113,6 +113,9 @@ cp "$param" "$app/sce_sys/param.json"
 cp "$root/ps5/sce_sys/icon0.png" "$app/sce_sys/icon0.png"
 # the sandbox exit's helper, sent to the payload loader from /app0 (ps5/host/sandbox.cpp)
 cp "$root/build/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
+# the front end's pictures (ps5/art: the Live Board's mainboard, made by make-board-art.mjs, and the logo)
+mkdir -p "$app/art"
+cp "$root/ps5/art/board.png" "$root/ps5/art/logo.png" "$app/art/"
 # the attributions kept and the other authors' parts (NOTICE)
 cp "$root/NOTICE" "$app/NOTICE.txt"
 (cd "$vulkan/runtime" && sha256sum --check --strict --quiet libc.prx.sha256)
