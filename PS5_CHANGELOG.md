@@ -14,5 +14,7 @@ Nothing here has run on a console yet.
   the ROM from `autostart.txt` or `roms/`, the shell exit. Links through PS5_Vulkan's RADV recipe
   (RADV at PS5 Mesa `1ba9874`); every import resolves to a module a title loads.
 - Added: the console probe (`probe.txt`) and the benchmark mode (`benchmark.txt`).
+- Changed: the console icon is Gopher64's gopher logo on PSGopher's dark ground (`ps5/sce_sys/icon0.png`,
+  made from Gopher64's `data/icon/gopher64.png`).
 - Changed (Gopher64, in `ps5.patch`): `config.json` and the cheats file are written through a
   buffer: a `write()` costs about 3.3 ms on the console (PS5_PayloadSDK's PROBE.md).

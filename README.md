@@ -32,6 +32,7 @@ No games, BIOS or other copyrighted data are included.
 ## Licence and credits
 
 GPL-3.0 (see `LICENSE`), as Gopher64. Gopher64 is by Logan McNaughton and its contributors;
+the gopher logo is Gopher64's (`data/icon` in its repository, GPL-3.0), used for PSGopher's icon;
 parallel-rdp by Hans-Kristian Arntzen (MIT); rcheevos by the RetroAchievements team (MIT);
 stb_truetype by Sean Barrett (public domain/MIT). The PS5 layer in `ps5/host/platform*` is from
 Mihawk's PS5 Vulkan Template (MIT); RADV is Mesa's (MIT) through Mihawk's PS5_Mesa and
