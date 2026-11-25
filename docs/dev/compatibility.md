@@ -1,7 +1,6 @@
 # PSGopher: compatibility
 
 Games are named only by their cartridge ID (the ROM header's game code at 0x3B) and region.
-No game has run on PSGopher yet.
 
 ## Principle
 
@@ -53,7 +52,7 @@ driver; it says nothing about RADV on the console, which is what the console run
 
 | ID | Boots | Plays | Saves | States | Full speed | Notes |
 | --- | --- | --- | --- | --- | --- | --- |
-| (none yet) | | | | | | |
+| (PAL, ID not logged; 2026-11-25) | yes | yes | not tried | not tried | no: 51-85% ([`performance.md`](performance.md#first-console-observations)) | audio choppy |
 
 ## Checks per release
 

@@ -1,7 +1,8 @@
 # PSGopher: performance
 
-No PSGopher number has been measured on a console yet. This document holds the method, the
-instrumentation, the baseline when it exists, and one entry per optimisation.
+No benchmark has been run on a console yet; the first game runs gave the observations below. This
+document holds the method, the instrumentation, the baseline when it exists, and one entry per
+optimisation.
 
 ## Method
 
@@ -10,7 +11,7 @@ instrumentation, the baseline when it exists, and one entry per optimisation.
 2. **One change at a time**, each built and run against the same baseline build in the same
    session, at least three runs each; the median is reported with the spread.
 3. **Keep or revert**: a change stays only with a measured gain larger than the run-to-run spread
-   and no accuracy change (the compatibility checks in PS5_COMPATIBILITY.md). Rejected changes stay
+   and no accuracy change (the compatibility checks in compatibility.md). Rejected changes stay
    documented here.
 4. **Separate the clocks**: wall time (`CLOCK_MONOTONIC`), the thread's own CPU time
    (`CLOCK_THREAD_CPUTIME_ID`, [unknown] on the console: probed at boot), emulated cycles
@@ -72,6 +73,15 @@ against it, a std `Mutex`/`Condvar` ping-pong across two threads (FreeBSD's `_um
 OGBox's figures (~1 kHz time-call resolution, `Sleep(1)` ~1.07 ms) are from its Windows-API
 emulation layer and are not used here.
 
+## First console observations
+
+Not a baseline (no benchmark mode, no fixed scene): what the owner's boot logs show.
+
+| Date, build | Game | Observation |
+| --- | --- | --- |
+| 2026-11-25, `d7010d1` | a PAL game (its ID was not logged) | 25.4-42.7 VIs a second against 50 over 25 ten-second windows, mostly ~28: 51-85% of full speed, mostly ~56%; the owner hears choppy audio. The log then had no CPU/present/RDRAM split; `33c8907` adds it to the `video:` line and the stats overlay, so the next log says which of them takes the time |
+| 2026-11-25, `d7010d1` | — | The library's first search of an SMB share with 1,424 ROMs took 55.6 s (headers read over the network); later starts read `library.tsv` |
+
 ## Baseline
 
 Not measured yet.
@@ -83,4 +93,4 @@ decision. None yet.
 
 ## Candidates, ranked
 
-See PS5_PORTING_ANALYSIS.md section 5. None is started before the baseline exists.
+See ../history/porting-analysis.md section 5. None is started before the baseline exists.

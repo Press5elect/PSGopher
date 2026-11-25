@@ -1,18 +1,28 @@
 # PSGopher: architecture
 
 How the port is put together, and why. Decisions are numbered (D1...) and referenced from code
-comments and the changelog. Labels as in PS5_PORTING_ANALYSIS.md.
+comments and the changelog. Labels as in ../history/porting-analysis.md.
 
 ## The layers
 
 ```text
   eboot.bin (PPSA99280, provisional)
   ├── ps5/host/            the title: main(), folders, the sandbox exit, the shell exit       C/C++
+  │   ├── main.cpp         start, the boot log, the menu <-> game loop                         C++
   │   ├── platform.c       PS5 Vulkan Template's PS5 layer (MIT): klog, splash, pads, audio    C
-  │   ├── menu.cpp         the game list and its settings: Dear ImGui on RADV (D16)           C++
+  │   ├── crash.c          the crash report in the boot log (Crux2's)                          C
+  │   ├── rust_abi.c       FreeBSD 12 -> 11 converters for Rust's stat/fstat/readdir/kevent     C
+  │   ├── menu.cpp         the front end's display, textures, pad and loop; share screens (D17) C++
+  │   ├── frontend.cpp     the Live Board: HOME, RACK, BENCH, panel, pickers (D17)             C++
+  │   ├── board.cpp        the mainboard: projection, labels, moving parts (D17)               C++
+  │   ├── quickmenu.cpp    the in-game quick menu and stats overlay (D17, D11)                 C++
+  │   ├── web.cpp          covers and descriptions: fetch thread and cache (D18)               C++
+  │   ├── image.cpp        PNG decoding (stb_image)                                             C++
   │   ├── library.cpp      the games found on the console, USB drives and shares (D16)        C++
+  │   ├── title_settings.cpp  psgopher.ini: display, HDR10, stats (D14)                        C++
+  │   ├── bench.c          benchmark mode and the live stats (D11)                             C
   │   ├── sandbox.cpp      out of the sandbox, OGBox's (D15); ps5/elevation: its helper       C++
-  │   └── shares.cpp       the network shares as the list edits them, OGBox's (D15)           C++
+  │   └── shares.cpp       the network shares as the front end edits them, OGBox's (D15)      C++
   ├── ps5/vfs/             ps5vfs: SMB, NFS and FTP mounts as paths (Crux2's, by OGBox) (D15)  C++
   ├── ps5/sdl3/            libpsgopher_sdl3.a: the SDL3 + SDL3_ttf functions Gopher64 calls,  C++
   │                        on the PS5 layer, RADV's VK_KHR_display and stb_truetype
@@ -55,8 +65,9 @@ vendor value would trip `unexpected_cfgs`).
 **D4. One emulation thread, as upstream.** The title's main thread runs Gopher64's `run()` and so
 the machine, as on the desktop. The pad is read on that thread (`SDL_PumpEvents`, called by
 Gopher64 once a frame). Audio plays from the PS5 layer's own thread (256-frame grains, 48 kHz),
-pulling from the `SDL_AudioStream` ring. Tokio's workers are limited (`TOKIO_WORKER_THREADS`) since
-they only write files here. Thread placement is a measured optimisation (PS5_PERFORMANCE.md), not
+pulling from the `SDL_AudioStream` ring. Tokio's whole runtime is refused by the console
+(EOPNOTSUPP, 2026-11-25): `psgopher::build_runtime` builds its scheduler and timers only (no I/O
+driver), which is all Gopher64 needs here (file writes, timers); the USB cartridge's TCP link is off. Thread placement is a measured optimisation (performance.md), not
 a default yet.
 
 **D5. Display.** `SDL_Vulkan_CreateSurface` makes a `VK_KHR_display` plane surface on the
@@ -88,15 +99,20 @@ throttling lesson applies to bulk writes, which Gopher64 does not make).
 FTZ start state is corrected exactly where it matters. Every other thread keeps the console's
 state; none computes guest floating point.
 
-**D10. Networking off.** Netplay, RetroAchievements and Discord compile (pure Rust/C) but are
-never started: the console's networking is unproven for titles (platform contract), and they are
-off unless configured or asked for on the command line.
+**D10. Gopher64's online features off.** Netplay, RetroAchievements and Discord compile (pure
+Rust/C) but are never started: they need Tokio's I/O driver, which the console refuses (D4), and
+they are off unless configured or asked for on the command line. The title's own network use is
+the shares (D15) and the covers and descriptions (D18), both on blocking sockets.
 
 **D11. Instrumentation from the start.** `ps5/host/bench.c`: presents and their spread, time
 blocked in present, the emulation thread's CPU time, `rdp_check_rdram` waits, audio underruns,
 one klog line a second and a CSV written once at the end, enabled by
 `/data/psgopher/benchmark.txt`; a probe of std, Tokio and the clocks by `probe.txt`
-(PS5_PERFORMANCE.md). Both are test files the launch reads, never defaults.
+([`performance.md`](performance.md)). Both are test files the launch reads, never defaults. Always on
+and cheap: the live stats (`psgopher_live_read`, fed by the same hooks), the `video:` line in the boot
+log every 10 s (VIs, speed against the target, the game's own frame rate, CPU and present time a VI,
+RDRAM syncs, audio queue and underruns), the RDRAM path parallel-rdp took, and the quick menu's stats
+overlay (`stats = on` in `psgopher.ini`).
 
 **D12. Link.** PS5_Vulkan's recipe unchanged, with Crux2's `--no-dynamic-linker -z
 nodynamic-undefined-weak` (Mesa's weak entry points must not become imports), and PSGopher's own
@@ -135,15 +151,32 @@ helper (`sandbox-elevator.elf`, OGBox's `ps5/elevation` with PSGopher's title ID
 payload loader on port 9021) for the console's whole file system (`ps5/host/sandbox.cpp`, OGBox's
 unchanged), finds the title folder again (it is no longer `/app0`), and from then on gives the
 driver the folder's `param.json` (`PS5_VIDEOOUT_PARAM_JSON`; `/dev/null` at 60 Hz, as OGBox) and
-ps5vfs its stand-in file. `elevation-off.txt` in the title folder keeps it in the sandbox (Settings
-> Storage writes it). Network shares are Crux2's ps5vfs as OGBox has it (`ps5/vfs`: SMB through
+ps5vfs its stand-in file. `elevation-off.txt` in the title folder keeps it in the sandbox (BENCH,
+This console writes it). Network shares are Crux2's ps5vfs as OGBox has it (`ps5/vfs`: SMB through
 libsmb2, NFS through libnfs, mounted at `/smb/<name>`) with OGBox's share list
-(`ps5/host/shares.cpp`): `/data/psgopher/config/network.cfg`, written by the list as shares are
+(`ps5/host/shares.cpp`): `/data/psgopher/config/network.cfg`, written by the front end as shares are
 added, changed or removed, mounted at the start. Gopher64 reads its ROM with `std::fs`, which knows
 nothing of ps5vfs: a share's ROM is copied to `/data/psgopher/cache/play` (one at a time; a ROM is
 at most 64 MiB) and that path is played. Saves are named by the ROM's hash, so they are the same
 wherever the ROM is. On the console: the helper and the file layer run in OGBox and Crux2 [console];
 with PSGopher's title ID [unknown] until the first run.
+
+**D16. The game library.** Every ROM found (`.z64 .n64 .v64`, a `.zip` whose first file is one, a
+`.7z` in a folder named for the N64 or in `roms/`): the console's `/data` (`/data/psgopher/roms`
+first), `/mnt/usb0-7`, `/mnt/ext0-1` and every share, each searched five folders deep on a thread,
+with a budget per place (`ps5/host/library.cpp`). The list is kept in `cache/library.tsv` (with each
+ROM's header facts: game ID, lockout chip, save type, pak, CRC key) so a start shows it at once, and
+searched again in the background; play time is `cache/played.tsv`. The front end (D17) draws it on a
+Vulkan device of its own (volk, RADV, the display's plane surface through `ps5/sdl3`), made before
+the menu and ended before the game, so Gopher64's parallel-rdp makes its own as on the desktop; the
+display (VideoOut) stays open across both. Settings are each one's own file, so they persist and
+agree: Gopher64's are its `config.json`, read and written through Gopher64's own `Config`
+(`psgopher_setting_get/set` in `psgopher.rs`), PSGopher's are `psgopher.ini`
+(`ps5/host/title_settings.cpp`). Refresh takes effect at the next start (the display opens once);
+HDR10 at the next game, and a game turns HDR10 off as it ends, so the menu is SDR. A game ends with
+the quick menu's Eject or Gopher64's quit (OPTIONS with the touch pad) and the menu comes back;
+Gopher64 runs again in the same process, as its Android build does. The host tests draw the menu
+offscreen through the PC's Vulkan with a scripted pad (`ps5/tests/test_menu.cpp`, PSGOPHER_MENU_HOST).
 
 **D17. The front end is the Live Board.** The design the owner chose (`ps5/art/live-board.html`)
 is the specification: its stage (1920x1080, doubled at 4K), its board canvas (2000x1250), its CSS 3D
@@ -155,26 +188,20 @@ design's drawDynamic) are drawn in board pixels and projected with it. Labels ar
 generator, clipped as polygons so one label can be flat or seated in the slot. Everything else is
 Dear ImGui draw lists (`frontend.cpp`), the pad read directly. The panel shows what Gopher64 makes
 of the cartridge (D16's facts), not guesses. In a game the quick menu (`quickmenu.cpp`) is the
-design's LIVE panel, drawn over the frame through parallel-rdp's device.
+design's LIVE panel, drawn over the frame through parallel-rdp's device. Cheats are Gopher64's own database
+(`psgopher_cheats_of`/`psgopher_cheat_set` in `psgopher.rs`, keyed by the header's CRCs); the region's
+flag is drawn from the header's country code; covers and descriptions are D18.
 
-**D16. The game list.** Between games the title shows a list of every ROM found (`.z64 .n64 .v64`,
-a `.zip` whose first file is one, a `.7z` in a folder named for the N64 or in `roms/`): the console's
-`/data` (`/data/psgopher/roms` first), `/mnt/usb0-7`, `/mnt/ext0-1` and every share, each searched
-five folders deep on a thread, with a budget per place (`ps5/host/library.cpp`); the list is kept in
-`cache/library.tsv` so a start shows it at once, and searched again in the background. Tabs Internal,
-USB and Network (L1/R1, Crux2's and OGBox's places), Cross plays, Triangle searches again, OPTIONS
-opens the settings, Square (Network) manages the shares with an on-screen keyboard and a search for
-SMB servers. Drawing: Dear ImGui with its Vulkan backend on a device of the list's own (volk, RADV,
-the display's plane surface through `ps5/sdl3`), made before the list and ended before the game, so
-Gopher64's parallel-rdp makes its own as on the desktop; the display (VideoOut) stays open across
-both. Settings are each one's own file, so they persist and agree: Gopher64's are its
-`config.json`, read and written through Gopher64's own `Config` (`psgopher_setting_get/set` in
-`psgopher.rs`, the patch), PSGopher's are `psgopher.ini` (`ps5/host/title_settings.cpp`). Refresh
-takes effect at the next start (the display opens once); HDR10 at the next game, and a game turns
-HDR10 off as it ends, so the list is SDR. A game ends with Gopher64's quit (OPTIONS with the touch
-pad) and the list comes back; Gopher64 runs again in the same process, as its Android build does.
-The host tests draw the list offscreen through the PC's Vulkan with a scripted pad
-(`ps5/tests/test_menu.cpp`, PSGOPHER_MENU_HOST).
+**D18. Covers and descriptions from the network.** A cartridge's label is its box art from the
+libretro-thumbnails N64 set (No-Intro names, from GitHub: thumbnails.libretro.com answered 404 for
+every N64 name, 2026-11-25), its panel three lines of its Wikipedia summary (search, then the first
+result described as a video game, as OGBox does). `ps5/host/web.cpp` asks for what the front end
+shows, newest first, on one thread, and keeps everything in `/data/psgopher/cache/covers` (a `.none`
+file when there is none, asked again after 30 days; a minute's rest after a network failure). The
+fetches are the core's (`psgopher_cover`, `psgopher_about` in `psgopher.rs`): rustls over a blocking
+`std::net::TcpStream` with webpki-roots' certificates, because Tokio's sockets are refused (D4) and the
+console has no certificate store. Covers become textures one per frame, at most 48 kept. Not yet run
+on a console.
 
 ## Milestones
 
@@ -182,7 +209,7 @@ The host tests draw the list offscreen through the PC's Vulkan with a scripted p
 | --- | --- | --- |
 | M1 | Gopher64's library cross-compiles for the target | [here] done 2026-11-24 |
 | M2 | The title links through `radv-link.sh` and packages to `eboot.bin` with every import resolved | [here] done 2026-11-24: 351 imports, all from modules a title loads |
-| M3 | On the console: launch, klog, splash, display, pad detected, a tone through audio, shell exit | a console run (owner) |
-| M4 | A ROM boots and plays: video, audio, pad, saves | a console run per game (owner) |
+| M3 | On the console: launch, klog, splash, display, pad detected, a tone through audio, shell exit | done 2026-11-25 (the owner's boot logs): also the sandbox exit, an SMB share, USB drives |
+| M4 | A ROM boots and plays: video, audio, pad, saves | in progress: a PAL game plays, at 51-85% of full speed (mostly ~56%) with choppy audio (2026-11-25; [`performance.md`](performance.md#first-console-observations)) |
 | M5 | Benchmark mode numbers per game, baseline recorded | console runs |
-| M6+ | One optimisation at a time, kept only with a measured gain | PS5_PERFORMANCE.md entries |
+| M6+ | One optimisation at a time, kept only with a measured gain | performance.md entries |

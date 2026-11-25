@@ -2,8 +2,8 @@
 
 Every dependency of Gopher64 at the pin (`5cf32936c8b4`), what it needs from the platform, and
 what happens to it on the PS5. "Compiles" means [here]: it built for `x86_64-sie-ps5` on
-2026-11-24 with Rust nightly 2026-11-23 and the payload SDK fork `88d6e41`. Nothing in this table
-has run on a console.
+2026-11-24 with Rust nightly 2026-11-23 and the payload SDK fork `88d6e41`. Marked [console] where a
+console run (2026-11-25) showed it.
 
 ## Submodules
 
@@ -35,7 +35,7 @@ or a call is left) to `ps5/host/rust_abi.c`, which converts. Its 11 structures a
 the SDK's at compile time, its 12 ones against Rust's libc by `test_rust_abi` (offsets reported by
 a no_std library built for `x86_64-unknown-freebsd`).
 
-## The title's own libraries (the game list and the shares)
+## The title's own libraries (the front end and the shares)
 
 Fetched and built by `ps5/tools/build-deps.sh` into `.deps/` (each at its master, as the owner's rule
 asks; `check-sources.sh` says when one moved on), linked into the title.
@@ -44,8 +44,9 @@ asks; `check-sources.sh` says when one moved on), linked into the title.
 | --- | --- | --- | --- |
 | libsmb2 | `5fdd128` (master of 2026-11-25) | LGPL-2.1-or-later | SMB2/3 shares for ps5vfs; built with the SDK's CMake toolchain, no patches (Crux2 and OGBox link its 6.2 tag the same way [console: both]) |
 | libnfs | `3fb4f2a` (master of 2026-11-25) | LGPL-2.1-or-later, BSD | NFS shares for ps5vfs; Crux2's flags: no coarse clock, no portmapper scan, `getservbyport`/`getuid`/`getgid` answered by ps5vfs (Crux2 pins `7613236` [console: Crux2]) |
-| Dear ImGui | `667c019` (master of 2026-11-25, 1.93.1 WIP) | MIT | the game list, with its Vulkan backend on volk; `IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS` (its default link opener calls `fork`, which no module a title loads exports) |
-| Roboto Medium | Dear ImGui's `misc/fonts` | Apache-2.0 | the list's font, made into a header at build time |
+| Dear ImGui | `667c019` (master of 2026-11-25, 1.93.1 WIP) | MIT | the front end and the quick menu, with its Vulkan backend on volk; `IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS` (its default link opener calls `fork`, which no module a title loads exports) |
+| Bricolage Grotesque, JetBrains Mono | `build-deps.sh`'s pins | SIL OFL 1.1 | the Live Board's faces, made into headers at build time; their licences ship in `licenses/` |
+| stb_image | `ps5/third_party/stb` | public domain / MIT | the board's picture, the logo, the covers (PNG only) |
 
 The network shares also need what the console's libc lacks or refuses, as in Crux2 and OGBox
 (`ps5/host/libc_gaps.c`, their `ps5_libc.c`): `getaddrinfo`/`freeaddrinfo` through the console's
@@ -59,7 +60,7 @@ and wraps them, kept local.
 
 | Crate (as used) | Platform needs | PS5 status |
 | --- | --- | --- |
-| `std` | libc, pthreads, `_umtx_op` (FreeBSD's futex for `Mutex`/`Condvar`), `kevent`, `sysctl`, emulated TLS | rebuilt with `-Zbuild-std`; runs in OGBox [console]; `_umtx_op`, `kevent` have console stubs; [unknown] whether every std path Gopher64 reaches behaves (first console run) |
+| `std` | libc, pthreads, `_umtx_op` (FreeBSD's futex for `Mutex`/`Condvar`), `kevent`, `sysctl`, emulated TLS | rebuilt with `-Zbuild-std`; runs in OGBox and, with the FreeBSD 11 converters, in PSGopher [console 2026-11-25: a game ran]; `std::net` (the covers' fetch) not yet run on a console |
 | `sdl3-sys` 0.7.3 (SDL 3.4.20), `sdl3-ttf-sys` 0.7.1 | SDL3, SDL3_ttf | bindings only (`no-link`); functions from `ps5/sdl3` (D2) |
 | `slint`, `rfd`, `open`, `winit`/`wgpu` (via slint) | window system, GPU through wgpu | not built (`--no-default-features`, PS5 target table) |
 | `mimalloc` | its own `mmap` heap | not built on the PS5 (would bypass the platform heap in direct memory) |
@@ -107,7 +108,7 @@ title, and two with no stub at all:
 | `realpath` | std's `canonicalize` | platform layer's `ps5_realpath` (the console refuses `realpath` to titles) |
 | `ZSTD_trace_*` (weak) | zstd | zstd built with `ZSTD_TRACE=0` |
 
-All bound with `--defsym`, kept local (PS5_ARCHITECTURE.md D12). After that, all 351 imports of
+All bound with `--defsym`, kept local (architecture.md D12). After that, all 351 imports of
 the linked title come from modules a title loads [here]. Still unproven until a console run calls
 them: `_umtx_op` (every contended std `Mutex`/`Condvar`), `kqueue`/`kevent` (Tokio; `kevent`
 has console evidence in PROBE.md), `sysctl`, `sigaltstack`. The probe exercises the first two.
@@ -128,5 +129,5 @@ A stub existing at link time does not prove the console exports the function
 | Threads | std/pthreads | std on the console's pthreads (2 MiB stacks via the wrap) |
 | Heap | mimalloc | the platform heap in direct memory (malloc wrap) |
 | Time | `Instant` (CLOCK_MONOTONIC) | the same; resolution and cost [unknown]: the benchmark mode measures them |
-| Networking | netplay, RA, Discord | off |
-| GUI | Slint | none yet; boots the ROM named in `autostart.txt` |
+| Networking | netplay, RA, Discord | Gopher64's off (D10); the shares, covers and descriptions on blocking sockets |
+| GUI | Slint | the Live Board (Dear ImGui on RADV); `autostart.txt` still boots a ROM first |

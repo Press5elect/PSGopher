@@ -5,20 +5,11 @@ emulator, for jailbroken consoles running homebrew. Gopher64's emulation is used
 its VR4300 and RSP interpreters and parallel-rdp, the Vulkan compute RDP, running on RADV
 linked into the title.
 
-**Status: in development. Nothing has run on a console yet.** The title builds, links and is
-signed, and its game list runs on the PC (host tests); the first console runs are next. No release
-exists.
+**Status: in development, no release yet.** The title runs on the console (2026-11-25): the board,
+USB drives, network shares and games, which do not reach full speed yet. What has and has not run
+on a console is in [`CHANGELOG.md`](CHANGELOG.md).
 
-| Document | What |
-| --- | --- |
-| [PS5_PORTING_ANALYSIS.md](PS5_PORTING_ANALYSIS.md) | The assessment: what Gopher64 is, what the console offers, the open questions |
-| [PS5_ARCHITECTURE.md](PS5_ARCHITECTURE.md) | How the port is built, the decisions (D1-D11), the milestones |
-| [PS5_DEPENDENCY_AUDIT.md](PS5_DEPENDENCY_AUDIT.md) | Every dependency and what it needs from the platform |
-| [PS5_GRAPHICS_BACKEND.md](PS5_GRAPHICS_BACKEND.md) | parallel-rdp on RADV |
-| [PS5_PERFORMANCE.md](PS5_PERFORMANCE.md) | Method, instrumentation, measurements |
-| [PS5_COMPATIBILITY.md](PS5_COMPATIBILITY.md) | Games tested (by ID) |
-| [PS5_BUILD_GUIDE.md](PS5_BUILD_GUIDE.md) | Building and running |
-| [PS5_CHANGELOG.md](PS5_CHANGELOG.md) | Changes |
+This page is the user's guide. Developers: the documentation index is [`docs/README.md`](docs/README.md).
 
 ## Use
 
@@ -66,7 +57,7 @@ turns that off.
 **The log**: `psgopher-boot.log` in the title folder (`/data/homebrew/PPSA99280/` when installed
 there; `/data/psgopher/` when the title folder takes no file), with the run before kept as
 `psgopher-boot.previous.log`, as OGBox and Crux2 keep theirs. Gopher64's own messages are in it too.
-When a game does not start, the list says why at the top.
+When a game does not start, the board says why at the top.
 
 No games, BIOS or other copyrighted data are included.
 

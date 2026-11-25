@@ -1,6 +1,6 @@
 /*
  * PSGopher - what ps5/sdl3 offers beyond SDL's own API: the audio counters the benchmark mode logs
- * (PS5_PERFORMANCE.md) and the render call the host tests drive without an audio device.
+ * (docs/dev/performance.md) and the render call the host tests drive without an audio device.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */

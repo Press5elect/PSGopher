@@ -2,8 +2,8 @@
 
 ## Decision
 
-parallel-rdp, unchanged, on RADV, presenting through `VK_KHR_display` (PS5_ARCHITECTURE.md D2,
-D5). No high-level renderer, no rewrite of the RDP. Labels as in PS5_PORTING_ANALYSIS.md.
+parallel-rdp, unchanged, on RADV, presenting through `VK_KHR_display` (architecture.md D2,
+D5). No high-level renderer, no rewrite of the RDP. Labels as in ../history/porting-analysis.md.
 
 ## Why parallel-rdp stays
 
@@ -12,7 +12,7 @@ D5). No high-level renderer, no rewrite of the RDP. Labels as in PS5_PORTING_ANA
 | Does Vulkan exist? | Yes: RADV linked into the title, Vulkan 1.4 [console: PS5_Vulkan] |
 | Does parallel-rdp run on it? | Yes, in PS5_RetroArch's Mupen64Plus-Next, upscaled 4x by default [console: PS5_Mupen64Plus `7cd4414`] |
 | Its fast RDRAM path (`VK_EXT_external_memory_host`)? | Supported: anonymous memory gets GPU access through `sceKernelMprotect` [console: PS5_Vulkan]. Gopher64's RDRAM is 64 KiB aligned [source] |
-| Does Gopher64's RDRAM qualify? | **[unknown]** RADV's import (`radv_ps5_buffer_from_ptr`) needs a page-aligned pointer below 2^47 and `sceKernelMprotect` adding GPU access. Gopher64 allocates RDRAM through Rust's allocator, i.e. the platform heap in direct memory at 0x20_0000_0000; the console test imported anonymous `mmap` memory. If the grant fails, parallel-rdp logs `Failed to allocate RDRAM with VK_EXT_external_memory_host` and runs its staging path (correct, slower). The first console run's klog settles it; if it falls back, allocate RDRAM with `mmap` on the PS5 (a one-line `cfg` in `rdram.rs`) |
+| Does Gopher64's RDRAM qualify? | **[unknown]** RADV's import (`radv_ps5_buffer_from_ptr`) needs a page-aligned pointer below 2^47 and `sceKernelMprotect` adding GPU access. Gopher64 allocates RDRAM through Rust's allocator, i.e. the platform heap in direct memory at 0x20_0000_0000; the console test imported anonymous `mmap` memory. If the grant fails, parallel-rdp logs `Failed to allocate RDRAM with VK_EXT_external_memory_host` and runs its staging path (correct, slower). The boot log's `rdp:` line (from `33c8907`) says which path was taken; if it falls back, allocate RDRAM with `mmap` on the PS5 (a one-line `cfg` in `rdram.rs`) |
 | Coherence? | Host-visible memory cached and coherent both ways, no flushes needed [console: PS5_Vulkan] |
 | Shaders? | SPIR-V precompiled into parallel-rdp (no runtime GLSL); ACO compiles pipelines; RADV's disk cache at a path we set |
 | Accuracy | parallel-rdp is the accuracy reference for LLE RDP; any replacement would be a regression by definition |
@@ -31,7 +31,7 @@ commit, and its `slangmosh.hpp` is the one in PSGopher's build [here, 2026-11-25
 
 `rdp-conformance` runs 257 test suites: random RDP command streams drawn by the GPU and by
 angrylion-rdp-plus, RDRAM and TMEM compared byte for byte. Built with the precompiled shaders PSGopher
-ships, on the PC's software Vulkan (lavapipe): see PS5_COMPATIBILITY.md for the result. The same tool,
+ships, on the PC's software Vulkan (lavapipe): see compatibility.md for the result. The same tool,
 built for the console as a test title, answers whether RADV on the PS5 draws exactly what angrylion
 draws: the accuracy question no game run can answer as well. Not built for the console yet.
 
@@ -40,7 +40,7 @@ draws: the accuracy question no game run can answer as well. Not built for the c
 parallel-rdp records a game's RDP command stream (`PARALLEL_RDP_DUMP=<file>`, `rdp_device.cpp`);
 `rdp-bench` and `rdp-replayer` play it back. A dump made once on the desktop build of the same pin,
 replayed on the console at 1x/2x/4x/8x, gives the GPU time per frame of real game content with no
-emulation on the CPU: the measurement that decides the upscale default (PS5_PERFORMANCE.md).
+emulation on the CPU: the measurement that decides the upscale default (performance.md).
 
 ## The PS5-specific pieces
 

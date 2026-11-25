@@ -56,7 +56,7 @@ radv_link_flags+=(--wrap=lstat --wrap=poll --wrap=setsockopt)
 
 # PSGopher's own bindings, the recipe's way (kept local, so nothing is exported): names Rust's std
 # and its crates import that no console module exports, to the platform layer's functions or to
-# ps5/host/rust_stubs.c's (PS5_DEPENDENCY_AUDIT.md)
+# ps5/host/rust_stubs.c's (docs/dev/dependencies.md)
 bindings=(accept4=ps5_accept4 gai_strerror=ps5_gai_strerror realpath=ps5_realpath
     getrandom=psgopher_getrandom dl_iterate_phdr=psgopher_dl_iterate_phdr
     pthread_setname_np=psgopher_pthread_setname_np recvmmsg=psgopher_recvmmsg getprotobyname=ps5px_getprotobyname)

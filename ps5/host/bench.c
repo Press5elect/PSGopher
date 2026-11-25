@@ -1,5 +1,5 @@
 /*
- * PSGopher - the benchmark mode's counters (PS5_PERFORMANCE.md, D11).
+ * PSGopher - the benchmark mode's counters (docs/dev/performance.md; docs/dev/architecture.md D11).
  *
  * On when /data/psgopher/benchmark.txt exists. parallel-rdp's interface reports each present (the
  * time Gopher64's thread spent in end_frame + begin_frame: the FIFO wait and the acquire) and each

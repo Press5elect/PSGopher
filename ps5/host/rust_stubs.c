@@ -1,6 +1,6 @@
 /*
  * PSGopher - libc names Rust's standard library and its crates import that no console module exports
- * and the platform layer does not provide (PS5_DEPENDENCY_AUDIT.md, "The core's imports").
+ * and the platform layer does not provide (docs/dev/dependencies.md, "The core's imports").
  *
  * Each is defined as psgopher_<name> and bound to <name> at the link (ps5/tools/link-title.sh,
  * --defsym, kept local), PS5_Vulkan's recipe's way: a title that defined a name a console stub

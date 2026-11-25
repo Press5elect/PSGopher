@@ -3,11 +3,18 @@
 The engineering assessment of a native PS5 port of [Gopher64](https://github.com/gopher64/gopher64)
 (GPL-3.0), written before any console run. Date: 2026-11-24.
 
+> **Historical document.** Kept as written (its hypotheses and its ranked optimisations are still the
+> starting list), apart from links. What has since been measured or decided is in
+> [`../dev/`](../dev/): the console's answers in [`dependencies.md`](../dev/dependencies.md) and
+> [`performance.md`](../dev/performance.md), the decisions in [`architecture.md`](../dev/architecture.md).
+> Known to be out of date here: games do run on the console (2026-11-25); the core makes network
+> requests for covers and descriptions (D18); a native front end exists (D17).
+
 Every statement carries one of these labels:
 
 | Label | Meaning |
 | --- | --- |
-| **[source]** | Read in the code at the pinned revision (Gopher64 `5cf32936c8b4`, master of 2026-11-25, v1.2.4) |
+| **[source]** | Read in the code at the pinned revision (Gopher64 `439e6c11f69d`, master of 2026-11-24, v1.2.4) |
 | **[console: X]** | Measured on a PS5 by project X, with its evidence named; not yet re-measured by PSGopher |
 | **[here]** | Measured or built in this repository, on the build PC (not on a console) |
 | **[hypothesis]** | Reasoned, not measured; to be tested |
@@ -86,7 +93,7 @@ thread on Zen 2 (question 6), which no one has measured for Gopher64.
 profiles, the audio drift controller, the VI pacing logic, parallel-rdp and its RDRAM tracker,
 rcheevos, every pure-Rust crate (serde, postcard, zip, sevenz, sha2, rand, regex, rustc-hash,
 fatfs, clap). The SDL-facing Rust (`ui/video.rs`, `audio.rs`, `input.rs`) also stays unchanged:
-PSGopher implements the SDL3 calls it makes instead of rewriting it (PS5_ARCHITECTURE.md).
+PSGopher implements the SDL3 calls it makes instead of rewriting it (../dev/architecture.md).
 
 ### 3. Needing platform-specific replacements
 
@@ -117,7 +124,7 @@ it is the accuracy reference, it runs, and the driver is a full Vulkan 1.4. Chan
 to the surface (KHR_display plane), the loader entry point, and present mode (FIFO only;
 parallel-rdp asks MAILBOX and falls back to FIFO [source: `interface.cpp`]). Anything beyond that
 (e.g. scanout straight into the swapchain image, upscale defaults) must be measured first
-(PS5_GRAPHICS_BACKEND.md).
+(../dev/graphics.md).
 
 ### 6. Is the existing interpreter adequate?
 
@@ -126,7 +133,7 @@ command recording share one thread [source], with cache emulation on every fetch
 x86-64 and Android/AArch64 builds, which suggests it is fast enough on desktop and recent phone
 cores, but that is not a measurement. The PS5's Zen 2 runs at up to 3.5 GHz [hypothesis: as Sony
 states; to confirm with a cycle-count probe], below current desktop clocks. Settled by:
-the benchmark mode (PS5_PERFORMANCE.md) on the console, emulated-cycles per host-second per game.
+the benchmark mode (../dev/performance.md) on the console, emulated-cycles per host-second per game.
 
 ### 7. Would an x86-64 dynarec help?
 
@@ -153,7 +160,7 @@ reads framebuffers (the tracker's waits). 4. SSAA downscale and the CRT shader, 
 
 ### 10. PS5-specific memory and scheduling work worth investigating
 
-Ranked in PS5_PERFORMANCE.md. In short: pin the emulation thread to its own core and keep
+Ranked in ../dev/performance.md. In short: pin the emulation thread to its own core and keep
 parallel-rdp's workers and audio off it; check that RDRAM is imported, not copied (host coherent);
 keep RDRAM and hot state in direct memory pages that are never re-protected; no dirty-page tracking
 by protection faults (Gopher64 uses an explicit range tracker, so the 16 KiB-granularity problem
@@ -165,7 +172,7 @@ One title (`PPSA99280`, provisional) that: logs to klog, hides the splash, opens
 through `VK_KHR_display`, initialises parallel-rdp, reads a ROM path from
 `/data/psgopher/autostart.txt`, runs it with the pad on player 1 and audio through sceAudioOut,
 saves to `/data/psgopher/data/saves`, and exits through the shell. That is Milestone 2/3 in
-PS5_ARCHITECTURE.md.
+../dev/architecture.md.
 
 ### 12. Most realistic path to full compatibility and 60 FPS
 

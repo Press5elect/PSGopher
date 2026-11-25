@@ -919,7 +919,7 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..6563369
+index 0000000..9e717f7
 --- /dev/null
 +++ b/src/psgopher.rs
 @@ -0,0 +1,783 @@
@@ -1391,7 +1391,7 @@ index 0000000..6563369
 +}
 +
 +/// The console probe (`/data/psgopher/probe.txt`): what std, Tokio and the clocks do on the console,
-+/// one `probe:` line each to klog (PS5_PERFORMANCE.md, "Timing facts to establish").
++/// one `probe:` line each to klog (docs/dev/performance.md, "Timing facts to establish").
 +#[unsafe(no_mangle)]
 +pub extern "C" fn psgopher_probe() {
 +    use std::time::{Duration, Instant};

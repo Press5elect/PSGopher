@@ -1,5 +1,5 @@
 /*
- * PSGopher - the SDL3 and SDL3_ttf functions Gopher64 calls, on the PS5 (PS5_ARCHITECTURE.md D2).
+ * PSGopher - the SDL3 and SDL3_ttf functions Gopher64 calls, on the PS5 (docs/dev/architecture.md D2).
  *
  * Gopher64 keeps calling SDL through the real sdl3-sys bindings (SDL 3.4.20, built with no-link);
  * this file defines exactly those functions (llvm-nm -u of libgopher64.a: 88), with SDL's

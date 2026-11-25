@@ -9,7 +9,7 @@
 #
 # Built on Mihawk's PS5 stack beside this repository: ../PS5_Vulkan (RADV's release archive, the
 # link recipe, the native tool, libc.prx) and ../PS5_PayloadSDK (this title's SDK pin,
-# ps5/tools/setup-sdk.sh). PS5_BUILD_GUIDE.md has the whole setup.
+# ps5/tools/setup-sdk.sh). docs/dev/building.md has the whole setup.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
