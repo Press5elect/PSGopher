@@ -19,6 +19,9 @@ void psgopher_bench_stop(void);
 void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns);
 void psgopher_bench_rdram_wait(uint64_t ns);
 
+/* PSGopher: the video line's counts start again (before each game) */
+void psgopher_video_reset(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -49,8 +49,36 @@ static uint64_t now_ns(clockid_t clock)
    return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
 }
 
+/* PSGopher: the boot log's video line, whatever the benchmark mode: the first frame shown, then
+ * the frames of each 10 s (one line; a game that stops showing frames stops it) */
+static uint64_t video_since_ns, video_count, video_total;
+
+/* a new game: its first frame is said again */
+void psgopher_video_reset(void)
+{
+   video_since_ns = video_count = video_total = 0;
+}
+
+static void video_heartbeat(uint64_t end_ns)
+{
+   if (++video_total == 1) {
+      say("video: the first frame is shown");
+      video_since_ns = end_ns;
+      return;
+   }
+   video_count++;
+   const uint64_t span = end_ns - video_since_ns;
+   if (span >= 10000000000ull) {
+      say("video: %llu frames in %.1f s (%.2f a second), %llu since the start", (unsigned long long)video_count,
+          (double)span / 1e9, (double)video_count * 1e9 / (double)span, (unsigned long long)video_total);
+      video_since_ns = end_ns;
+      video_count = 0;
+   }
+}
+
 void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns)
 {
+   video_heartbeat(end_ns);
    if (!atomic_load_explicit(&enabled, memory_order_relaxed))
       return;
    const uint64_t cpu = now_ns(CLOCK_THREAD_CPUTIME_ID);

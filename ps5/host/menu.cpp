@@ -799,7 +799,7 @@ void Menu::drawList(const Buttons &input)
 	}
 	ImGui::EndChild();
 	ImGui::Separator();
-	std::string foot = "Cross Play     Triangle Search again     Options Settings";
+	std::string foot = "Cross Play     Triangle Search again     Options Settings     In a game: hold the touch pad + Options: back here";
 	if (tab == TabNetwork)
 		foot += "     Square Shares";
 	if (library().scanning())

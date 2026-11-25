@@ -146,3 +146,9 @@ platform_log_note(void)
 {
    return "host build: no log";
 }
+
+int
+platform_log_fd(void)
+{
+   return -1;
+}

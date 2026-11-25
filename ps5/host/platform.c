@@ -118,6 +118,12 @@ platform_log_note(void)
    return log_note;
 }
 
+int
+platform_log_fd(void)
+{
+   return log_fd;
+}
+
 void
 say(const char *format, ...)
 {

@@ -41,6 +41,7 @@ extern "C" {
 int psgopher_main(int argc, const char *const *argv);
 void psgopher_probe(void);
 size_t psgopher_last_error(char *buffer, size_t size);
+void psgopher_crash_install(void);
 }
 
 static const char ROOT[] = "/data/psgopher";
@@ -192,6 +193,7 @@ static int play(const std::string &rom)
 {
    const char *argv[] = {"psgopher", "--fullscreen", rom.c_str()};
    say("starting Gopher64 with %s", rom.c_str());
+   psgopher_video_reset();
    const int status = psgopher_main(3, argv);
    say("Gopher64 returned %d", status);
    return status;
@@ -220,6 +222,7 @@ int main()
 #ifdef PSGOPHER_BUILD
    say("build: %s", PSGOPHER_BUILD);
 #endif
+   psgopher_crash_install();
    psgopher_sandbox_log(log_line);
    say("title folder: %s", title_dir);
    /* Crux2: outside the sandbox the effective group can differ from the real one, and Mesa's
