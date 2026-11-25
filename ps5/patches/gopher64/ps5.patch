@@ -90,7 +90,7 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..91a1484 100644
+index b741e0d..870499a 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
 @@ -20,6 +20,26 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -140,7 +140,7 @@ index b741e0d..91a1484 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +759,118 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +759,125 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -165,8 +165,15 @@ index b741e0d..91a1484 100644
 +  hdr.asked = hdr.on = false;
 +}
 +
-+// the layers go before the device does
++// the layers go before the device does; HDR10 goes off with the game (the game list after it is SDR)
 +static void psgopher_hdr_release() {
++  if (hdr.on && wsi_videoout_set_hdr10) {
++    if (wsi)
++      wsi->get_device().wait_idle();
++    const int rc = wsi_videoout_set_hdr10(0);
++    LOGI("psgopher: HDR output off with the game (0x%08x)\n", unsigned(rc));
++  }
++  hdr.on = hdr.asked = false;
 +  hdr.picture.reset();
 +  hdr.overlay.reset();
 +}
@@ -259,7 +266,7 @@ index b741e0d..91a1484 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +921,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +928,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -281,7 +288,7 @@ index b741e0d..91a1484 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +971,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +978,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -298,7 +305,7 @@ index b741e0d..91a1484 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -848,6 +1009,10 @@ static void render_frame(Vulkan::Device &device) {
+@@ -848,6 +1016,10 @@ static void render_frame(Vulkan::Device &device) {
      }
  
      cmd->end_render_pass();
@@ -309,7 +316,7 @@ index b741e0d..91a1484 100644
    }
    device.submit(cmd);
  }
-@@ -870,9 +1035,15 @@ void rdp_update_screen() {
+@@ -870,9 +1042,15 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -325,7 +332,7 @@ index b741e0d..91a1484 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1075,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1082,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -526,10 +533,10 @@ index 4e51a1b..35d03a2 100644
  mod ui;
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..f22fd07
+index 0000000..99c992b
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,203 @@
+@@ -0,0 +1,287 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -562,6 +569,90 @@ index 0000000..f22fd07
 +        }
 +    }
 +    // (Config is written when it is dropped)
++}
++
++/// Gopher64's settings by name, for the title's game list (ps5/host/menu.cpp): each read is
++/// config.json as it is now, each change is written back at once (Config writes itself when it
++/// is dropped), so the list and Gopher64 always agree and every change persists. The names are
++/// the JSON's own (`video.upscale`, `input.controller_enabled.2`); booleans are 0 and 1.
++fn setting<'a>(config: &'a mut crate::ui::config::Config, name: &str) -> Option<SettingRef<'a>> {
++    let indexed = |prefix: &str| -> Option<usize> {
++        name.strip_prefix(prefix)?.parse::<usize>().ok().filter(|i| *i < 4)
++    };
++    Some(match name {
++        "video.upscale" => SettingRef::Number(&mut config.video.upscale),
++        "video.ssaa" => SettingRef::Flag(&mut config.video.ssaa),
++        "video.integer_scaling" => SettingRef::Flag(&mut config.video.integer_scaling),
++        "video.widescreen" => SettingRef::Flag(&mut config.video.widescreen),
++        "video.vsync" => SettingRef::Flag(&mut config.video.vsync),
++        "video.crt" => SettingRef::Flag(&mut config.video.crt),
++        "emulation.overclock" => SettingRef::Flag(&mut config.emulation.overclock),
++        "emulation.disable_expansion_pak" => SettingRef::Flag(&mut config.emulation.disable_expansion_pak),
++        "emulation.usb" => SettingRef::Flag(&mut config.emulation.usb),
++        "emulation.rewind" => SettingRef::Flag(&mut config.emulation.rewind),
++        "input.emulate_vru" => SettingRef::Flag(&mut config.input.emulate_vru),
++        _ => {
++            if let Some(i) = indexed("input.controller_enabled.") {
++                SettingRef::Flag(&mut config.input.controller_enabled[i])
++            } else if let Some(i) = indexed("input.transfer_pak.") {
++                SettingRef::Flag(&mut config.input.transfer_pak[i])
++            } else {
++                return None;
++            }
++        }
++    })
++}
++
++enum SettingRef<'a> {
++    Flag(&'a mut bool),
++    Number(&'a mut u32),
++}
++
++fn setting_name(name: *const std::ffi::c_char) -> Option<String> {
++    if name.is_null() {
++        return None;
++    }
++    Some(unsafe { std::ffi::CStr::from_ptr(name) }.to_string_lossy().into_owned())
++}
++
++/// The setting's value, or -1 for a name Gopher64 has not.
++///
++/// # Safety
++/// `name` is a NUL-terminated string.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_setting_get(name: *const std::ffi::c_char) -> i64 {
++    let Some(name) = setting_name(name) else { return -1 };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        match setting(&mut config, &name) {
++            Some(SettingRef::Flag(v)) => *v as i64,
++            Some(SettingRef::Number(v)) => *v as i64,
++            None => -1,
++        }
++    })
++    .unwrap_or(-1)
++}
++
++/// Sets it and writes config.json; false for a name Gopher64 has not or a value it does not take
++/// (the file is then written as it was).
++/// `video.upscale` takes Gopher64's own choices only (1, 2, 4, 8).
++///
++/// # Safety
++/// `name` is a NUL-terminated string.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_setting_set(name: *const std::ffi::c_char, value: i64) -> bool {
++    let Some(name) = setting_name(name) else { return false };
++    std::panic::catch_unwind(|| {
++        let mut config = crate::ui::config::Config::new();
++        match setting(&mut config, &name) {
++            Some(SettingRef::Flag(v)) => *v = value != 0,
++            Some(SettingRef::Number(v)) if [1, 2, 4, 8].contains(&value) => *v = value as u32,
++            _ => return false,
++        }
++        true
++        // (written as config drops)
++    })
++    .unwrap_or(false)
 +}
 +
 +/// # Safety

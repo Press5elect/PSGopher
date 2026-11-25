@@ -4,6 +4,9 @@
 #   ps5/tools/build.sh             the sources' check, Gopher64's core, the PS5 code, the link
 #   ps5/tools/build.sh --compile   stop before the link
 #
+# The libraries the game list links (libsmb2, libnfs, Dear ImGui) are fetched and built by
+# ps5/tools/build-deps.sh into .deps/, the sandbox helper by ps5/tools/build-elevator.sh.
+#
 # Built on Mihawk's PS5 stack beside this repository: ../PS5_Vulkan (RADV's release archive, the
 # link recipe, the native tool, libc.prx) and ../PS5_PayloadSDK (this title's SDK pin,
 # ps5/tools/setup-sdk.sh). PS5_BUILD_GUIDE.md has the whole setup.
@@ -35,15 +38,64 @@ identity="PSGopher $(git -C "$root" describe --always --dirty --abbrev=12), Goph
 common=(-DPSGOPHER_BUILD="\"$identity\"" -O2 -g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter
     -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$root/ps5/third_party/stb"
     -I"$vulkan/.deps/native/radv-crux2/include" -I"$sdk/target/include")
-cc -std=c11 "${common[@]}" -c "$root/ps5/host/platform.c" -o "$work/obj/platform.o"
-cc -std=c11 "${common[@]}" -c "$root/ps5/host/rust_stubs.c" -o "$work/obj/rust_stubs.o"
-cc -std=c11 "${common[@]}" -c "$root/ps5/host/bench.c" -o "$work/obj/bench.o"
-cc -std=c++20 "${common[@]}" -c "$root/ps5/host/main.cpp" -o "$work/obj/main.o"
-cc -std=c++20 "${common[@]}" -c "$root/ps5/host/videoout_hooks.cpp" -o "$work/obj/videoout_hooks.o"
-cc -std=c++20 "${common[@]}" -Wno-unused-function -Wno-missing-field-initializers \
-    -c "$root/ps5/sdl3/psgopher_sdl3.cpp" -o "$work/obj/psgopher_sdl3.o"
+# the game list's libraries (libsmb2, libnfs, Dear ImGui: ps5/tools/build-deps.sh) and the sandbox
+# exit's helper (ps5/tools/build-elevator.sh), and the list's font as a header
+ports=$("$root/ps5/tools/build-deps.sh")
+imgui="$root/.deps/src/imgui"
+"$root/ps5/tools/build-elevator.sh" > /dev/null
+mkdir -p "$work/gen"
+font="$imgui/misc/fonts/Roboto-Medium.ttf"
+if [[ ! -f $work/gen/menu_font.h || $font -nt $work/gen/menu_font.h ]]; then
+    python3 - "$font" "$work/gen/menu_font.h" <<'PY'
+import sys
+data = open(sys.argv[1], 'rb').read()
+lines = ["/* Roboto Medium (Christian Robertson, Apache License 2.0), from Dear ImGui's misc/fonts:",
+         " * the game list's font. Made by ps5/tools/build.sh. */", "#pragma once",
+         "static const unsigned int psgopher_font_size = %d;" % len(data), "static const unsigned char psgopher_font[] = {"]
+lines += ["  " + ",".join(str(b) for b in data[i:i + 32]) + "," for i in range(0, len(data), 32)]
+open(sys.argv[2], "w").write("\n".join(lines + ["};", ""]))
+PY
+fi
+rdp="$root/vendor/gopher64/parallel-rdp/parallel-rdp-standalone"
+list=(-I"$root/ps5/vfs" -I"$ports/include" -I"$imgui" -I"$imgui/backends" -I"$work/gen" -I"$rdp/volk"
+    -I"$rdp/vulkan-headers/include" -DIMGUI_IMPL_VULKAN_USE_VOLK -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS
+    -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS) # (its default opens links with fork, which a title has not)
+jobs=()
+compile() { # language output source flags...
+    local language=$1 output=$2 source=$3
+    shift 3
+    cc "$language" "${common[@]}" "$@" -c "$source" -o "$work/obj/$output" &
+    jobs+=($!)
+}
+compile -std=c11 platform.o "$root/ps5/host/platform.c"
+compile -std=c11 rust_stubs.o "$root/ps5/host/rust_stubs.c"
+compile -std=c11 bench.o "$root/ps5/host/bench.c"
+compile -std=c11 libc_gaps.o "$root/ps5/host/libc_gaps.c"
+compile -std=c++20 main.o "$root/ps5/host/main.cpp"
+compile -std=c++20 videoout_hooks.o "$root/ps5/host/videoout_hooks.cpp"
+compile -std=c++20 psgopher_sdl3.o "$root/ps5/sdl3/psgopher_sdl3.cpp" -Wno-unused-function -Wno-missing-field-initializers
+compile -std=c++20 sandbox.o "$root/ps5/host/sandbox.cpp" -Wno-missing-field-initializers
+compile -std=c++20 title_settings.o "$root/ps5/host/title_settings.cpp"
+compile -std=c++20 library.o "$root/ps5/host/library.cpp" "${list[@]}"
+compile -std=c++20 shares.o "$root/ps5/host/shares.cpp" "${list[@]}"
+compile -std=c++20 menu.o "$root/ps5/host/menu.cpp" "${list[@]}" -Wno-missing-field-initializers
+for vfs in ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp; do
+    compile -std=c++20 "$vfs.o" "$root/ps5/vfs/$vfs.cpp" "${list[@]}" -Wno-missing-field-initializers -Wno-sign-compare
+done
+for source in imgui imgui_draw imgui_tables imgui_widgets backends/imgui_impl_vulkan; do
+    compile -std=c++20 "imgui_${source##*/}.o" "$imgui/$source.cpp" "${list[@]}" -w
+done
+failed=0
+for job in "${jobs[@]}"; do wait "$job" || failed=1; done
+[[ $failed == 0 ]] || { echo "build.sh: the PS5 code did not compile (above)" >&2; exit 1; }
 echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
+objects=()
+for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps videoout_hooks sandbox title_settings library shares menu \
+    ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp imgui_imgui imgui_imgui_draw imgui_imgui_tables imgui_imgui_widgets \
+    imgui_imgui_impl_vulkan; do
+    objects+=("$work/obj/$object.o")
+done
 "$root/ps5/tools/link-title.sh" "$work" "$vulkan" "$sdk" \
-    "$work/obj/main.o" "$work/obj/platform.o" "$work/obj/psgopher_sdl3.o" "$work/obj/rust_stubs.o" "$work/obj/bench.o" "$work/obj/videoout_hooks.o" "$core"
+    "${objects[@]}" "$ports/lib/libsmb2.a" "$ports/lib/libnfs.a" "$ports/lib/libdcerpc.a" "$core"

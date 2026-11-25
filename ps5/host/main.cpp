@@ -1,9 +1,12 @@
 /*
- * PSGopher - the title: the console's setup, the ROM to boot, Gopher64, the shell exit.
+ * PSGopher - the title: the console's setup, the game list, Gopher64, the shell exit.
  *
- * The ROM: the first line of /data/psgopher/autostart.txt (a path, or a file name in
- * /data/psgopher/roms), else the first ROM in /data/psgopher/roms by name. Gopher64 then runs as on
- * the desktop with that ROM on its command line (psgopher_main, vendor/gopher64/src/psgopher.rs).
+ * First, while the process has one thread, out of the title's sandbox (sandbox.cpp, as OGBox and
+ * Crux2: USB drives and the whole of /data are then seen), then the network shares (menu.h,
+ * ps5vfs) and the game list (library.h, menu.h). A game chosen there runs in Gopher64 as on the
+ * desktop with its ROM on the command line (psgopher_main, vendor/gopher64/src/psgopher.rs); when
+ * it ends (OPTIONS with the touch pad, Gopher64's quit), the list comes back. /data/psgopher/
+ * autostart.txt still boots its ROM first; benchmark.txt and probe.txt run without the list.
  * The title never calls exit(): main returns and the PS5 layer's catchReturnFromMain asks the shell
  * to close it (platform.c).
  *
@@ -20,13 +23,19 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <sys/types.h>
+#include <unistd.h>
 
 #include <SDL3/SDL.h>
 #include <time.h>
 #include <x86intrin.h>
 
+#include "library.h"
+#include "menu.h"
+#include "title_settings.h"
+
 extern "C" {
 #include "bench.h"
+#include "sandbox.h"
 #include "platform.h"
 #include "psgopher_sdl3.h"
 int psgopher_main(int argc, const char *const *argv);
@@ -41,19 +50,6 @@ static void folder(const std::string &path)
    if (mkdir(path.c_str(), 0777) != 0 && errno != EEXIST)
       say("folder %s: %s", path.c_str(), strerror(errno));
    chmod(path.c_str(), 0777);
-}
-
-static bool is_rom(const std::string &name)
-{
-   static const char *const extensions[] = {".z64", ".n64", ".v64", ".zip", ".7z", ".bin"};
-   std::string lower = name;
-   std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
-   for (const char *e : extensions) {
-      const size_t n = strlen(e);
-      if (lower.size() > n && lower.compare(lower.size() - n, n, e) == 0)
-         return true;
-   }
-   return false;
 }
 
 static std::string first_line(const std::string &path)
@@ -169,104 +165,48 @@ static Uint32 benchmark_timer(void *, SDL_TimerID, Uint32)
    return 100;
 }
 
-/* ---------------------------------------------------------------- the title's own settings */
-
-/* /data/psgopher/config/psgopher.ini (Gopher64's own are in config.json): the display's refresh and
- * HDR10, which must be known before Vulkan starts. Written with its defaults when missing, so it can be
- * edited over FTP. Variable refresh and HDR10 are off until a console run has shown them working
- * (default-off, the owner's rule for what no console has tested yet). */
-static const char SETTINGS[] = "/data/psgopher/config/psgopher.ini";
-static const char SETTINGS_DEFAULT[] =
-   "# PSGopher's own settings (Gopher64's are in config.json). Read when the title starts.\n"
-   "#\n"
-   "# display: 60   59.94 Hz, the N64's own rate (PAL games' 50 Hz alternate one and two refreshes)\n"
-   "#          120  119.88 Hz\n"
-   "#          vrr  119.88 Hz with variable refresh: each frame shown when it is ready (NTSC and PAL\n"
-   "#               alike), on a TV that has it; otherwise as 120\n"
-   "display = 60\n"
-   "\n"
-   "# hdr: on sends HDR10 when the console's own output is HDR (its settings, and the TV); otherwise SDR\n"
-   "hdr = off\n"
-   "# hdr_white: the nits white is shown at (80 to 400; 203 is HDR's reference)\n"
-   "hdr_white = 203\n"
-   "# hdr_peak: the nits the brightest parts of the picture are raised to (0 off; up to 4000)\n"
-   "hdr_peak = 1000\n";
-
-static void apply_settings()
+/* autostart.txt's ROM: a path, or a file name in /data/psgopher/roms */
+static std::string autostart_rom()
 {
-   if (FILE *f = fopen(SETTINGS, "r"))
-      fclose(f);
-   else if (FILE *w = fopen(SETTINGS, "w")) {
-      fputs(SETTINGS_DEFAULT, w); /* (one fwrite of a small file: fine) */
-      fclose(w);
-      chmod(SETTINGS, 0666);
-   }
-   std::string display = "60", hdr = "off", white = "203", peak = "1000";
-   if (FILE *f = fopen(SETTINGS, "r")) {
-      char line[256];
-      while (fgets(line, sizeof(line), f)) {
-         char key[64] = {}, value[128] = {};
-         if (line[0] == '#' || sscanf(line, " %63[a-z_] = %127s", key, value) != 2)
-            continue;
-         if (!strcmp(key, "display"))
-            display = value;
-         else if (!strcmp(key, "hdr"))
-            hdr = value;
-         else if (!strcmp(key, "hdr_white"))
-            white = value;
-         else if (!strcmp(key, "hdr_peak"))
-            peak = value;
-      }
-      fclose(f);
-   }
-   /* the driver's switches (Crux2's RADV, patches 0015/0016): param.json declares 119.88 Hz; 59.94
-    * unless asked otherwise, variable refresh only on request */
-   if (display == "vrr") {
-      setenv("PS5_VIDEOOUT_VRR", "1", 1);
-      say("display: 119.88 Hz with variable refresh asked for (%s)", SETTINGS);
-   } else if (display == "120") {
-      say("display: 119.88 Hz asked for (%s)", SETTINGS);
-   } else {
-      setenv("PS5_VIDEOOUT_59HZ", "1", 1);
-      say("display: 59.94 Hz (%s: display = %s)", SETTINGS, display.c_str());
-   }
-   /* parallel-rdp's interface reads these (vendor/gopher64/parallel-rdp/interface.cpp, PSGOPHER) */
-   if (hdr == "on") {
-      setenv("PSGOPHER_HDR", "1", 1);
-      setenv("PSGOPHER_HDR_WHITE", white.c_str(), 1);
-      setenv("PSGOPHER_HDR_PEAK", peak.c_str(), 1);
-      say("display: HDR10 asked for: white %s nits, highlights %s nits", white.c_str(), peak.c_str());
-   }
+   std::string named = first_line(std::string(ROOT) + "/autostart.txt");
+   if (!named.empty() && named[0] != '/')
+      named = std::string(ROOT) + "/roms/" + named;
+   if (!named.empty())
+      say("autostart.txt names %s", named.c_str());
+   return named;
 }
 
-static std::string choose_rom()
+static void log_line(const char *line) { say("%s", line); }
+
+/* Gopher64 with one ROM; its status */
+static int play(const std::string &rom)
 {
-   const std::string roms = std::string(ROOT) + "/roms";
-   std::string named = first_line(std::string(ROOT) + "/autostart.txt");
-   if (!named.empty()) {
-      if (named[0] != '/')
-         named = roms + "/" + named;
-      say("autostart.txt names %s", named.c_str());
-      return named;
-   }
-   std::vector<std::string> found;
-   if (DIR *dir = opendir(roms.c_str())) {
-      while (dirent *entry = readdir(dir))
-         if (entry->d_name[0] != '.' && is_rom(entry->d_name))
-            found.push_back(entry->d_name);
-      closedir(dir);
-   }
-   std::sort(found.begin(), found.end());
-   say("%zu ROM(s) in %s", found.size(), roms.c_str());
-   return found.empty() ? std::string() : roms + "/" + found.front();
+   const char *argv[] = {"psgopher", "--fullscreen", rom.c_str()};
+   say("starting Gopher64 with %s", rom.c_str());
+   const int status = psgopher_main(3, argv);
+   say("Gopher64 returned %d", status);
+   return status;
 }
 
 int main()
 {
+   /* out of the sandbox before anything starts a thread (platform_init's klog capture does) */
+   static char title_dir[192] = "/app0";
+   (void)psgopher_sandbox_leave(title_dir, sizeof(title_dir));
    platform_init("PSGopher");
 #ifdef PSGOPHER_BUILD
    say("build: %s", PSGOPHER_BUILD);
 #endif
+   psgopher_sandbox_log(log_line);
+   say("title folder: %s", title_dir);
+   /* Crux2: outside the sandbox the effective group can differ from the real one, and Mesa's
+    * shader cache is off while they differ */
+   if (getegid() != getgid()) {
+      const unsigned was = (unsigned)getegid();
+      const bool fixed = setegid(getgid()) == 0;
+      say("ids: egid %u, gid %u: the effective group %s", was, (unsigned)getgid(),
+          fixed ? "is set to the real one" : "could not be changed (the shader cache is off)");
+   }
    /* (no umask: a title's kernel applies no file mode mask, PS5_PayloadSDK's ps5platform/libc.h) */
    for (const char *sub : {"", "/config", "/data", "/data/saves", "/data/states", "/cache", "/cache/radv", "/roms"})
       folder(std::string(ROOT) + sub);
@@ -276,7 +216,9 @@ int main()
     * 13: PROBE.md) */
    setenv("MESA_SHADER_CACHE_DIR", "/data/psgopher/cache/radv", 1);
    setenv("TOKIO_WORKER_THREADS", "2", 0);
-   apply_settings();
+   psgopher::TitleSettings settings;
+   settings.load();
+   settings.applyDisplay(title_dir);
 
    if (exists(std::string(ROOT) + "/probe.txt")) {
       probe();
@@ -284,24 +226,41 @@ int main()
       return 0;
    }
    read_benchmark(std::string(ROOT) + "/benchmark.txt");
-
-   std::string rom = choose_rom();
-   if (!bench.rom.empty())
-      rom = bench.rom[0] == '/' ? bench.rom : std::string(ROOT) + "/roms/" + bench.rom;
-   if (rom.empty()) {
-      say("no ROM: put one in %s/roms or name it in %s/autostart.txt", ROOT, ROOT);
-      return 2;
-   }
-   const char *argv[] = {"psgopher", "--fullscreen", rom.c_str()};
    if (bench.on) {
+      if (bench.rom.empty()) {
+         say("benchmark: benchmark.txt names no rom");
+         return 2;
+      }
+      const std::string rom = bench.rom[0] == '/' ? bench.rom : std::string(ROOT) + "/roms/" + bench.rom;
       char path[128];
       snprintf(path, sizeof(path), "%s/bench-%lld.csv", ROOT, (long long)time(nullptr));
+      settings.applyHdr();
       psgopher_bench_start(path);
       SDL_AddTimer(100, benchmark_timer, nullptr);
+      const int status = play(rom);
+      psgopher_bench_stop();
+      return status;
    }
-   say("starting Gopher64 with %s", rom.c_str());
-   const int status = psgopher_main(3, argv);
-   psgopher_bench_stop();
-   say("Gopher64 returned %d", status);
-   return status;
+
+   psgopher::startShares(title_dir);
+   psgopher::library().load();
+   psgopher::library().rescan();
+
+   std::string notice;
+   const std::string first = autostart_rom();
+   if (!first.empty()) {
+      settings.applyHdr();
+      if (play(first) != 0)
+         notice = "The game ended with an error (the log says why)";
+   }
+   for (;;) {
+      const psgopher::MenuResult chosen = psgopher::runMenu(notice);
+      if (!chosen.play)
+         break;
+      settings.load(); /* the list may have changed HDR10 */
+      settings.applyHdr();
+      notice = play(chosen.rom) == 0 ? std::string() : "The game ended with an error (the log says why)";
+   }
+   say("closing");
+   return 0;
 }

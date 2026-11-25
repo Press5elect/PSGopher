@@ -16,3 +16,38 @@ ${CC:-gcc} -O2 -g -fsanitize=address,undefined -c "$root/ps5/host/platform_host.
 ${CXX:-g++} "${flags[@]}" "$root/ps5/sdl3/psgopher_sdl3.cpp" "$root/ps5/tests/test_sdl3.cpp" \
     "$out/platform_host.o" -o "$out/test_sdl3" -lpthread -lm
 "$out/test_sdl3" "$root/vendor/gopher64/data/ui/RobotoMono-Regular.ttf"
+
+# the game list's search, the title's settings file and the shares file (ps5vfs stood in for)
+${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -DPSGOPHER_SHARES_HOST_TEST \
+    -I"$root/ps5/host" -I"$root/ps5/vfs" "$root/ps5/tests/test_library.cpp" "$root/ps5/host/library.cpp" \
+    "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" -o "$out/test_library" -lpthread
+"$out/test_library" "$out/library"
+
+# the game list itself, drawn offscreen through the PC's Vulkan (lavapipe when it is there) with a
+# scripted pad; pictures in build/host-tests/menu-pictures (PNG with python3-pil)
+lavapipe=${PSGOPHER_LAVAPIPE_ICD:-/opt/lavapipe/lvp_icd.json}
+imgui="$root/.deps/src/imgui"
+rdp="$root/vendor/gopher64/parallel-rdp/parallel-rdp-standalone"
+if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/menu_font.h ]]; then
+    menu_flags=(-std=c++20 -O1 -g -fsanitize=address,undefined -DPSGOPHER_MENU_HOST -DPSGOPHER_SHARES_HOST_TEST
+        -DIMGUI_IMPL_VULKAN_USE_VOLK -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS -I"$root/ps5/host" -I"$root/ps5/vfs"
+        -I"$imgui" -I"$imgui/backends" -I"$rdp/volk" -I"$rdp/vulkan-headers/include" -I"$root/build/ps5/gen")
+    ${CC:-gcc} -O1 -g -fsanitize=address,undefined -I"$rdp/vulkan-headers/include" -c "$rdp/volk/volk.c" -o "$out/volk.o"
+    for source in imgui imgui_draw imgui_tables imgui_widgets backends/imgui_impl_vulkan; do
+        [[ $out/imgui_${source##*/}.o -nt $imgui/$source.cpp ]] ||
+            ${CXX:-g++} "${menu_flags[@]}" -w -c "$imgui/$source.cpp" -o "$out/imgui_${source##*/}.o"
+    done
+    ${CXX:-g++} "${menu_flags[@]}" -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-unused-function \
+        -Wno-unused-variable \
+        "$root/ps5/tests/test_menu.cpp" "$root/ps5/host/menu.cpp" "$root/ps5/host/library.cpp" \
+        "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" "$root/ps5/host/sandbox.cpp" \
+        "$out/volk.o" "$out"/imgui_*.o -o "$out/test_menu" -lpthread -ldl
+    [[ -f $lavapipe ]] && export VK_ICD_FILENAMES=$lavapipe
+    "$out/test_menu" "$out/menu-work" "$out/menu-pictures"
+    if python3 -c 'import PIL' 2>/dev/null; then
+        python3 -c 'import sys, glob, PIL.Image as I
+for p in glob.glob(sys.argv[1] + "/*.ppm"): I.open(p).save(p[:-4] + ".png")' "$out/menu-pictures"
+    fi
+else
+    echo "test_menu: skipped (needs .deps/src/imgui, vendor/gopher64 and a build's build/ps5/gen/menu_font.h)"
+fi

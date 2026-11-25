@@ -1,0 +1,225 @@
+/*
+ * PSGopher - the game list on the PC: ps5/host/menu.cpp built with PSGOPHER_MENU_HOST draws offscreen
+ * through the PC's Vulkan (lavapipe in the tests), with Dear ImGui's own Vulkan backend as on the
+ * console. A scripted pad goes through every screen (the tabs, the settings, the shares, a share's
+ * form and the on-screen keyboard), pictures are taken on the way, and the checks are what the
+ * screens did: Gopher64's settings changed through the bridge, the keyboard's text, the game played.
+ * Under AddressSanitizer and UBSan; a Dear ImGui assertion fails the test.
+ *
+ *   test_menu <work folder> <pictures folder>
+ *
+ * SPDX-License-Identifier: GPL-3.0-or-later
+ */
+#include "library.h"
+#include "menu.h"
+
+#include <chrono>
+#include <cstdarg>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
+#include <map>
+#include <string>
+#include <thread>
+#include <vector>
+
+#include <dirent.h>
+#include <sys/stat.h>
+
+extern "C" {
+#include "platform.h"
+}
+#include "ps5_vfs.h"
+
+static int failures = 0;
+#define CHECK(x)                                                                    \
+	do {                                                                            \
+		if (!(x)) {                                                                 \
+			std::fprintf(stderr, "FAILED %s:%d: %s\n", __FILE__, __LINE__, #x);     \
+			failures++;                                                             \
+		}                                                                           \
+	} while (0)
+
+/* ---------------------------------------------------------------- the PS5 layer, stood in for */
+
+extern "C" void say(const char *format, ...)
+{
+	va_list args;
+	va_start(args, format);
+	std::vfprintf(stdout, format, args);
+	va_end(args);
+	std::fputc('\n', stdout);
+}
+
+extern "C" double now_seconds(void)
+{
+	return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+extern "C" {
+const char *psgopher_menu_host_shot = nullptr;
+}
+
+/* The script: each step holds these buttons for some frames, then lets go for as many; a picture
+ * is taken at the end of a step that names one. */
+struct Step {
+	uint32_t buttons;
+	const char *shot;
+	int frames;
+};
+static std::vector<Step> g_script;
+static size_t g_step = 0;
+static int g_frame_in_step = 0;
+static std::string g_pictures;
+static std::string g_shot_path;
+static uint32_t g_held = 0;
+static bool g_script_done = false;
+
+extern "C" void pad_poll(struct pad *pad)
+{
+	uint32_t held = 0;
+	if (g_step < g_script.size()) {
+		const Step &s = g_script[g_step];
+		const int hold = s.frames;
+		if (g_frame_in_step < hold)
+			held = s.buttons;
+		g_frame_in_step++;
+		if (g_frame_in_step >= hold * 2 + 2) {
+			if (s.shot) {
+				g_shot_path = g_pictures + "/" + s.shot + ".ppm";
+				psgopher_menu_host_shot = g_shot_path.c_str();
+			}
+			g_step++;
+			g_frame_in_step = 0;
+		}
+	} else {
+		g_script_done = true;
+		static int idle = 0;
+		if (++idle > 300) {
+			std::fprintf(stderr, "FAILED: the script ended and the list did not return\n");
+			std::exit(1);
+		}
+	}
+	*pad = {};
+	pad->pressed = held & ~g_held;
+	pad->held = held;
+	g_held = held;
+}
+
+/* ---------------------------------------------------------------- Gopher64's settings, stood in for */
+
+static std::map<std::string, int64_t> g_settings = {
+	{ "video.upscale", 1 }, { "video.ssaa", 0 }, { "video.integer_scaling", 0 }, { "video.widescreen", 0 },
+	{ "video.crt", 0 }, { "emulation.overclock", 0 }, { "emulation.disable_expansion_pak", 0 },
+	{ "emulation.rewind", 0 }, { "emulation.usb", 0 }, { "input.emulate_vru", 0 },
+	{ "input.controller_enabled.0", 1 }, { "input.controller_enabled.1", 0 },
+	{ "input.controller_enabled.2", 0 }, { "input.controller_enabled.3", 0 },
+};
+static int g_setting_reads = 0;
+
+extern "C" int64_t psgopher_setting_get(const char *name)
+{
+	g_setting_reads++;
+	const auto it = g_settings.find(name);
+	return it == g_settings.end() ? -1 : it->second;
+}
+
+extern "C" bool psgopher_setting_set(const char *name, int64_t value)
+{
+	const auto it = g_settings.find(name);
+	if (it == g_settings.end())
+		return false;
+	if (std::string(name) == "video.upscale" && value != 1 && value != 2 && value != 4 && value != 8)
+		return false;
+	it->second = value;
+	return true;
+}
+
+/* ---------------------------------------------------------------- ps5vfs, stood in for (no shares) */
+
+extern "C" void ps5vfs_set_shadow_path(const char *) {}
+extern "C" void ps5vfs_set_log(void (*)(const char *)) {}
+extern "C" int ps5vfs_is_virtual(const char *path) { return strncmp(path, "/smb/", 5) == 0; }
+extern "C" const char *ps5vfs_mount_point(unsigned) { return nullptr; }
+extern "C" ps5vfs_dir *ps5vfs_opendir(const char *) { return nullptr; }
+extern "C" int ps5vfs_readdir(ps5vfs_dir *, struct ps5vfs_dirent *) { return 0; }
+extern "C" void ps5vfs_closedir(ps5vfs_dir *) {}
+extern "C" FILE *ps5vfs_fopen(const char *, const char *) { return nullptr; }
+extern "C" size_t ps5vfs_fread(void *, size_t, size_t, FILE *) { return 0; }
+extern "C" int ps5vfs_ferror(FILE *) { return 1; }
+extern "C" int ps5vfs_fclose(FILE *) { return 0; }
+
+static void write(const std::string &path, const std::string &bytes)
+{
+	FILE *f = std::fopen(path.c_str(), "wb");
+	std::fwrite(bytes.data(), 1, bytes.size(), f);
+	std::fclose(f);
+}
+
+int main(int argc, char **argv)
+{
+	const std::string work = argc > 1 ? argv[1] : "/tmp/psgopher-menu-test";
+	g_pictures = argc > 2 ? argv[2] : work;
+	if (std::system(("rm -rf '" + work + "' && mkdir -p '" + work + "/data/psgopher/roms' '" + work +
+			"/data/psgopher/cache' '" + g_pictures + "'").c_str()) != 0)
+		return 2;
+	/* a list of the kind a console has: ROM files named as dumps are */
+	static const char *const names[] = { "Aero Racer (U)", "Bomb Squad 64 (E)", "Cave Diver (J)", "Dino Park (U) [!]",
+		"Echo Base (U)", "Fjord Fishing (E)", "Gem Keeper (U)", "Hover Cars (J)", "Ice Climb 64 (U)", "Jungle Run (E)",
+		"Kart Champs (U)", "Lunar Lander 64 (U)", "Moto Trial (E)", "Night Ops (U)", "Orbit (J)" };
+	for (const char *n : names)
+		write(work + "/data/psgopher/roms/" + n + ".z64", std::string(8u << 20, '\0').substr(0, 1024 * (strlen(n) * 37 % 900 + 100)));
+	psgopher::libraryUseRoot(work + "/data");
+	psgopher::library().rescan();
+	for (int i = 0; i < 300 && psgopher::library().scanning(); i++)
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+
+	const uint32_t none = 0;
+	g_script = {
+		{ none, nullptr, 4 },
+		{ none, "1-list", 2 },
+		{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, "2-list-moved", 2 },
+		{ PAD_R1, "3-usb", 2 },
+		{ PAD_R1, "4-network", 2 },
+		{ PAD_SQUARE, "5-shares", 2 },
+		{ PAD_CROSS, "6-share-form", 2 },        /* Add a share */
+		{ PAD_DOWN, nullptr, 2 },                /* Server */
+		{ PAD_CROSS, "7-keyboard", 2 },          /* the keyboard */
+		{ PAD_CROSS, nullptr, 2 },               /* types 'q' (the first key of the second row) */
+		{ PAD_RIGHT, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, /* 'w' */
+		{ PAD_SQUARE, nullptr, 2 },              /* deletes it */
+		{ PAD_UP, nullptr, 2 }, { PAD_CROSS, "8-keyboard-typed", 2 }, /* '2' */
+		{ PAD_OPTIONS, "9-share-form-filled", 2 }, /* done */
+		{ PAD_CIRCLE, nullptr, 2 },              /* the form left without saving */
+		{ PAD_CIRCLE, nullptr, 2 },              /* the shares left: the list's Network tab */
+		{ PAD_OPTIONS, "10-settings", 2 },
+		{ PAD_RIGHT, nullptr, 2 },               /* Resolution: 2x */
+		{ PAD_DOWN, nullptr, 2 }, { PAD_CROSS, "11-settings-changed", 2 }, /* SSAA on */
+	};
+	for (int i = 0; i < 20; i++) /* down to About */
+		g_script.push_back({ PAD_DOWN, nullptr, 2 });
+	g_script.push_back({ none, "12-settings-about", 2 });
+	g_script.push_back({ PAD_CIRCLE, nullptr, 2 });
+	g_script.push_back({ PAD_L1, nullptr, 2 });
+	g_script.push_back({ PAD_L1, nullptr, 2 });   /* back to Internal */
+	g_script.push_back({ PAD_DOWN, nullptr, 2 }); /* the second game */
+	g_script.push_back({ PAD_CROSS, nullptr, 2 }); /* plays it */
+
+	const psgopher::MenuResult r = psgopher::runMenu("A notice from the last game");
+	std::printf("menu returned: play %d, %s; Gopher64's settings read %d times\n", r.play, r.rom.c_str(), g_setting_reads);
+	CHECK(r.play);
+	CHECK(r.rom == work + "/data/psgopher/roms/Bomb Squad 64 (E).z64");
+	CHECK(g_settings["video.upscale"] == 2);
+	CHECK(g_settings["video.ssaa"] == 1);
+	CHECK(g_setting_reads < 40); /* read once each, not every frame */
+	for (const char *shot : { "1-list", "7-keyboard", "8-keyboard-typed", "10-settings", "12-settings-about" }) {
+		struct stat st;
+		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);
+	}
+	if (failures) {
+		std::fprintf(stderr, "test_menu: %d check(s) failed\n", failures);
+		return 1;
+	}
+	std::printf("test_menu: all checks passed\n");
+	return 0;
+}

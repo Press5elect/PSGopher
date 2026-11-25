@@ -7,8 +7,13 @@ comments and the changelog. Labels as in PS5_PORTING_ANALYSIS.md.
 
 ```text
   eboot.bin (PPSA99280, provisional)
-  ├── ps5/host/            the title: main(), folders, the ROM to boot, the shell exit        C/C++
-  │   └── platform.c       PS5 Vulkan Template's PS5 layer (MIT): klog, splash, pads, audio    C
+  ├── ps5/host/            the title: main(), folders, the sandbox exit, the shell exit       C/C++
+  │   ├── platform.c       PS5 Vulkan Template's PS5 layer (MIT): klog, splash, pads, audio    C
+  │   ├── menu.cpp         the game list and its settings: Dear ImGui on RADV (D16)           C++
+  │   ├── library.cpp      the games found on the console, USB drives and shares (D16)        C++
+  │   ├── sandbox.cpp      out of the sandbox, OGBox's (D15); ps5/elevation: its helper       C++
+  │   └── shares.cpp       the network shares as the list edits them, OGBox's (D15)           C++
+  ├── ps5/vfs/             ps5vfs: SMB, NFS and FTP mounts as paths (Crux2's, by OGBox) (D15)  C++
   ├── ps5/sdl3/            libpsgopher_sdl3.a: the SDL3 + SDL3_ttf functions Gopher64 calls,  C++
   │                        on the PS5 layer, RADV's VK_KHR_display and stb_truetype
   ├── libgopher64.a        Gopher64 (vendor/gopher64 at the pin + ps5/patches/gopher64)       Rust
@@ -123,6 +128,41 @@ frame's picture and its messages are drawn into two layers, and `ps5/shaders/psg
 (Crux2's light: gamma 2.2, BT.709 to BT.2020, white and highlights, PQ) writes each 10:10:10:2 word's
 bytes into the B8G8R8A8 swapchain image. Both are off by default until a console run shows them
 working (the owner's rule for what no console has tested).
+
+**D15. Storage everywhere, as OGBox and Crux2.** A title's sandbox shows only part of `/data` and no
+USB drive. Before anything starts a thread (klog's capture is the first), `main` asks the bundled
+helper (`sandbox-elevator.elf`, OGBox's `ps5/elevation` with PSGopher's title ID; sent to the
+payload loader on port 9021) for the console's whole file system (`ps5/host/sandbox.cpp`, OGBox's
+unchanged), finds the title folder again (it is no longer `/app0`), and from then on gives the
+driver the folder's `param.json` (`PS5_VIDEOOUT_PARAM_JSON`; `/dev/null` at 60 Hz, as OGBox) and
+ps5vfs its stand-in file. `elevation-off.txt` in the title folder keeps it in the sandbox (Settings
+> Storage writes it). Network shares are Crux2's ps5vfs as OGBox has it (`ps5/vfs`: SMB through
+libsmb2, NFS through libnfs, mounted at `/smb/<name>`) with OGBox's share list
+(`ps5/host/shares.cpp`): `/data/psgopher/config/network.cfg`, written by the list as shares are
+added, changed or removed, mounted at the start. Gopher64 reads its ROM with `std::fs`, which knows
+nothing of ps5vfs: a share's ROM is copied to `/data/psgopher/cache/play` (one at a time; a ROM is
+at most 64 MiB) and that path is played. Saves are named by the ROM's hash, so they are the same
+wherever the ROM is. On the console: the helper and the file layer run in OGBox and Crux2 [console];
+with PSGopher's title ID [unknown] until the first run.
+
+**D16. The game list.** Between games the title shows a list of every ROM found (`.z64 .n64 .v64`,
+a `.zip` whose first file is one, a `.7z` in a folder named for the N64 or in `roms/`): the console's
+`/data` (`/data/psgopher/roms` first), `/mnt/usb0-7`, `/mnt/ext0-1` and every share, each searched
+five folders deep on a thread, with a budget per place (`ps5/host/library.cpp`); the list is kept in
+`cache/library.tsv` so a start shows it at once, and searched again in the background. Tabs Internal,
+USB and Network (L1/R1, Crux2's and OGBox's places), Cross plays, Triangle searches again, OPTIONS
+opens the settings, Square (Network) manages the shares with an on-screen keyboard and a search for
+SMB servers. Drawing: Dear ImGui with its Vulkan backend on a device of the list's own (volk, RADV,
+the display's plane surface through `ps5/sdl3`), made before the list and ended before the game, so
+Gopher64's parallel-rdp makes its own as on the desktop; the display (VideoOut) stays open across
+both. Settings are each one's own file, so they persist and agree: Gopher64's are its
+`config.json`, read and written through Gopher64's own `Config` (`psgopher_setting_get/set` in
+`psgopher.rs`, the patch), PSGopher's are `psgopher.ini` (`ps5/host/title_settings.cpp`). Refresh
+takes effect at the next start (the display opens once); HDR10 at the next game, and a game turns
+HDR10 off as it ends, so the list is SDR. A game ends with Gopher64's quit (OPTIONS with the touch
+pad) and the list comes back; Gopher64 runs again in the same process, as its Android build does.
+The host tests draw the list offscreen through the PC's Vulkan with a scripted pad
+(`ps5/tests/test_menu.cpp`, PSGOPHER_MENU_HOST).
 
 ## Milestones
 

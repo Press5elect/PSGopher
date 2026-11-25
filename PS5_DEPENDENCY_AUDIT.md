@@ -22,6 +22,26 @@ has run on a console.
 | parallel-rdp + Granite's Vulkan layer + `interface.cpp` | compiles with `-march=x86-64-v3 -flto=thin` (upstream's flags; Zen 2 code runs [console: Crux2]) |
 | rcheevos + `retroachievements.c` | compiles |
 
+## The title's own libraries (the game list and the shares)
+
+Fetched and built by `ps5/tools/build-deps.sh` into `.deps/` (each at its master, as the owner's rule
+asks; `check-sources.sh` says when one moved on), linked into the title.
+
+| Library | Revision | Licence | PS5 |
+| --- | --- | --- | --- |
+| libsmb2 | `5fdd128` (master of 2026-11-25) | LGPL-2.1-or-later | SMB2/3 shares for ps5vfs; built with the SDK's CMake toolchain, no patches (Crux2 and OGBox link its 6.2 tag the same way [console: both]) |
+| libnfs | `3fb4f2a` (master of 2026-11-25) | LGPL-2.1-or-later, BSD | NFS shares for ps5vfs; Crux2's flags: no coarse clock, no portmapper scan, `getservbyport`/`getuid`/`getgid` answered by ps5vfs (Crux2 pins `7613236` [console: Crux2]) |
+| Dear ImGui | `667c019` (master of 2026-11-25, 1.93.1 WIP) | MIT | the game list, with its Vulkan backend on volk; `IMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS` (its default link opener calls `fork`, which no module a title loads exports) |
+| Roboto Medium | Dear ImGui's `misc/fonts` | Apache-2.0 | the list's font, made into a header at build time |
+
+The network shares also need what the console's libc lacks or refuses, as in Crux2 and OGBox
+(`ps5/host/libc_gaps.c`, their `ps5_libc.c`): `getaddrinfo`/`freeaddrinfo` through the console's
+resolver (libSceNet) in place of the platform layer's, which refuses every lookup, even of a
+numeric address, which libsmb2 and libnfs make; `getprotobyname`; and three wraps, `lstat` (stat's
+answer where the sandbox refuses lstat), `poll` (restarted after a signal) and `setsockopt` (large
+TCP buffers before a share connects: OGBox measured 18 MB/s without them). `link-title.sh` binds
+and wraps them, kept local.
+
 ## Crates
 
 | Crate (as used) | Platform needs | PS5 status |

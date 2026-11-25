@@ -41,18 +41,32 @@ stub libSceAgcDriver vendor/ps5/sdk/stubs/agc_driver_canary_link_stub.c
 source "$vulkan/tools/radv-link.sh"
 radv_link_recipe "$vulkan" "$sdk" "$archive" || exit 2
 
+# The network shares' name lookups (ps5/host/libc_gaps.c, Crux2's and OGBox's ps5_libc.c): the
+# console's resolver in place of the platform layer's getaddrinfo, which refuses every lookup and
+# which libsmb2 and libnfs call even for a numeric address
+for i in "${!radv_link_flags[@]}"; do
+    case ${radv_link_flags[$i]} in
+    --defsym=getaddrinfo=ps5_getaddrinfo) radv_link_flags[$i]=--defsym=getaddrinfo=ps5px_getaddrinfo ;;
+    --defsym=freeaddrinfo=ps5_freeaddrinfo) radv_link_flags[$i]=--defsym=freeaddrinfo=ps5px_freeaddrinfo ;;
+    esac
+done
+# lstat answered by stat where the sandbox refuses it, poll restarted after a signal, TCP buffers
+# made large before a share's connection (OGBox's measured 18 MB/s limit): OGBox's wraps
+radv_link_flags+=(--wrap=lstat --wrap=poll --wrap=setsockopt)
+
 # PSGopher's own bindings, the recipe's way (kept local, so nothing is exported): names Rust's std
 # and its crates import that no console module exports, to the platform layer's functions or to
 # ps5/host/rust_stubs.c's (PS5_DEPENDENCY_AUDIT.md)
 bindings=(accept4=ps5_accept4 gai_strerror=ps5_gai_strerror realpath=ps5_realpath
     getrandom=psgopher_getrandom dl_iterate_phdr=psgopher_dl_iterate_phdr
-    pthread_setname_np=psgopher_pthread_setname_np recvmmsg=psgopher_recvmmsg)
+    pthread_setname_np=psgopher_pthread_setname_np recvmmsg=psgopher_recvmmsg getprotobyname=ps5px_getprotobyname)
 {
     printf '{\n    local:\n'
     for binding in "${bindings[@]}"; do
         printf '        %s;\n' "${binding%%=*}"
         radv_link_flags+=("--defsym=$binding")
     done
+    printf '        __wrap_lstat;\n        __wrap_poll;\n        __wrap_setsockopt;\n'
     printf '};\n'
 } > "$work/link/psgopher-local.map"
 radv_link_flags+=(--version-script "$work/link/psgopher-local.map")
@@ -97,6 +111,10 @@ mkdir -p "$app/sce_sys" "$app/sce_module"
 "$tool" self --inspect --file "$app/eboot.bin" > /dev/null
 cp "$param" "$app/sce_sys/param.json"
 cp "$root/ps5/sce_sys/icon0.png" "$app/sce_sys/icon0.png"
+# the sandbox exit's helper, sent to the payload loader from /app0 (ps5/host/sandbox.cpp)
+cp "$root/build/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
+# the attributions kept and the other authors' parts (NOTICE)
+cp "$root/NOTICE" "$app/NOTICE.txt"
 (cd "$vulkan/runtime" && sha256sum --check --strict --quiet libc.prx.sha256)
 cp "$vulkan/runtime/libc.prx" "$app/sce_module/libc.prx"
 mv "$work/eboot.elf.new" "$work/eboot.elf"

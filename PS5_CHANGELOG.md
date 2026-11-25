@@ -4,6 +4,21 @@
 
 Nothing here has run on a console yet.
 
+- Added: the game list: every N64 ROM on the console's `/data`, USB drives, extended storage and
+  network shares, in tabs (Internal, USB, Network), kept between starts and searched again in the
+  background; a game ends back in the list. Drawn with Dear ImGui on RADV.
+- Added: settings in the list, kept as they change: Gopher64's own in its `config.json` (through
+  Gopher64's `Config`), PSGopher's refresh and HDR10 in `psgopher.ini`. No text file to edit.
+- Added: network shares (SMB and NFS) through Crux2's ps5vfs and OGBox's share list, added and
+  edited in the list with an on-screen keyboard and a search for SMB servers.
+- Added: USB drives and the whole of `/data`: the title leaves its sandbox at the start, as OGBox
+  and Crux2 (the bundled `sandbox-elevator.elf` through the payload loader, port 9021);
+  Settings > Storage turns it off.
+- Added: `NOTICE` (the OGBox and Crux2 attributions kept, every other author), shipped as
+  `NOTICE.txt`; Settings > About.
+- Changed (Gopher64, in `ps5.patch`): `psgopher_setting_get/set`, Gopher64's settings by name for
+  the list; HDR10 goes off as a game ends.
+
 - Added: Gopher64 (`439e6c11f69d`, master of 2026-11-24) builds for the PS5 as a static library,
   with Rust's standard library rebuilt for the console's target (`ps5/rust/x86_64-sie-ps5.json`)
   and parallel-rdp, volk and rcheevos through the payload SDK's clang (fork `88d6e41`).

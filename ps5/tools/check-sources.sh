@@ -43,6 +43,27 @@ else
 fi
 stb=$(sed -n 's/.*nothings\/stb at \([0-9a-f]*\).*/\1/p' "$root/ps5/third_party/stb/README.txt")
 check stb_truetype "$stb" "$(head_of https://github.com/nothings/stb.git refs/heads/master)"
+# the game list's libraries (ps5/tools/build-deps.sh), each at its master
+deps="$root/ps5/tools/build-deps.sh"
+check libsmb2 "$(sed -n 's/^libsmb2_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/sahlberg/libsmb2.git refs/heads/master)"
+check libnfs "$(sed -n 's/^libnfs_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/sahlberg/libnfs.git refs/heads/master)"
+check "Dear ImGui" "$(sed -n 's/^imgui_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/ocornut/imgui.git refs/heads/master)"
+# the sandbox exit's helper and the shares are OGBox's (ps5/elevation, ps5/vfs, ps5/host/shares.*,
+# sandbox.cpp, libc_gaps.c): said when OGBox's copies changed since they were taken
+ogbox=${OGBOX_DIR:-$root/../OGBox}
+if [[ -d $ogbox/ps5/src/platform/vfs ]]; then
+    changed=""
+    for pair in "src/platform/vfs/ps5_vfs_smb.cpp:vfs/ps5_vfs_smb.cpp" "src/platform/vfs/ps5_vfs_nfs.cpp:vfs/ps5_vfs_nfs.cpp" \
+        "src/platform/vfs/ps5_vfs_ftp.cpp:vfs/ps5_vfs_ftp.cpp" "src/platform/vfs/ps5_vfs_internal.h:vfs/ps5_vfs_internal.h" \
+        "elevation/validate-elevation-helper.py:elevation/validate-elevation-helper.py"; do
+        cmp -s "$ogbox/ps5/${pair%%:*}" "$root/ps5/${pair#*:}" || changed+=" ${pair#*:}"
+    done
+    if [[ -z $changed ]]; then
+        printf '  ok      %-22s the files taken unchanged are the same as OGBox %s\n' "OGBox's shares" "$(git -C "$ogbox" rev-parse --short=12 HEAD)"
+    else
+        printf '  note    %-22s differ from OGBox %s:%s (see what changed there)\n' "OGBox's shares" "$(git -C "$ogbox" rev-parse --short=12 HEAD)" "$changed"
+    fi
+fi
 echo "  note    PS5 Mesa main is $(head_of https://github.com/mihawk-99/PS5_Mesa.git | cut -c1-12); PSGopher follows PS5_Vulkan's pin of it"
 echo "  note    Rust: $(rustc +nightly --version 2>/dev/null) (rustup update nightly for the newest)"
 exit $behind

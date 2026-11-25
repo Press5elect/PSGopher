@@ -1,0 +1,42 @@
+PSGopher - a port of Gopher64 to the PlayStation 5
+Copyright (C) 2026 Press5elect
+
+PSGopher is free software: you can redistribute it and/or modify it under the terms of the GNU
+General Public License as published by the Free Software Foundation, either version 3 of the
+License, or (at your option) any later version (LICENSE). It is distributed in the hope that it
+will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or
+FITNESS FOR A PARTICULAR PURPOSE.
+
+
+ATTRIBUTIONS KEPT (GPL-3.0, section 7(b))
+
+Parts of PSGopher are taken from OGBox and Crux2 (Press5elect), whose licences add the additional
+term of GPL-3.0 section 7(b) that the author attribution be preserved:
+
+  "OGBox by Press5elect"    the network shares and the files they read (ps5/host/shares.*, from
+                            OGBox's ps5/src/ogbox_shares.*), the sandbox exit (ps5/host/sandbox.*,
+                            from OGBox's ps5/src/platform/ps5_sandbox.*; ps5/elevation, OGBox's,
+                            from Crux2), ps5/tools/build-elevator.sh, and the changes marked "OGBox"
+                            in the files below;
+  "Crux2 by Press5elect"    the virtual file layer (ps5/vfs, Crux2's ps5vfs by way of OGBox) and
+                            the libc gaps (ps5/host/libc_gaps.c, Crux2's and OGBox's ps5_libc.c):
+                            the files whose header carries "keep the attribution "Crux2 by
+                            Press5elect"".
+
+These attributions are kept in those files' copyright notices, in this NOTICE file (which goes
+with every copy of the source and is in the title folder as NOTICE.txt), and in the game list's
+Settings > About.
+
+
+OTHER AUTHORS' PARTS
+
+Gopher64 (Logan McNaughton and contributors, GPL-3.0), with parallel-rdp (Hans-Kristian Arntzen,
+MIT), volk (Arseny Kapoulkine, MIT), rcheevos (the RetroAchievements team, MIT) and the Rust crates
+it builds with (their own licences). The sandbox elevation helper and its client in ps5/elevation:
+BlackBearReloaded's ps5-native-app-boilerplate (GPL-3.0-or-later; ps5/elevation/LICENSE). libsmb2
+(Ronnie Sahlberg, LGPL-2.1-or-later) and libnfs (Ronnie Sahlberg, LGPL-2.1-or-later and BSD),
+linked for the network shares. Dear ImGui (Omar Cornut, MIT), the game list's drawing, and its
+Roboto Medium font (Christian Robertson, Apache License 2.0). stb_truetype (Sean Barrett, public
+domain or MIT). The PS5 layer in ps5/host/platform* (Mihawk's PS5 Vulkan Template, MIT); RADV
+(Mesa, MIT) through Mihawk's PS5_Mesa and PS5_Vulkan, with Crux2's driver patches; the payload
+SDK and platform layer (Mihawk's PS5_PayloadSDK).
