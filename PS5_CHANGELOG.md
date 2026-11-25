@@ -13,6 +13,10 @@ Nothing here has run on a console yet.
 - Added: the title `PPSA99280` (provisional ID): klog, the splash, folders under `/data/psgopher`,
   the ROM from `autostart.txt` or `roms/`, the shell exit. Links through PS5_Vulkan's RADV recipe
   (RADV at PS5 Mesa `1ba9874`); every import resolves to a module a title loads.
+- Added: 119.88 Hz, variable refresh and HDR10 output, through Crux2's RADV, chosen in
+  `/data/psgopher/config/psgopher.ini` (`display`, `hdr`); off by default until tested on a console.
+- Changed: RADV is Crux2's (PS5 Mesa `1ba9874` with Crux2's 17 driver patches, Mesa main 27.0-devel
+  among them), built by Crux2's script; the build refuses PS5_Vulkan's plain archive.
 - Added: the console probe (`probe.txt`) and the benchmark mode (`benchmark.txt`).
 - Changed: the console icon is Gopher64's gopher logo on PSGopher's dark ground (`ps5/sce_sys/icon0.png`,
   made from Gopher64's `data/icon/gopher64.png`).

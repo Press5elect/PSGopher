@@ -27,6 +27,10 @@ in `/data/psgopher/data/`. Controls are Gopher64's default gamepad layout on the
 A, Square B, L2 Z, Options Start, the right stick the C buttons; the touch pad click is Gopher64's
 hotkey (with Options: quit; with L1/R1: save/load state; with L2: fast forward).
 
+Display and HDR: `/data/psgopher/config/psgopher.ini` (made at the first start) sets `display = 60`
+(the default), `120` or `vrr` (variable refresh, on a TV that has it), and `hdr = on` for HDR10 when the
+console's output is HDR, with `hdr_white` and `hdr_peak` in nits. Both are untested on a console yet.
+
 No games, BIOS or other copyrighted data are included.
 
 ## Licence and credits

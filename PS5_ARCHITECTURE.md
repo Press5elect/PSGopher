@@ -16,11 +16,11 @@ comments and the changelog. Labels as in PS5_PORTING_ANALYSIS.md.
   │   ├── src/ui/          unchanged; calls SDL3 through the real sdl3-sys bindings (no-link)
   │   ├── src/psgopher.rs  psgopher_main(): the entry the title calls (the patch adds it)
   │   └── parallel-rdp/    compiled by Gopher64's build.rs with the SDK's clang++              C++
-  ├── RADV release archive PS5_Vulkan's, PS5 Mesa at PS5_Vulkan's pin                         C/C++
+  ├── RADV, Crux2's       PS5 Mesa at PS5_Vulkan's pin + Crux2's patches (ps5/patches/mesa-27)  C/C++
   └── libps5platform.a     PS5_PayloadSDK's platform layer (heap, threads, libc gaps)         C
 ```
 
-Linking is PS5_Vulkan's `tools/radv-link.sh`, unchanged (heap and thread wraps, libc bindings,
+RADV is Crux2's archive, the same driver Crux2 ships (D13). Linking is PS5_Vulkan's `tools/radv-link.sh`, unchanged (heap and thread wraps, libc bindings,
 whole-archive RADV).
 
 ## Decisions
@@ -99,6 +99,30 @@ nodynamic-undefined-weak` (Mesa's weak entry points must not become imports), an
 `getrandom`, `dl_iterate_phdr`, `pthread_setname_np`, `recvmmsg` to `ps5/host/rust_stubs.c`).
 The four in `rust_stubs.c` belong in the platform layer with host tests; they stay here until
 PS5_PayloadSDK takes them. zstd is built with `ZSTD_TRACE=0` (its weak hooks would be imports).
+
+**D13. Crux2's RADV.** PSGopher links the RADV Crux2 builds and plays on: PS5 Mesa at PS5_Vulkan's
+pin with Crux2's driver series (`ps5/patches/mesa-27` in Crux2: Mesa main 27.0-devel merged in,
+the GFX10.1 hardware workarounds, the shader-cache and timed-wait fixes, the VideoOut changes),
+built by Crux2's own `ps5/tools/build-radv-crux2.sh` into PS5_Vulkan's `.deps/native/radv-crux2`.
+The patches live in Crux2 only. `link-title.sh` refuses to link without that archive, and
+`check-sources.sh` stops the build when the archive's patch list differs from Crux2's current one.
+The series' opt-in features (variable refresh, HDR10, streamed zeroing) stay off: PSGopher sets
+none of their switches.
+
+**D14. Variable refresh and HDR10, behind settings.** Both come from Crux2's RADV (patches 0015-0017
+and 0020) and need the title's side, done as Crux2 does it. `param.json` declares the 119.88 Hz mode
+(`attribute3` 0x80040) and HDR10 (`attribute` 0x20000000); `ps5/host/videoout_hooks.cpp` answers the
+driver's three hooks by finding `sceVideoOutVrrUnpegFromFixedRate`, `sceVideoOutSubmitChangeBufferAttribute2`
+and `sceVideoOutGetOutputStatus` by name or NID while the title runs (Crux2's lookup; a title that
+imported them would not start on a firmware without them). `/data/psgopher/config/psgopher.ini`
+chooses: `display = 60` (default; `PS5_VIDEOOUT_59HZ`), `120`, or `vrr` (`PS5_VIDEOOUT_VRR`: each frame
+shown when ready, which also ends PAL's 50 Hz judder); `hdr = off` (default) or `on`, with
+`hdr_white` (203) and `hdr_peak` (1000). HDR10 is on only while asked for, the console's output is
+HDR and VideoOut took the framebuffers (Crux2's rules, in `interface.cpp` under `PSGOPHER`): the
+frame's picture and its messages are drawn into two layers, and `ps5/shaders/psgopher_hdr.frag`
+(Crux2's light: gamma 2.2, BT.709 to BT.2020, white and highlights, PQ) writes each 10:10:10:2 word's
+bytes into the B8G8R8A8 swapchain image. Both are off by default until a console run shows them
+working (the owner's rule for what no console has tested).
 
 ## Milestones
 

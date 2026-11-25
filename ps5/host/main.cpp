@@ -169,6 +169,76 @@ static Uint32 benchmark_timer(void *, SDL_TimerID, Uint32)
    return 100;
 }
 
+/* ---------------------------------------------------------------- the title's own settings */
+
+/* /data/psgopher/config/psgopher.ini (Gopher64's own are in config.json): the display's refresh and
+ * HDR10, which must be known before Vulkan starts. Written with its defaults when missing, so it can be
+ * edited over FTP. Variable refresh and HDR10 are off until a console run has shown them working
+ * (default-off, the owner's rule for what no console has tested yet). */
+static const char SETTINGS[] = "/data/psgopher/config/psgopher.ini";
+static const char SETTINGS_DEFAULT[] =
+   "# PSGopher's own settings (Gopher64's are in config.json). Read when the title starts.\n"
+   "#\n"
+   "# display: 60   59.94 Hz, the N64's own rate (PAL games' 50 Hz alternate one and two refreshes)\n"
+   "#          120  119.88 Hz\n"
+   "#          vrr  119.88 Hz with variable refresh: each frame shown when it is ready (NTSC and PAL\n"
+   "#               alike), on a TV that has it; otherwise as 120\n"
+   "display = 60\n"
+   "\n"
+   "# hdr: on sends HDR10 when the console's own output is HDR (its settings, and the TV); otherwise SDR\n"
+   "hdr = off\n"
+   "# hdr_white: the nits white is shown at (80 to 400; 203 is HDR's reference)\n"
+   "hdr_white = 203\n"
+   "# hdr_peak: the nits the brightest parts of the picture are raised to (0 off; up to 4000)\n"
+   "hdr_peak = 1000\n";
+
+static void apply_settings()
+{
+   if (FILE *f = fopen(SETTINGS, "r"))
+      fclose(f);
+   else if (FILE *w = fopen(SETTINGS, "w")) {
+      fputs(SETTINGS_DEFAULT, w); /* (one fwrite of a small file: fine) */
+      fclose(w);
+      chmod(SETTINGS, 0666);
+   }
+   std::string display = "60", hdr = "off", white = "203", peak = "1000";
+   if (FILE *f = fopen(SETTINGS, "r")) {
+      char line[256];
+      while (fgets(line, sizeof(line), f)) {
+         char key[64] = {}, value[128] = {};
+         if (line[0] == '#' || sscanf(line, " %63[a-z_] = %127s", key, value) != 2)
+            continue;
+         if (!strcmp(key, "display"))
+            display = value;
+         else if (!strcmp(key, "hdr"))
+            hdr = value;
+         else if (!strcmp(key, "hdr_white"))
+            white = value;
+         else if (!strcmp(key, "hdr_peak"))
+            peak = value;
+      }
+      fclose(f);
+   }
+   /* the driver's switches (Crux2's RADV, patches 0015/0016): param.json declares 119.88 Hz; 59.94
+    * unless asked otherwise, variable refresh only on request */
+   if (display == "vrr") {
+      setenv("PS5_VIDEOOUT_VRR", "1", 1);
+      say("display: 119.88 Hz with variable refresh asked for (%s)", SETTINGS);
+   } else if (display == "120") {
+      say("display: 119.88 Hz asked for (%s)", SETTINGS);
+   } else {
+      setenv("PS5_VIDEOOUT_59HZ", "1", 1);
+      say("display: 59.94 Hz (%s: display = %s)", SETTINGS, display.c_str());
+   }
+   /* parallel-rdp's interface reads these (vendor/gopher64/parallel-rdp/interface.cpp, PSGOPHER) */
+   if (hdr == "on") {
+      setenv("PSGOPHER_HDR", "1", 1);
+      setenv("PSGOPHER_HDR_WHITE", white.c_str(), 1);
+      setenv("PSGOPHER_HDR_PEAK", peak.c_str(), 1);
+      say("display: HDR10 asked for: white %s nits, highlights %s nits", white.c_str(), peak.c_str());
+   }
+}
+
 static std::string choose_rom()
 {
    const std::string roms = std::string(ROOT) + "/roms";
@@ -206,6 +276,7 @@ int main()
     * 13: PROBE.md) */
    setenv("MESA_SHADER_CACHE_DIR", "/data/psgopher/cache/radv", 1);
    setenv("TOKIO_WORKER_THREADS", "2", 0);
+   apply_settings();
 
    if (exists(std::string(ROOT) + "/probe.txt")) {
       probe();

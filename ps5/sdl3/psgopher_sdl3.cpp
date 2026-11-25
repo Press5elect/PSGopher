@@ -182,7 +182,8 @@ extern "C" char const *const *SDL_Vulkan_GetInstanceExtensions(Uint32 *count)
    return extensions;
 }
 
-/* The display's mode closest to the N64's 59.94 Hz from below 60.5 Hz, else its first (D5) */
+/* The display's mode: at 60 Hz (PS5_VIDEOOUT_59HZ, the title's default) the fastest up to 60.5 Hz, the
+ * N64's 59.94; at 120 Hz the fastest the driver offers (D5, D14) */
 extern "C" bool SDL_Vulkan_CreateSurface(SDL_Window *window, VkInstance instance,
                                          const struct VkAllocationCallbacks *allocator, VkSurfaceKHR *surface)
 {
@@ -211,10 +212,14 @@ extern "C" bool SDL_Vulkan_CreateSurface(SDL_Window *window, VkInstance instance
    vkGetDisplayModePropertiesKHR(gpu, display.display, &count, modes.data());
    if (count == 0)
       return set_error("SDL_Vulkan_CreateSurface: the display has no mode");
+   const bool sixty = getenv("PS5_VIDEOOUT_59HZ") != nullptr;
    const VkDisplayModePropertiesKHR *chosen = &modes[0];
    for (const auto &mode : modes) {
       const uint32_t rate = mode.parameters.refreshRate; /* millihertz */
-      if (rate <= 60500 && (chosen->parameters.refreshRate > 60500 || rate > chosen->parameters.refreshRate))
+      if (!sixty) {
+         if (rate > chosen->parameters.refreshRate)
+            chosen = &mode;
+      } else if (rate <= 60500 && (chosen->parameters.refreshRate > 60500 || rate > chosen->parameters.refreshRate))
          chosen = &mode;
    }
    VkDisplaySurfaceCreateInfoKHR info = {VK_STRUCTURE_TYPE_DISPLAY_SURFACE_CREATE_INFO_KHR};

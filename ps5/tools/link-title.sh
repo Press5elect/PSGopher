@@ -13,7 +13,11 @@ work=$1 vulkan=$2 sdk=$3
 shift 3
 objects=("$@")
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-archive=${RADV_ARCHIVE:-$vulkan/.deps/native/radv-release/lib/libvulkan_radeon.ps5.a}
+# RADV is Crux2's: PS5_Vulkan's PS5 Mesa pin with Crux2's driver patches (ps5/patches/mesa-27 in
+# ../Crux2), built by Crux2's ps5/tools/build-radv-crux2.sh into PS5_Vulkan's .deps/native/radv-crux2.
+# PS5_Vulkan's plain release archive is never linked by mistake: without radv-crux2 the link stops.
+archive=${RADV_ARCHIVE:-$vulkan/.deps/native/radv-crux2/lib/libvulkan_radeon.ps5.a}
+[[ -f $archive ]] || { echo "link-title.sh: no Crux2 RADV at $archive: run ../Crux2/ps5/tools/build-radv-crux2.sh" >&2; exit 2; }
 export PS5_CLANG=${PS5_CLANG:-$(command -v clang || true)}
 tool="$vulkan/build/host/ps5-native-tool"
 native="$vulkan/tooling/native"

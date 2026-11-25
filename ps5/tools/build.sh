@@ -31,18 +31,19 @@ work="$root/build/ps5"
 mkdir -p "$work/obj"
 cc() { PS5_PAYLOAD_SDK="$sdk" sh "$vulkan/tooling/prospero-clang18" "$@"; }
 # the build's identity, first in the boot log: this repository's commit (+dirty) and Gopher64's pin
-identity="PSGopher $(git -C "$root" describe --always --dirty --abbrev=12), Gopher64 $(sed -n 's/^revision=//p' "$root/ps5/tools/fetch-gopher64.sh" | cut -c1-12), RADV $(sed -n 's/^revision: //p' "$vulkan/.deps/native/radv-release/PROVENANCE.txt" | cut -c1-11), built $(date -u +%Y-%m-%dT%H:%MZ)"
+identity="PSGopher $(git -C "$root" describe --always --dirty --abbrev=12), Gopher64 $(sed -n 's/^revision=//p' "$root/ps5/tools/fetch-gopher64.sh" | cut -c1-12), RADV Crux2 $(git -C "${CRUX2_DIR:-$root/../Crux2}" rev-parse --short=12 HEAD 2>/dev/null) on PS5 Mesa $(sed -n 's/^Crux2: PS5 Mesa \([0-9a-f]*\).*/\1/p' "$vulkan/.deps/native/radv-crux2/PROVENANCE.txt" | cut -c1-11), built $(date -u +%Y-%m-%dT%H:%MZ)"
 common=(-DPSGOPHER_BUILD="\"$identity\"" -O2 -g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter
     -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$root/ps5/third_party/stb"
-    -I"$vulkan/.deps/native/radv-release/include" -I"$sdk/target/include")
+    -I"$vulkan/.deps/native/radv-crux2/include" -I"$sdk/target/include")
 cc -std=c11 "${common[@]}" -c "$root/ps5/host/platform.c" -o "$work/obj/platform.o"
 cc -std=c11 "${common[@]}" -c "$root/ps5/host/rust_stubs.c" -o "$work/obj/rust_stubs.o"
 cc -std=c11 "${common[@]}" -c "$root/ps5/host/bench.c" -o "$work/obj/bench.o"
 cc -std=c++20 "${common[@]}" -c "$root/ps5/host/main.cpp" -o "$work/obj/main.o"
+cc -std=c++20 "${common[@]}" -c "$root/ps5/host/videoout_hooks.cpp" -o "$work/obj/videoout_hooks.o"
 cc -std=c++20 "${common[@]}" -Wno-unused-function -Wno-missing-field-initializers \
     -c "$root/ps5/sdl3/psgopher_sdl3.cpp" -o "$work/obj/psgopher_sdl3.o"
 echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
 "$root/ps5/tools/link-title.sh" "$work" "$vulkan" "$sdk" \
-    "$work/obj/main.o" "$work/obj/platform.o" "$work/obj/psgopher_sdl3.o" "$work/obj/rust_stubs.o" "$work/obj/bench.o" "$core"
+    "$work/obj/main.o" "$work/obj/platform.o" "$work/obj/psgopher_sdl3.o" "$work/obj/rust_stubs.o" "$work/obj/bench.o" "$work/obj/videoout_hooks.o" "$core"

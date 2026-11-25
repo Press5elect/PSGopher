@@ -8,6 +8,7 @@ How the title is built on an x86-64 Linux PC (Ubuntu 24.04 here), as it was buil
 | --- | --- |
 | `../PS5_Vulkan` ([mihawk-99/PS5_Vulkan](https://github.com/mihawk-99/PS5_Vulkan)) | RADV's release archive, the link recipe (`tools/radv-link.sh`), the native tool, `libc.prx`, the compiler wrapper, the console tools |
 | `../PS5_Mesa` | RADV's source, built by PS5_Vulkan at its pin |
+| `../Crux2` ([Press5elect/Crux2](https://github.com/Press5elect/Crux2)) | RADV: its driver patches (`ps5/patches/mesa-27`) and the script that builds them (`ps5/tools/build-radv-crux2.sh`) |
 | `../PS5_PayloadSDK` | the payload SDK fork and its platform layer, exported at `ps5/tools/setup-sdk.sh`'s pin |
 | `../PS5_VulkanTemplate` (optional) | its `ps5/tools/bootstrap.sh` sets the three up; the PS5 layer in `ps5/host/platform*` comes from it |
 
@@ -41,6 +42,20 @@ git clone https://github.com/mihawk-99/PS5_VulkanTemplate.git ../PS5_VulkanTempl
 That clones PS5_Vulkan, PS5_Mesa and PS5_PayloadSDK beside it, builds PS5_Vulkan's SDK, the native
 tool and `libc.prx`, and RADV's release archive (`tools/build-radv.sh release`, the long step).
 It also asks for the console's address in PS5_Vulkan's `.env`, which only the console tools need.
+
+Then RADV as Crux2 builds it (another long build; again after Crux2's Mesa patches change):
+
+```bash
+git clone https://github.com/Press5elect/Crux2.git ../Crux2
+```
+
+```bash
+../Crux2/ps5/tools/build-radv-crux2.sh
+```
+
+It applies Crux2's patches to PS5_Vulkan's Mesa pin on a local `crux2-radv` branch of PS5_Mesa
+(nothing is pushed) and leaves the archive in `../PS5_Vulkan/.deps/native/radv-crux2`, the one
+PSGopher links. PS5_Vulkan's plain release archive is left as it was and is not used.
 
 ## The build
 
@@ -104,6 +119,7 @@ Files the title reads, in `/data/psgopher/` (create them over FTP):
 | `roms/<file>` | ROMs (`.z64 .n64 .v64 .zip .7z .bin`); the first by name boots |
 | `autostart.txt` | first line: the ROM to boot (a file in `roms/` or a full path) |
 | `probe.txt` | run the console probe instead of a game, then exit (`probe:` lines) |
+| `config/psgopher.ini` | the display (`display = 60`, `120` or `vrr`) and HDR10 (`hdr = on`, `hdr_white`, `hdr_peak`); written with its defaults at the first start |
 | `benchmark.txt` | benchmark mode: lines `rom <file>`, `seconds <n>`, `unlimited` (`bench:` lines, `bench-<time>.csv`) |
 
 What Gopher64 writes there: `config/config.json`, `data/saves/`, `data/states/`, `cache/`

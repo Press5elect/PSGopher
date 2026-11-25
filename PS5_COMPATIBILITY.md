@@ -44,7 +44,7 @@ angrylion-rdp-plus's, byte for byte.
 | Where | Driver | Result |
 | --- | --- | --- |
 | PC, 2026-11-25 [here] | lavapipe (Mesa 26.0.8, llvmpipe, Vulkan 1.4.335) | **257 of 257 passed** (ctest, 24 min on 4 cores) |
-| PS5 | RADV, PS5 Mesa `1ba9874` | not run yet: needs the tool built as a test title |
+| PS5 | RADV, Crux2's (PS5 Mesa `1ba9874` + Crux2's patches) | not run yet: needs the tool built as a test title |
 
 The PC run shows the shader binaries and the renderer at the pin are correct on a conformant
 driver; it says nothing about RADV on the console, which is what the console run is for.

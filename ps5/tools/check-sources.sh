@@ -25,9 +25,22 @@ check gopher64 "$(sed -n 's/^revision=//p' "$root/ps5/tools/fetch-gopher64.sh")"
 check PS5_PayloadSDK "$(sed -n 's/^sdk_revision=\([0-9a-f]*\).*/\1/p' "$root/ps5/tools/setup-sdk.sh")" \
     "$(head_of https://github.com/mihawk-99/PS5_PayloadSDK.git)"
 check PS5_Vulkan "$(git -C "$vulkan" rev-parse HEAD 2>/dev/null)" "$(head_of https://github.com/mihawk-99/PS5_Vulkan.git)"
+# RADV: Crux2's archive, built on PS5_Vulkan's Mesa pin with exactly the patches Crux2 has now
+crux2=${CRUX2_DIR:-$root/../Crux2}
 mesa_pin=$(sed -n 's/^mesa_revision=//p' "$vulkan/tools/build-radv.sh" 2>/dev/null | grep -o '[0-9a-f]\{40\}')
-built=$(sed -n 's/^revision: //p' "$vulkan/.deps/native/radv-release/PROVENANCE.txt" 2>/dev/null)
-check "RADV archive (PS5 Mesa)" "$built" "$mesa_pin"
+provenance="$vulkan/.deps/native/radv-crux2/PROVENANCE.txt"
+built=$(sed -n 's/^Crux2: PS5 Mesa \([0-9a-f]*\).*/\1/p' "$provenance" 2>/dev/null)
+check "RADV (Crux2's, Mesa pin)" "$built" "$mesa_pin"
+have=$(sed -n 's/^  \([0-9][0-9][0-9][0-9]-.*\.patch\)$/\1/p' "$provenance" 2>/dev/null | sort | tr '\n' ' ')
+want=$(ls "$crux2/ps5/patches/mesa-27/" 2>/dev/null | grep '\.patch$' | sort | tr '\n' ' ')
+if [[ -z $want ]]; then
+    printf '  ?       %-22s no Crux2 checkout at %s\n' "RADV (Crux2's patches)" "$crux2"
+elif [[ $have == "$want" ]]; then
+    printf '  ok      %-22s %s patches, Crux2 %s\n' "RADV (Crux2's patches)" "$(wc -w <<< "$want")" "$(git -C "$crux2" rev-parse --short=12 HEAD)"
+else
+    printf '  behind  %-22s the archive was not built with Crux2'"'"'s current patches: run %s\n' "RADV (Crux2's patches)" "$crux2/ps5/tools/build-radv-crux2.sh"
+    behind=1
+fi
 stb=$(sed -n 's/.*nothings\/stb at \([0-9a-f]*\).*/\1/p' "$root/ps5/third_party/stb/README.txt")
 check stb_truetype "$stb" "$(head_of https://github.com/nothings/stb.git refs/heads/master)"
 echo "  note    PS5 Mesa main is $(head_of https://github.com/mihawk-99/PS5_Mesa.git | cut -c1-12); PSGopher follows PS5_Vulkan's pin of it"
