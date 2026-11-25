@@ -299,6 +299,11 @@ static void csv_add(const char *line)
    csv_length += n;
 }
 
+/* the run's summary (benchmark mode): the live figures of each second after the first five
+ * (a probe loading, shaders made), averaged */
+static int run_seconds;
+static double run_vis, run_fps, run_cpu, run_rsp, run_rdp, run_part[3], run_speed;
+
 static void *bench_main(void *unused)
 {
    (void)unused;
@@ -339,6 +344,15 @@ static void *bench_main(void *unused)
       csv_add(line);
       line[strlen(line) - 1] = 0;
       say("bench: %s", line);
+      if (second >= 5) {
+         struct psgopher_live l;
+         psgopher_live_read(&l);
+         run_seconds++;
+         run_vis += l.frames_per_second, run_fps += l.game_fps, run_speed += l.speed;
+         run_cpu += l.cpu_ms, run_rsp += l.rsp_ms, run_rdp += l.rdp_ms;
+         for (int i = 0; i < 3; i++)
+            run_part[i] += l.rdp_part_ms[i];
+      }
    }
    return NULL;
 }
@@ -348,6 +362,9 @@ bool psgopher_bench_start(const char *path)
    if (atomic_load(&running))
       return true;
    snprintf(csv_path, sizeof(csv_path), "%s", path);
+   run_seconds = 0;
+   run_vis = run_fps = run_cpu = run_rsp = run_rdp = run_speed = 0;
+   run_part[0] = run_part[1] = run_part[2] = 0;
    say("bench: columns second,presents,frame_min_ms,frame_median_ms,frame_p99_ms,frame_max_ms,"
        "present_block_ms,emu_cpu_ms,rdram_wait_ms,rdram_waits,audio_underrun_grains,audio_queued_ms");
    if (now_ns(CLOCK_THREAD_CPUTIME_ID) == UINT64_MAX)
@@ -373,6 +390,14 @@ void psgopher_bench_stop(void)
    atomic_store(&running, false);
    pthread_join(thread, NULL);
    atomic_store(&enabled, false);
+   if (run_seconds > 0) {
+      const double n = run_seconds;
+      say("benchmark summary: %d s measured: %.2f VIs a second (%.0f%% speed), game %.1f fps; a VI: CPU %.2f ms "
+          "(RSP %.2f, RDP %.2f: draw %.2f, sync %.2f, frame %.2f)",
+          run_seconds, run_vis / n, run_speed / n, run_fps / n, run_cpu / n, run_rsp / n, run_rdp / n, run_part[0] / n,
+          run_part[1] / n, run_part[2] / n);
+   } else
+      say("benchmark summary: the run was shorter than its first five seconds");
    const int fd = open(csv_path, O_WRONLY | O_CREAT | O_TRUNC, 0666);
    if (fd >= 0) {
       const ssize_t written = write(fd, csv, csv_length);

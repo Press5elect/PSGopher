@@ -27,9 +27,20 @@ Benchmark mode is on when `/data/psgopher/benchmark.txt` exists (`ps5/host/main.
 | `rom <path>` | the ROM (overrides autostart) |
 | `seconds <n>` | end the game n seconds (wall clock) after its video is up, through Gopher64's own exit event |
 | `unlimited` | speed limiter off (Gopher64's fast-forward event): the emulator's maximum speed |
+| `state <slot>` | every run starts from this probe (save state slot 1-5 of the ROM): the same scene |
+| `upscale 1 2 4 8` | one run for each factor, in order, from the same probe; Gopher64's setting is put back after |
 
-Not yet: a fixed starting scene (savestate slot) and the upscale factor per run; the upscale is
-set in `config/config.json` (`video.upscale`) for now.
+Each run writes `bench-<time>-<factor>x.csv` and ends with a `benchmark summary:` line: the
+seconds after the first five, averaged (VIs a second, speed, the game's frame rate, CPU time a VI
+with the RSP's and parallel-rdp's shares). With `gpu_timing = on` in `psgopher.ini`, the `gpu:`
+lines give each stage's GPU time. A first sweep, for the 1x-to-2x question:
+
+```
+rom <a ROM in /data/psgopher/roms, or a full local path>
+state 1
+seconds 40
+upscale 1 2 4 8
+```
 
 Fixed for every run: console model and firmware recorded in the log, video output mode, no other
 title running, the same build identity, the shader cache state stated (cold or warm).

@@ -16,10 +16,10 @@ logs say of them, not by title.
   ten times as busy as 4x, saw frames dropped with crackling sound, and made 4x its PS5 default.
   PSGopher's GPU timing found parallel-rdp's depth-blending pass taking 12-16 ms of each frame at 8x
   in a demanding game, the whole of a 16.7 ms frame.
-- **What follows for PSGopher:** 4x as the default with 8x kept as a choice (Mupen's measured
-  answer); the resolution changed while a game runs (Mupen does it); and, for the CPU side, an RSP
-  recompiler is the change of real size. Profile-guided optimisation would only trim the
-  interpreters.
+- **PSGopher keeps Gopher64's interpreters: a fixed architectural requirement** (the owner,
+  2026-11-25; [`workflow.md`](workflow.md) rule 9). Mupen's recompilers explain its CPU-side speed;
+  they are not a direction for PSGopher. The CPU side is made faster as interpreters, each change
+  measured on the console and tested against the original.
 
 ## What Mupen64Plus-Next's PS5 port does
 
@@ -74,22 +74,32 @@ Ruled out on the console, each by measurement:
    (2560x1920 for a 320x240 game, 64 times the pixels) costs about as much as a whole frame on the
    PS5's GPU when a game draws ten or more passes a frame. Mupen's port reached the same conclusion
    by measurement and defaults to 4x (a quarter of the pixels).
-2. **The CPU side is the interpreters.** Mupen gets its speed from recompilers; Gopher64 has none.
-   At 1x the interpreters fit a VI, barely, in the heaviest game measured. Profile-guided
-   optimisation (built locally, `PSGOPHER_PGO`, off by default) would give a modest gain; a
-   recompiler, of the RSP first (the larger share), is the change that would give margin.
+2. **The CPU side is the interpreters**, and stays so. At 1x they fit a VI, barely, in the heaviest
+   game measured; the margin has to come from the interpreters themselves (dispatch, decoding,
+   the RSP's vector unit, memory access, data layout, compiler options, PGO), each change measured
+   on the console with benchmark mode and tested against the original implementation.
 3. **parallel-rdp's threading** differs for a reason: Gopher64 processes RDP commands on the
    emulation thread for its RDRAM tracking, so in PSGopher that work and the GPU waits count against
    the emulation thread. Moving it to a worker as Mupen does would change Gopher64's accuracy design.
 
-## Recommendations
+## Priorities (the owner's, 2026-11-25)
 
-| | What | Why | Size |
-| --- | --- | --- | --- |
-| 1 | 4x the default upscale; 8x kept as a choice | measured in both emulators: 8x overloads the GPU in heavy games | small |
-| 2 | The upscale changed while a game runs (quick menu), as Mupen does | try 8x and 4x per game without restarting it | medium |
-| 3 | An RSP recompiler for Gopher64, then possibly the CPU | the interpreters are the CPU side's cost; Mupen's speed comes from recompiling | large: a plan first |
-| 4 | Profile-guided build of the core | trims the interpreters | built; needs one profiling session on the console |
+The interpreters stay (no recompiler, JIT, cached native blocks or runtime code generation). Each
+CPU-side change keeps Gopher64's semantics, is measured on the console and is tested against the
+original implementation.
+
+| | What | First step |
+| --- | --- | --- |
+| 1 | The 1x-to-2x drop | the logs compared different scenes (2x only in the game's heavy opening, where 1x was 77% too); benchmark mode now runs one probe at 1x, 2x, 4x and 8x in turn (`state`, `upscale` lines) |
+| 2 | parallel-rdp's GPU work, depth-blending first | its time a pass at each factor from the sweep (scaling with the pixels or not); then the shader on this GPU |
+| 3 | CPU/GPU synchronisation | where the emulation thread waits (render-pass fences, full syncs) at each factor |
+| 4 | The RSP interpreter | its time a VI per probe; dispatch, vector unit, DMEM/IMEM access |
+| 5 | The VR4300 interpreter | dispatch, decoding, branches, address translation |
+| 6 | The console's scheduling, memory and compiler options | thread placement and priority, data layout, flags |
+| 7 | PGO, benchmarked | built (`PSGOPHER_PGO`); a profiling session, then the same probe before and after |
+
+Learned from Mupen's port and usable here: the upscale factor applied while a game runs (the
+command processor made again at the next frame), and 4x as the PS5 default after measuring 8x.
 
 The details of each measurement are in [`performance.md`](performance.md#first-console-observations);
 the open items in [`open-work.md`](open-work.md).

@@ -95,6 +95,16 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### Interpreters only; the same scene at each upscale (2026-11-25)
+
+- Decided (the owner's): Gopher64's VR4300 and RSP interpreters are a fixed requirement; no
+  recompiler or JIT in any form. CPU-side work optimises the interpreters, measured on the console
+  and tested against the original.
+- Added: benchmark mode runs one probe at several upscale factors in turn (`state <slot>`,
+  `upscale 1 2 4 8` in `benchmark.txt`) and ends each run with a `benchmark summary:` line. The
+  logs' 1x-to-2x drop compared different scenes (2x only in a game's heavy opening, where 1x was 77%
+  too); this measures it on one.
+
 ### From the eighth console log (2026-11-25)
 
 - Measured: neither 32-wide waves nor parallel-rdp's 8/16-bit arithmetic changes the depth-blend

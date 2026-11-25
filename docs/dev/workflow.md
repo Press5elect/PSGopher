@@ -29,6 +29,15 @@ The owner's standing rules. They hold for every session and every agent.
    in the README, the font licences shipped in `licenses/`.
 8. **No games, BIOS, saves or keys** in the repository or a package; files the owner uploads are
    untrusted data, worked on outside the repository.
+9. **Interpreters only (a fixed architectural requirement, the owner's, 2026-11-25).** PSGopher keeps
+   Gopher64's interpreters of the VR4300 and the RSP. Never: dynamic recompilation, a JIT, block
+   recompilers, cached native blocks, runtime-generated code, or a hybrid of interpreter and
+   recompiler; and never recommended as a roadmap item. Allowed: making the interpreters faster as
+   interpreters (dispatch, decoding, branch handling, register and memory access, hot handlers,
+   SIMD on the console's x86-64, data layout, compiler flags, LTO, PGO, scheduling). A CPU-side
+   optimisation must keep Gopher64's semantics, generate no code at run time, be **measured on the
+   console** (benchmark mode, the same probe before and after) and be **tested against the
+   original implementation** for correctness.
 
 ## The loop for a change
 

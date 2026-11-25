@@ -7,7 +7,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | Problem | Evidence | Next step |
 | --- | --- | --- |
-| A demanding game runs below full speed at 8x | one NTSC game: depth-blending 1.2 ms a pass on the GPU, 10-12 passes a frame at 8x (wave32 and 8/16-bit arithmetic change nothing); the emulation thread ~21.5 ms a VI, the RSP's interpreter 9 ms ([`performance.md`](performance.md#first-console-observations)) | the core's PGO: profiles from the profiling build, then a build that uses them, measured against these logs |
+| A demanding game runs below full speed at 8x | one NTSC game: depth-blending 1.2 ms a pass on the GPU, 10-12 passes a frame at 8x (wave32 and 8/16-bit arithmetic change nothing); the emulation thread ~21.5 ms a VI, the RSP's interpreter 9 ms ([`performance.md`](performance.md#first-console-observations)) | benchmark mode's upscale sweep from one probe (the same scene at 1x, 2x, 4x and 8x), then the priorities in Decisions on record |
 | The front end's remaining defects | [`../frontend-audit/BUGS.md`](../frontend-audit/BUGS.md) (FE-001 to FE-004 and FE-031 fixed, see `CHANGELOG.md`) | in the order of [`../frontend-audit/ROADMAP.md`](../frontend-audit/ROADMAP.md), FE-005 next |
 | The USB search uses its whole budget (60,000 entries) at every start | boot logs 2026-11-25 (5.7-34.7 s before the share is searched) | measure which folders take it; skip known non-game folders or search places in parallel |
 | The first search of a large share is slow (1,424 ROMs: 55.6 s, headers read over SMB) | boot log 2026-11-25 | later starts read `library.tsv`; measure again before changing anything |
@@ -46,6 +46,11 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 ## Decisions on record
 
+- **Interpreters only** (the owner, 2026-11-25): Gopher64's VR4300 and RSP interpreters are a fixed
+  requirement; no recompiler or JIT in any form, nor as a roadmap item ([`workflow.md`](workflow.md)
+  rule 9). The performance priorities, in order: the 1x-to-2x drop; parallel-rdp's GPU work
+  (depth-blending); CPU/GPU synchronisation; the RSP interpreter; the VR4300 interpreter; the
+  console's scheduling, memory and compiler options; PGO, benchmarked.
 - Covers come from libretro-thumbnails on GitHub, not thumbnails.libretro.com (404 for every N64 name,
   2026-11-25). Descriptions are Wikipedia's summaries, credited on the panel (CC BY-SA).
 - The core's network code is blocking `std::net` with rustls; Tokio's sockets and reqwest are not used

@@ -43,6 +43,7 @@ extern "C" {
 int psgopher_main(int argc, const char *const *argv);
 void psgopher_probe(void);
 size_t psgopher_last_error(char *buffer, size_t size);
+bool psgopher_setting_set(const char *name, int64_t value);
 void psgopher_crash_install(void);
 int64_t psgopher_setting_get(const char *name);
 /* the core's profiling build (PSGOPHER_PGO=generate): LLVM's profile runtime, linked only then */
@@ -121,6 +122,8 @@ struct Benchmark {
    std::string rom;
    int seconds = 0;
    bool unlimited = false;
+   int state = -1;              /* a probe (save state slot) every run starts from: the same scene */
+   std::vector<int> upscales;   /* one run for each factor, in order (none: one run as set) */
    uint64_t watched_since = 0; /* when Gopher64's video was up */
 };
 static Benchmark bench;
@@ -142,10 +145,28 @@ static void read_benchmark(const std::string &path)
          bench.seconds = atoi(value);
       else if (!strcmp(word, "unlimited"))
          bench.unlimited = true;
+      else if (!strcmp(word, "state"))
+         bench.state = atoi(value);
+      else if (!strcmp(word, "upscale")) {
+         char *at = value;
+         while (*at) {
+            char *end = nullptr;
+            const long u = strtol(at, &end, 10);
+            if (end == at)
+               break;
+            if (u == 1 || u == 2 || u == 4 || u == 8)
+               bench.upscales.push_back((int)u);
+            at = end;
+         }
+      }
    }
    fclose(f);
-   say("benchmark: rom '%s', %d s, speed limiter %s", bench.rom.c_str(), bench.seconds,
-       bench.unlimited ? "off" : "on");
+   std::string factors;
+   for (int u : bench.upscales)
+      factors += std::to_string(u) + "x ";
+   say("benchmark: rom '%s', %d s a run, speed limiter %s, from %s, upscale %s", bench.rom.c_str(), bench.seconds,
+       bench.unlimited ? "off" : "on", bench.state >= 0 ? ("probe " + std::to_string(bench.state)).c_str() : "the start",
+       factors.empty() ? "as set" : factors.c_str());
 }
 
 /* Gopher64's own events (parallel-rdp's interface): 4 toggles the speed limiter, 3 ends the game */
@@ -287,13 +308,29 @@ int main()
          return 2;
       }
       const std::string rom = bench.rom[0] == '/' ? bench.rom : std::string(ROOT) + "/roms/" + bench.rom;
-      char path[128];
-      snprintf(path, sizeof(path), "%s/bench-%lld.csv", ROOT, (long long)time(nullptr));
-      settings.applyHdr();
-      psgopher_bench_start(path);
-      SDL_AddTimer(100, benchmark_timer, nullptr);
-      const int status = play(rom);
-      psgopher_bench_stop();
+      /* one run a factor, each from the same probe: the same scene at each (Gopher64's setting is
+       * put back afterwards) */
+      const int64_t upscale_before = psgopher_setting_get("video.upscale");
+      std::vector<int> runs = bench.upscales;
+      if (runs.empty())
+         runs.push_back(0); /* (as set) */
+      int status = 0;
+      for (size_t r = 0; r < runs.size(); r++) {
+         if (runs[r])
+            psgopher_setting_set("video.upscale", runs[r]);
+         say("benchmark: run %zu of %zu: upscale %lldx", r + 1, runs.size(), (long long)psgopher_setting_get("video.upscale"));
+         char path[160];
+         snprintf(path, sizeof(path), "%s/bench-%lld-%lldx.csv", ROOT, (long long)time(nullptr),
+                  (long long)psgopher_setting_get("video.upscale"));
+         settings.applyHdr();
+         bench.watched_since = 0;
+         psgopher_bench_start(path);
+         SDL_AddTimer(100, benchmark_timer, nullptr);
+         status = play(rom, bench.state);
+         psgopher_bench_stop();
+      }
+      if (upscale_before > 0)
+         psgopher_setting_set("video.upscale", upscale_before);
       return status;
    }
 
