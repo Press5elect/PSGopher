@@ -23,6 +23,7 @@
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
+#include <x86intrin.h>
 
 #define MAX_FRAMES 1024 /* presents kept per second */
 
@@ -57,6 +58,15 @@ static uint64_t now_ns(clockid_t clock)
 static struct psgopher_live live_now;
 static uint64_t live_since_ns, live_frames, live_present_ns, live_cpu_start, live_last_end;
 static _Atomic uint64_t live_rdram_ns, live_rdram_waits;
+/* parallel-rdp's share in TSC ticks, and the TSC at the second's start (its rate measured against
+ * the monotonic clock over the same second) */
+static _Atomic uint64_t live_rdp_ticks;
+static uint64_t live_tsc_start;
+
+void psgopher_bench_rdp(uint64_t ticks)
+{
+   atomic_fetch_add_explicit(&live_rdp_ticks, ticks, memory_order_relaxed);
+}
 #define HISTORY 180
 static float history_ms[HISTORY];
 static int history_at, history_n;
@@ -89,6 +99,8 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
    if (!live_since_ns) {
       live_since_ns = end_ns;
       live_cpu_start = cpu;
+      live_tsc_start = __rdtsc();
+      atomic_store(&live_rdp_ticks, 0);
       return;
    }
    live_frames++;
@@ -102,6 +114,10 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
       const uint64_t rdram = atomic_exchange(&live_rdram_ns, 0), waits = atomic_exchange(&live_rdram_waits, 0);
       live_now.rdram_ms = (double)rdram / 1e6 / (double)live_frames;
       live_now.rdram_waits = (double)waits / (double)live_frames;
+      const uint64_t tsc = __rdtsc(), rdp_ticks = atomic_exchange(&live_rdp_ticks, 0);
+      const double ticks_per_ns = (double)(tsc - live_tsc_start) / (double)span;
+      live_now.rdp_ms = ticks_per_ns > 0 ? (double)rdp_ticks / ticks_per_ns / 1e6 / (double)live_frames : -1.0;
+      live_tsc_start = tsc;
       if (psgopher_rdp_rates) {
          uint32_t fps = 0, vis = 0;
          int pal = 0;
@@ -129,6 +145,7 @@ void psgopher_video_reset(void)
    live_since_ns = live_frames = live_present_ns = live_last_end = 0;
    atomic_store(&live_rdram_ns, 0);
    atomic_store(&live_rdram_waits, 0);
+   atomic_store(&live_rdp_ticks, 0);
    history_at = history_n = 0;
    live_now = (struct psgopher_live){ 0 };
    psgopher_sdl3_audio_stats audio;
@@ -150,11 +167,11 @@ static void video_heartbeat(uint64_t end_ns)
       const struct psgopher_live l = live_now;
       psgopher_sdl3_audio_stats audio;
       psgopher_sdl3_audio_stats_read(&audio);
-      say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms, present wait %.2f ms, "
+      say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms (RDP %.2f), present wait %.2f ms, "
           "RDRAM sync %.2f ms (%.1f); audio queue %llu, %llu underrun(s) in 10 s",
           (unsigned long long)video_count, (double)span / 1e9, (double)video_count * 1e9 / (double)span,
           l.target_vis ? (double)video_count * 1e9 / (double)span / l.target_vis * 100.0 : 0.0, l.game_fps, l.cpu_ms,
-          l.present_ms, l.rdram_ms, l.rdram_waits, (unsigned long long)audio.queued_frames,
+          l.rdp_ms, l.present_ms, l.rdram_ms, l.rdram_waits, (unsigned long long)audio.queued_frames,
           (unsigned long long)(audio.underrun_grains - video_underruns_at));
       video_underruns_at = audio.underrun_grains;
       video_since_ns = end_ns;

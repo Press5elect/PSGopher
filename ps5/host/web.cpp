@@ -14,8 +14,11 @@
 #include <map>
 #include <mutex>
 #include <thread>
+#include <vector>
 
+#include <dirent.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 extern "C" {
 void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -143,7 +146,7 @@ void doCover(Web &w, const std::string &name)
 
 void doAbout(Web &w, const std::string &name)
 {
-	const std::string base = w.folder + "/about-" + safeName(name);
+	const std::string base = w.folder + "/about2-" + safeName(name); /* (about2: matched by title) */
 	std::string text;
 	bool done = true;
 	if (readText(base + ".txt", text)) {
@@ -223,6 +226,19 @@ void webStart(const std::string &folder)
 	if (w.on)
 		return;
 	mkdir(folder.c_str(), 0777);
+	/* the first descriptions (about-<name>) took any game's article the search offered: some
+	 * were another game's; they go, and are asked again as about2- (matched by title) */
+	if (DIR *dir = opendir(folder.c_str())) {
+		std::vector<std::string> old;
+		while (struct dirent *e = readdir(dir))
+			if (strncmp(e->d_name, "about-", 6) == 0)
+				old.push_back(folder + "/" + e->d_name);
+		closedir(dir);
+		for (const std::string &path : old)
+			unlink(path.c_str());
+		if (!old.empty())
+			say("about: %zu description(s) of the first matching let go: asked again", old.size());
+	}
 	w.folder = folder;
 	w.on = true;
 	std::thread(run).detach();

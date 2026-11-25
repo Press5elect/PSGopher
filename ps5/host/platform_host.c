@@ -81,10 +81,16 @@ pad_light_bar(uint8_t r, uint8_t g, uint8_t b)
    (void)b;
 }
 
+/* host tests: scripted controllers (none unless a test sets them; the console's real ones are in
+ * platform.c) */
+uint32_t platform_host_players;
+const struct pad_reading *platform_host_readings[PAD_PLAYERS];
+int platform_host_counts[PAD_PLAYERS];
+
 uint32_t
 pad_players(void)
 {
-   return 0;
+   return platform_host_players;
 }
 
 bool
@@ -98,9 +104,12 @@ pad_player(int player, struct pad *pad)
 int
 pad_player_readings(int player, const struct pad_reading **readings)
 {
-   (void)player;
-   *readings = NULL;
-   return 0;
+   if (player < 0 || player >= PAD_PLAYERS || !((platform_host_players >> player) & 1)) {
+      *readings = NULL;
+      return 0;
+   }
+   *readings = platform_host_readings[player];
+   return platform_host_counts[player];
 }
 
 void

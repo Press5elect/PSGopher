@@ -419,25 +419,30 @@ static int player_of(SDL_JoystickID id)
 
 /* PSGopher's quick menu (ps5/host/quickmenu.cpp): a touch pad tap of any player, pressed and let go
  * within half a second with no other button pressed meanwhile (with one, it is Gopher64's hotkey) */
-static bool tap_down, tap_clean, tap_seen;
-static uint64_t tap_since_us;
-static void watch_tap(const pad_reading *readings, int count)
+/* (each player's own press: another controller's reading at rest is not this one let go, FE-004) */
+static bool tap_down[PAD_PLAYERS], tap_clean[PAD_PLAYERS], tap_seen;
+static uint64_t tap_since_us[PAD_PLAYERS];
+static void watch_tap(int player, const pad_reading *readings, int count)
 {
+   if (player < 0 || player >= PAD_PLAYERS)
+      return;
+   bool &down = tap_down[player], &clean = tap_clean[player];
+   uint64_t &since_us = tap_since_us[player];
    for (int i = 0; i < count; i++) {
       const uint32_t b = readings[i].buttons;
       if (b & PAD_INTERCEPTED)
          continue;
       const bool touch = (b & PAD_TOUCH_PAD) != 0;
-      if (touch && !tap_down) {
-         tap_down = true;
-         tap_clean = (b & ~PAD_TOUCH_PAD) == 0;
-         tap_since_us = readings[i].timestamp_us;
+      if (touch && !down) {
+         down = true;
+         clean = (b & ~PAD_TOUCH_PAD) == 0;
+         since_us = readings[i].timestamp_us;
       } else if (touch) {
          if (b & ~PAD_TOUCH_PAD)
-            tap_clean = false;
-      } else if (tap_down) {
-         tap_down = false;
-         if (tap_clean && readings[i].timestamp_us - tap_since_us < 500000)
+            clean = false;
+      } else if (down) {
+         down = false;
+         if (clean && readings[i].timestamp_us - since_us < 500000)
             tap_seen = true;
       }
    }
@@ -459,7 +464,7 @@ static void poll_pads()
       const bool connected = (present >> player) & 1;
       const pad_reading *readings = nullptr;
       const int count = connected ? pad_player_readings(player, &readings) : 0;
-      watch_tap(readings, count);
+      watch_tap(player, readings, count);
       if (count > 0)
          held_any |= readings[count - 1].buttons & ~PAD_INTERCEPTED;
       if (count > 0 && hold_until_released) {
@@ -509,13 +514,15 @@ extern "C" void psgopher_sdl3_menu_pad(struct pad *pad)
 {
    pad_poll(pad);
    const pad_reading *readings = nullptr;
-   watch_tap(readings, pad_player_readings(0, &readings));
+   watch_tap(0, readings, pad_player_readings(0, &readings));
 }
 
 extern "C" void psgopher_sdl3_hold_until_released(void)
 {
    hold_until_released = true;
-   tap_seen = tap_down = false;
+   tap_seen = false;
+   for (bool &down : tap_down)
+      down = false;
 }
 
 extern "C" void SDL_PumpEvents(void)
@@ -773,6 +780,7 @@ struct SDL_AudioStream {
    std::vector<float> table; /* PHASES+1 rows of TAPS */
    double table_cutoff = 0;
    bool playing = false;
+   bool fed = false; /* the game has given audio: an empty queue before that is no underrun */
    psgopher_sdl3_audio_stats stats = {};
 };
 static SDL_AudioStream *the_stream;
@@ -863,7 +871,7 @@ extern "C" void psgopher_sdl3_audio_render(SDL_AudioStream *s, int16_t *out, int
    }
    if (made < frames) {
       memset(out + made * 2, 0, (size_t)(frames - made) * 4);
-      if (s->playing) {
+      if (s->playing && s->fed) {
          s->stats.underrun_grains++;
          s->stats.silent_frames += (uint64_t)(frames - made);
       }
@@ -953,6 +961,8 @@ extern "C" bool SDL_PutAudioStreamData(SDL_AudioStream *s, const void *buffer, i
    const int16_t *samples = (const int16_t *)buffer;
    const size_t n = (size_t)length / 2;
    const size_t at = s->input.size();
+   if (n)
+      s->fed = true;
    s->input.resize(at + n);
    for (size_t i = 0; i < n; i++)
       s->input[at + i] = samples[i] * (1.0f / 32768.0f);

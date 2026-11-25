@@ -207,7 +207,7 @@ uint32_t memoryType(Display &d, uint32_t bits, VkMemoryPropertyFlags want)
 	for (uint32_t i = 0; i < mp.memoryTypeCount; i++)
 		if ((bits & (1u << i)) && (mp.memoryTypes[i].propertyFlags & want) == want)
 			return i;
-	return 0;
+	return UINT32_MAX; /* (none: the caller fails) */
 }
 
 /* A picture for ImGui: uploaded through a staging buffer, its mipmaps made by blits (the board is
@@ -222,6 +222,28 @@ ImTextureID uploadTexture(Display &d, const Image &img)
 	while ((std::max(w, h) >> levels) > 0)
 		levels++;
 	Display::Texture t;
+	VkBuffer staging{};
+	VkDeviceMemory staging_memory{};
+	VkCommandBuffer cmd{};
+	/* every step checked: a failure lets go of what was made and the front end draws without the
+	 * picture (FE-031); nothing goes on with a null handle */
+	auto fail = [&](const char *step, VkResult r) -> ImTextureID {
+		say("menu: a picture (%ux%u) could not be uploaded: %s (%d)", w, h, step, (int)r);
+		if (cmd)
+			vkFreeCommandBuffers(d.device, d.pool, 1, &cmd);
+		if (staging)
+			vkDestroyBuffer(d.device, staging, nullptr);
+		if (staging_memory)
+			vkFreeMemory(d.device, staging_memory, nullptr);
+		if (t.view)
+			vkDestroyImageView(d.device, t.view, nullptr);
+		if (t.image)
+			vkDestroyImage(d.device, t.image, nullptr);
+		if (t.memory)
+			vkFreeMemory(d.device, t.memory, nullptr);
+		return ImTextureID_Invalid;
+	};
+	VkResult r;
 	VkImageCreateInfo ici{ VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO };
 	ici.imageType = VK_IMAGE_TYPE_2D;
 	ici.format = VK_FORMAT_R8G8B8A8_UNORM;
@@ -230,29 +252,45 @@ ImTextureID uploadTexture(Display &d, const Image &img)
 	ici.arrayLayers = 1;
 	ici.samples = VK_SAMPLE_COUNT_1_BIT;
 	ici.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
-	if (vkCreateImage(d.device, &ici, nullptr, &t.image) != VK_SUCCESS)
-		return ImTextureID_Invalid;
+	if ((r = vkCreateImage(d.device, &ici, nullptr, &t.image)) != VK_SUCCESS) {
+		t.image = VK_NULL_HANDLE;
+		return fail("vkCreateImage", r);
+	}
 	VkMemoryRequirements req;
 	vkGetImageMemoryRequirements(d.device, t.image, &req);
 	VkMemoryAllocateInfo mai{ VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO };
 	mai.allocationSize = req.size;
 	mai.memoryTypeIndex = memoryType(d, req.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
-	vkAllocateMemory(d.device, &mai, nullptr, &t.memory);
-	vkBindImageMemory(d.device, t.image, t.memory, 0);
+	if (mai.memoryTypeIndex == UINT32_MAX)
+		return fail("no device-local memory type", VK_ERROR_FEATURE_NOT_PRESENT);
+	if ((r = vkAllocateMemory(d.device, &mai, nullptr, &t.memory)) != VK_SUCCESS) {
+		t.memory = VK_NULL_HANDLE;
+		return fail("vkAllocateMemory (image)", r);
+	}
+	if ((r = vkBindImageMemory(d.device, t.image, t.memory, 0)) != VK_SUCCESS)
+		return fail("vkBindImageMemory", r);
 	/* the staging buffer */
-	VkBuffer staging{};
-	VkDeviceMemory staging_memory{};
 	VkBufferCreateInfo bci{ VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO };
 	bci.size = img.rgba.size();
 	bci.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-	vkCreateBuffer(d.device, &bci, nullptr, &staging);
+	if ((r = vkCreateBuffer(d.device, &bci, nullptr, &staging)) != VK_SUCCESS) {
+		staging = VK_NULL_HANDLE;
+		return fail("vkCreateBuffer", r);
+	}
 	vkGetBufferMemoryRequirements(d.device, staging, &req);
 	mai.allocationSize = req.size;
 	mai.memoryTypeIndex = memoryType(d, req.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
-	vkAllocateMemory(d.device, &mai, nullptr, &staging_memory);
-	vkBindBufferMemory(d.device, staging, staging_memory, 0);
+	if (mai.memoryTypeIndex == UINT32_MAX)
+		return fail("no host-visible memory type", VK_ERROR_FEATURE_NOT_PRESENT);
+	if ((r = vkAllocateMemory(d.device, &mai, nullptr, &staging_memory)) != VK_SUCCESS) {
+		staging_memory = VK_NULL_HANDLE;
+		return fail("vkAllocateMemory (staging)", r);
+	}
+	if ((r = vkBindBufferMemory(d.device, staging, staging_memory, 0)) != VK_SUCCESS)
+		return fail("vkBindBufferMemory", r);
 	void *mapped = nullptr;
-	vkMapMemory(d.device, staging_memory, 0, VK_WHOLE_SIZE, 0, &mapped);
+	if ((r = vkMapMemory(d.device, staging_memory, 0, VK_WHOLE_SIZE, 0, &mapped)) != VK_SUCCESS || !mapped)
+		return fail("vkMapMemory", r);
 	memcpy(mapped, img.rgba.data(), img.rgba.size());
 	vkUnmapMemory(d.device, staging_memory);
 	/* copy, then each level from the one above */
@@ -260,8 +298,10 @@ ImTextureID uploadTexture(Display &d, const Image &img)
 	ai.commandPool = d.pool;
 	ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	ai.commandBufferCount = 1;
-	VkCommandBuffer cmd{};
-	vkAllocateCommandBuffers(d.device, &ai, &cmd);
+	if ((r = vkAllocateCommandBuffers(d.device, &ai, &cmd)) != VK_SUCCESS) {
+		cmd = VK_NULL_HANDLE;
+		return fail("vkAllocateCommandBuffers", r);
+	}
 	VkCommandBufferBeginInfo bi{ VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO };
 	bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	vkBeginCommandBuffer(cmd, &bi);
@@ -303,20 +343,31 @@ ImTextureID uploadTexture(Display &d, const Image &img)
 	VkSubmitInfo si{ VK_STRUCTURE_TYPE_SUBMIT_INFO };
 	si.commandBufferCount = 1;
 	si.pCommandBuffers = &cmd;
-	vkQueueSubmit(d.queue, 1, &si, VK_NULL_HANDLE);
-	vkQueueWaitIdle(d.queue);
+	if ((r = vkQueueSubmit(d.queue, 1, &si, VK_NULL_HANDLE)) != VK_SUCCESS)
+		return fail("vkQueueSubmit", r);
+	if ((r = vkQueueWaitIdle(d.queue)) != VK_SUCCESS)
+		return fail("vkQueueWaitIdle", r);
 	vkFreeCommandBuffers(d.device, d.pool, 1, &cmd);
+	cmd = VK_NULL_HANDLE;
 	vkDestroyBuffer(d.device, staging, nullptr);
+	staging = VK_NULL_HANDLE;
 	vkFreeMemory(d.device, staging_memory, nullptr);
+	staging_memory = VK_NULL_HANDLE;
 
 	VkImageViewCreateInfo vi{ VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO };
 	vi.image = t.image;
 	vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
 	vi.format = VK_FORMAT_R8G8B8A8_UNORM;
 	vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, levels, 0, 1 };
-	vkCreateImageView(d.device, &vi, nullptr, &t.view);
-	/* (the backend's own sampler: linear, every level) */
+	if ((r = vkCreateImageView(d.device, &vi, nullptr, &t.view)) != VK_SUCCESS) {
+		t.view = VK_NULL_HANDLE;
+		return fail("vkCreateImageView", r);
+	}
+	/* (the backend's own sampler: linear, every level). A full descriptor pool gives a null set,
+	 * which ImGui would assert on when drawn (the console's SIGABRT in GetTexID, FE-001) */
 	t.set = ImGui_ImplVulkan_AddTexture(t.view, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	if (!t.set)
+		return fail("ImGui_ImplVulkan_AddTexture (the descriptor pool is full)", VK_ERROR_OUT_OF_POOL_MEMORY);
 	d.textures.push_back(t);
 	return (ImTextureID)t.set;
 }
@@ -1225,7 +1276,13 @@ MenuResult runMenu(const std::string &notice)
 	init.Device = d.device;
 	init.QueueFamily = d.family;
 	init.Queue = d.queue;
-	init.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + 8;
+	/* the font atlas's pages, the board and the logo, every cover the cache keeps, and room to spare:
+	 * 16 sets were too few for the covers (the console's SIGABRT in GetTexID, FE-001) */
+	init.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_SAMPLED_IMAGE_POOL_SIZE + 2 + (uint32_t)Menu::kCovers + 16;
+	init.CheckVkResultFn = [](VkResult r) {
+		if (r < 0)
+			say("menu: ImGui's Vulkan backend: VkResult %d", (int)r);
+	};
 	init.MinImageCount = 2;
 	init.ImageCount = std::max<uint32_t>(2, (uint32_t)d.images.size()); /* (the host test draws into one) */
 	init.PipelineInfoMain.RenderPass = d.pass;
@@ -1303,21 +1360,30 @@ MenuResult runMenu(const std::string &notice)
 			/* one upload a frame (each waits for the queue) */
 			if (m->uploaded_at == m->frames)
 				return { ImTextureID_Invalid, 0.0f };
+			/* the cache full: room is made by letting go of the least lately shown cover, if it was
+			 * not shown in the last two frames; otherwise nothing is taken (it stays with the web
+			 * thread for later) and the cache never grows past kCovers (FE-003) */
+			auto oldest = m->covers.end();
+			if (m->covers.size() >= Menu::kCovers) {
+				oldest = m->covers.begin();
+				for (auto c = m->covers.begin(); c != m->covers.end(); ++c)
+					if (c->second.shown < oldest->second.shown)
+						oldest = c;
+				if (oldest->second.shown + 2 >= m->frames)
+					return { ImTextureID_Invalid, 0.0f };
+			}
 			Image picture;
 			if (webCover(g.name, &picture) != WebState::Ready)
 				return { ImTextureID_Invalid, 0.0f };
 			m->uploaded_at = m->frames;
-			if (m->covers.size() >= Menu::kCovers) {
-				auto oldest = m->covers.begin();
-				for (auto c = m->covers.begin(); c != m->covers.end(); ++c)
-					if (c->second.shown < oldest->second.shown)
-						oldest = c;
-				if (oldest->second.shown + 2 < m->frames) {
+			if (oldest != m->covers.end()) {
+				if (oldest->second.id != ImTextureID_Invalid)
 					freeTexture(*dp, oldest->second.id);
-					webForget(oldest->first);
-					m->covers.erase(oldest);
-				}
+				webForget(oldest->first);
+				m->covers.erase(oldest);
 			}
+			/* (a failed upload is kept as no texture, so it is not tried again each frame; it is let
+			 * go like any other when room is needed, and asked for again after that) */
 			Menu::Cover c;
 			c.id = uploadTexture(*dp, picture);
 			c.aspect = picture.height ? (float)picture.width / (float)picture.height : 0;
@@ -1363,6 +1429,11 @@ MenuResult runMenu(const std::string &notice)
 		last = now;
 		frame(d, menu, b);
 	}
+	/* the covers' textures go with the display: each is asked for again in the next menu (from the
+	 * cache folder), else they never came back after a game (FE-002) */
+	for (const auto &c : menu.covers)
+		webForget(c.first);
+	menu.covers.clear();
 	closeDisplay(d);
 	ImGui::DestroyContext();
 	if (menu.result.play)

@@ -4,6 +4,10 @@ Part of the front end audit of 2026-11-25. Index: [MASTER_PLAN.md](MASTER_PLAN.m
 [BUGS.md](BUGS.md), IMP ids in [IMPROVEMENTS.md](IMPROVEMENTS.md). This file gives only the order,
 the files each step holds, and how each step is verified.
 
+**Progress.** Fixed after the audit: FE-001 (confirmed on the console first: SIGABRT in `GetTexID`
+in the boot log of 2026-11-25), FE-031, FE-003, FE-002 and FE-004 (with its two-controller host
+test). Phase 0's many-covers test is still to be written. Next: FE-005.
+
 ## Rules of the sequence
 
 1. **Severity first.** There is no P0. The one P1 (FE-001) and the cover chain it belongs to come

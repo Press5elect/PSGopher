@@ -80,6 +80,10 @@ Not a baseline (no benchmark mode, no fixed scene): what the owner's boot logs s
 | Date, build | Game | Observation |
 | --- | --- | --- |
 | 2026-11-25, `d7010d1` | a PAL game (its ID was not logged) | 25.4-42.7 VIs a second against 50 over 25 ten-second windows, mostly ~28: 51-85% of full speed, mostly ~56%; the owner hears choppy audio. The log then had no CPU/present/RDRAM split; `33c8907` adds it to the `video:` line and the stats overlay, so the next log says which of them takes the time |
+| 2026-11-25, `33c8907` | an NTSC game (ID not logged) | 59.8 VIs a second (100%) most of 150 s, the game at 30 fps; CPU 1.3-7 ms a VI. Down to 87-93% where CPU reached 10-11 ms with 3-5 ms of present wait; 0 underruns at 100%, 11-75 in a 10 s window below it |
+| 2026-11-25, `33c8907` | a second NTSC game (ID not logged) | 14.5-39 VIs a second (24-65%), CPU 17.5-21.5 ms a VI, present wait 0.1-4.5 ms: CPU-bound on the emulation thread; 175-1,139 underruns in each 10 s. Both games at 8x upscale, supersampled, 3840x2160. Not yet known: how much of the CPU time is parallel-rdp's (the next build's `RDP` figure) and whether 1x changes it |
+| 2026-11-25, `33c8907` | — | The audio underruns follow the speed: Gopher64 keeps about two VIs of audio queued and cannot refill below 100%. The GPU wait in the winsys spins at most 1.5 ms before sleeping (`radv_ps5_queue_wait_seq`), so it does not explain 17-21 ms of CPU time |
+| 2026-11-25, `33c8907` | — | The library's search of USB (60,000 entries, its budget) and the share took 10.2 s with `library.tsv` (29.9 s on the run before) |
 | 2026-11-25, `d7010d1` | — | The library's first search of an SMB share with 1,424 ROMs took 55.6 s (headers read over the network); later starts read `library.tsv` |
 
 ## Baseline
@@ -93,4 +97,6 @@ decision. None yet.
 
 ## Candidates, ranked
 
-See ../history/porting-analysis.md section 5. None is started before the baseline exists.
+See ../history/porting-analysis.md section 5. None is started before the baseline exists. Measured
+elsewhere on the same stack and worth an A/B build here: profile-guided optimisation (Crux2, with its
+own profile runtime) and LTO (Crux2: about 3%; the core is built with thin LTO already).

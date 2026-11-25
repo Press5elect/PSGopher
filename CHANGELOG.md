@@ -5,9 +5,9 @@ branch. Games are named by cartridge ID only.
 
 ## Unreleased
 
-Status: the title, the sandbox exit, an SMB share, USB drives and a PAL game have run on a console
-(2026-11-25), the game below full speed. Not yet run on a console: the covers and descriptions, the
-cheats, the stats overlay, variable refresh, HDR10.
+Status: the title, the sandbox exit, an SMB share, USB drives, covers, descriptions and three games
+have run on a console (2026-11-25): one NTSC game at full speed, two below it. Not yet run on a
+console: the cheats, variable refresh, HDR10.
 
 ### Front end
 
@@ -72,6 +72,28 @@ cheats, the stats overlay, variable refresh, HDR10.
 - Added: the boot log, `psgopher-boot.log` in the title folder (the run before kept), as OGBox and
   Crux2; it has Gopher64's own messages and panics, which went nowhere before (Rust writes to
   descriptor 2, which klog's capture cannot move). A game that does not start says why on the board.
+
+### Console fixes (from the second console logs, 2026-11-25)
+
+- Fixed: the title stopped (SIGABRT in ImGui's `GetTexID`) after several hundred covers had been
+  loaded: ImGui's descriptor pool held 16 pictures against a cover cache of 48, and a failed
+  upload handed ImGui a null texture (audit FE-001). The pool now holds every cover the cache keeps
+  plus the board, the logo and the font atlas's pages; every step of an upload is checked and a
+  failure frees what it made and is logged (`menu: a picture ... could not be uploaded`, FE-031).
+- Fixed: RACK asked for and uploaded a cover for every spine on its shelves, which never draw one
+  (FE-003); the cover cache no longer grows past its size.
+- Fixed: covers did not come back after a game (FE-002): they are asked for again from the cache
+  folder in the next menu.
+- Fixed: with two controllers, holding the touch pad opened the quick menu (FE-004): each
+  controller's tap is its own. A host test covers one and two controllers.
+- Fixed: a 2 KiB `[BIOS]` PIF file on a share was listed as a game and failed to start: raw files
+  smaller than a ROM's header and boot code (4 KiB) are not listed.
+- Fixed: descriptions taken from the wrong article ("2048" found another game's, the PIF file a
+  general article): an article is used only when its title is the cartridge's name (No-Intro's
+  "Name, The" turned round first). The first descriptions are deleted once and asked for again.
+- Changed: the `video:` line gives parallel-rdp's share of the CPU time (`CPU x ms (RDP y)`), so a
+  log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
+  Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
 ### Platform and build
 

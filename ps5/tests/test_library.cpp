@@ -222,6 +222,7 @@ int main(int argc, char **argv)
 	/* the share */
 	folders(share + "/n64");
 	write(share + "/n64/Delta.z64", std::string(70000, 'd'));
+	write(data + "/psgopher/roms/[BIOS] PIF (Japan, USA).v64", std::string(2048, 'p')); /* too small for a ROM */
 	write(share + "/n64/shared.zip", zipNaming("folder/inner.v64"));
 
 	CHECK(psgopher::isRomName("x.Z64") && psgopher::isRomName("x.zip") && !psgopher::isRomName("x.bin"));
@@ -252,6 +253,7 @@ int main(int argc, char **argv)
 	CHECK(!find(games, "toodeep"));
 	CHECK(!find(games, "cached"));
 	CHECK(!find(games, ".hidden"));
+	CHECK(!find(games, "[BIOS] PIF (Japan, USA)"));
 	CHECK(find(games, "Delta") && find(games, "Delta")->tab == psgopher::TabNetwork);
 	CHECK(find(games, "shared") && find(games, "shared")->tab == psgopher::TabNetwork);
 	/* each file once, though /data/psgopher/roms is inside /data */

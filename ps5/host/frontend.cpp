@@ -759,7 +759,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 
 	/* the line from the strip's cartridge to the slot */
 	if (g) {
-		const board::Look look = lookFor(*g);
+		const board::Look look = board::lookOf(g->name, g->id); /* (its colour only: no cover asked for) */
 		const ImVec2 slot = projector_(board::anchor("slot"));
 		const ImVec2 from = S(960, 806);
 		ImVec2 pts[40];
@@ -1101,7 +1101,7 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		dl->AddRectFilledMultiColor(S(56, y - 18), S(1300, y + SH + 6), IM_COL32(4, 11, 14, 255), IM_COL32(4, 11, 14, 255),
 		                            IM_COL32(10, 28, 34, 255), IM_COL32(10, 28, 34, 255));
 	}
-	const board::Look sel_look = g ? lookFor(*g) : board::Look{};
+	const board::Look sel_look = g ? board::lookOf(g->name, g->id) : board::Look{}; /* (colours only) */
 	if (g) {
 		const float sx = RX + (rack_sel_ % COLS) * PITCH + 10, sy = RY + (sel_row - rack_scroll_) * SHELF + 50;
 		for (int i = 10; i >= 1; i--)
@@ -1113,7 +1113,8 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		prev_letter = letterOf(games_[rack_[first_row * COLS - 1]]);
 	for (int k = first_row * COLS; k < std::min(n, last_row * COLS); k++) {
 		const Game &cg = games_[rack_[k]];
-		const board::Look look = lookFor(cg);
+		/* a spine draws its hue and code, never a cover: none is asked for (FE-003) */
+		const board::Look look = board::lookOf(cg.name, cg.id);
 		const bool on = k == rack_sel_;
 		const float x = RX + (k % COLS) * PITCH, y = RY + (k / COLS - rack_scroll_) * SHELF - (on ? 34 : 0);
 		const float a = visible(k) ? 1 : .13f;

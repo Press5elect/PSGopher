@@ -2,7 +2,7 @@
  * PSGopher - what the front end fetches from the network: each cartridge's box art (libretro's
  * thumbnails) and its description (Wikipedia's summary, found as OGBox finds one). One thread of
  * its own asks for what the front end shows, the latest asked first; everything is kept in
- * /data/psgopher/cache/covers (<name>.png, about-<name>.txt; <name>.none and about-<name>.none
+ * /data/psgopher/cache/covers (<name>.png, about2-<name>.txt; <name>.none and about2-<name>.none
  * when there is none, asked again after 30 days). The fetches themselves are the core's
  * (psgopher.rs: rustls over a blocking socket, Tokio's sockets being refused on the console).
  *

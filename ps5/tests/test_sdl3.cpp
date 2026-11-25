@@ -15,6 +15,7 @@
 #include <vulkan/vulkan.h>
 
 #include "psgopher_sdl3.h"
+#include "platform.h"
 
 #include <cmath>
 #include <cstdio>
@@ -247,10 +248,54 @@ static void test_text(const char *font_path)
    TTF_CloseFont(font);
 }
 
+
+/* the quick menu's tap (FE-004): a touch pad pressed and let go within half a second, nothing else
+ * pressed; with a second controller connected and at rest, a touch pad held on the first is no tap */
+extern "C" uint32_t platform_host_players;
+extern "C" const struct pad_reading *platform_host_readings[PAD_PLAYERS];
+extern "C" int platform_host_counts[PAD_PLAYERS];
+
+static void test_tap()
+{
+   static pad_reading p0, p1;
+   p1.connected = true;
+   p0.connected = true;
+   auto poll = [&](uint32_t players, uint32_t buttons, uint64_t us) {
+      p0.buttons = buttons;
+      p0.timestamp_us = p1.timestamp_us = us;
+      platform_host_players = players;
+      platform_host_readings[0] = &p0;
+      platform_host_readings[1] = &p1;
+      platform_host_counts[0] = platform_host_counts[1] = 1;
+      SDL_PumpEvents();
+   };
+   for (uint32_t players : { 1u, 3u }) {
+      psgopher_sdl3_take_tap();
+      /* held for 1.1 s alone (a hotkey begun): no tap, whatever the second controller does */
+      for (int i = 0; i <= 11; i++)
+         poll(players, PAD_TOUCH_PAD, 1000000 + i * 100000);
+      CHECK(!psgopher_sdl3_take_tap(), "%u controller(s): a touch pad held is no tap", players == 1 ? 1 : 2);
+      poll(players, 0, 2200000);
+      CHECK(!psgopher_sdl3_take_tap(), "%u controller(s): let go after 1.2 s is no tap", players == 1 ? 1 : 2);
+      /* the touch pad with L1 (a hotkey): no tap */
+      poll(players, PAD_TOUCH_PAD, 3000000);
+      poll(players, PAD_TOUCH_PAD | PAD_L1, 3100000);
+      poll(players, 0, 3200000);
+      CHECK(!psgopher_sdl3_take_tap(), "%u controller(s): a hotkey is no tap", players == 1 ? 1 : 2);
+      /* a tap */
+      poll(players, PAD_TOUCH_PAD, 4000000);
+      poll(players, 0, 4200000);
+      CHECK(psgopher_sdl3_take_tap(), "%u controller(s): a tap is seen", players == 1 ? 1 : 2);
+   }
+   platform_host_players = 0;
+   SDL_PumpEvents();
+}
+
 int main(int argc, char **argv)
 {
    test_window_and_controllers();
    test_events();
+   test_tap();
    test_audio();
    test_text(argc > 1 ? argv[1] : "vendor/gopher64/data/ui/RobotoMono-Regular.ttf");
    if (failures) {

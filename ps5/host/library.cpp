@@ -329,6 +329,11 @@ void search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 			}
 			const std::string l = lower(e.name);
 			bool rom = rawRom(l);
+			/* a raw file too small for a ROM's header and boot code is no game: the console's
+			 * PIF (BIOS) image, 2 KiB as a .v64, was listed and failed to start (boot log
+			 * 2026-11-25); a size of 0 is one the listing did not give */
+			if (rom && e.size > 0 && e.size < 0x1000)
+				rom = false;
 			if (!rom && endsWith(l, ".zip"))
 				rom = zipHoldsRom(full);
 			if (!rom && endsWith(l, ".7z"))

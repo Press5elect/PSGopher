@@ -25,7 +25,7 @@ What to look for:
 | `library:` | the search: places, budgets, headers read, the time it took |
 | `psgopher:` | Gopher64's runtime (the Tokio fallback), its messages and panics |
 | `rdp:` | the RDRAM path parallel-rdp took (imported host memory or the staging copy) |
-| `video:` | every 10 s: VIs (against 50 or 59.94), speed, the game's own frame rate, CPU and present time a VI, RDRAM syncs, audio queue and underruns |
+| `video:` | every 10 s: VIs (against 50 or 59.94), speed, the game's own frame rate, CPU time a VI with parallel-rdp's share (`RDP`), present time, RDRAM syncs, audio queue and underruns (counted from the game's first audio) |
 | `quickmenu:` | the quick menu opened and what was chosen |
 | `covers:`, `about:` | each cover and description fetched, missing, or why the network failed |
 | `crash report:` | a fault: signal, registers, stack offsets |
