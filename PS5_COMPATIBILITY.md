@@ -34,6 +34,21 @@ freely licensed test ROMs for accuracy.
 
 No ROM is in this repository or will be; I test with my own dumps.
 
+## Renderer accuracy: parallel-rdp's conformance suites
+
+parallel-rdp's own tests (`rdp-conformance`, `vi-conformance` from gopher64/parallel-rdp at `748144e`,
+the commit PSGopher's renderer was generated from), built with the precompiled shaders PSGopher ships
+(`slangmosh.hpp`, byte-identical to the build's), compare the GPU's RDRAM and TMEM with
+angrylion-rdp-plus's, byte for byte.
+
+| Where | Driver | Result |
+| --- | --- | --- |
+| PC, 2026-11-25 [here] | lavapipe (Mesa 26.0.8, llvmpipe, Vulkan 1.4.335) | **257 of 257 passed** (ctest, 24 min on 4 cores) |
+| PS5 | RADV, PS5 Mesa `1ba9874` | not run yet: needs the tool built as a test title |
+
+The PC run shows the shader binaries and the renderer at the pin are correct on a conformant
+driver; it says nothing about RADV on the console, which is what the console run is for.
+
 ## Per-game record
 
 | ID | Boots | Plays | Saves | States | Full speed | Notes |
