@@ -23,6 +23,7 @@
 #include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <utime.h>
 
 #include "ps5_vfs.h"
 
@@ -104,6 +105,44 @@ extern "C" int ps5vfs_fclose(FILE *fp)
 	return std::fclose(fp);
 }
 
+/* ---------------------------------------------------------------- Gopher64's facts, stood in for */
+
+struct PsgopherRomFacts {
+	uint32_t cic, save, rumble;
+};
+static int g_facts_calls = 0;
+extern "C" bool psgopher_rom_facts(const uint8_t *rom, size_t len, PsgopherRomFacts *out)
+{
+	g_facts_calls++;
+	/* always given in Gopher64's byte order (.z64), 4 KiB */
+	CHECK(len == 0x1000);
+	CHECK(rom[0] == 0x80 && rom[1] == 0x37 && rom[2] == 0x12 && rom[3] == 0x40);
+	*out = { rom[0x3C] == 'C' ? 6102u : 6105u, rom[0x3C] == 'C' ? 1u : 32u, 0u };
+	return true;
+}
+
+/* a ROM's first 4 KiB and more: header name, code, then in the byte order asked */
+static std::string romImage(const char *name, const char *code, const char *order, size_t size = 0x2000)
+{
+	std::string rom(size, '\0');
+	const unsigned char magic[4] = { 0x80, 0x37, 0x12, 0x40 };
+	memcpy(&rom[0], magic, 4);
+	char title[20];
+	memset(title, ' ', sizeof(title));
+	memcpy(title, name, strlen(name));
+	memcpy(&rom[0x20], title, 20);
+	memcpy(&rom[0x3B], code, 4);
+	if (!strcmp(order, "v64"))
+		for (size_t i = 0; i + 1 < rom.size(); i += 2)
+			std::swap(rom[i], rom[i + 1]);
+	else if (!strcmp(order, "n64"))
+		for (size_t i = 0; i + 3 < rom.size(); i += 4) {
+			std::swap(rom[i], rom[i + 3]);
+			std::swap(rom[i + 1], rom[i + 2]);
+		}
+	return rom;
+}
+
 /* ---------------------------------------------------------------- helpers */
 
 static void write(const std::string &path, const std::string &bytes)
@@ -169,12 +208,12 @@ int main(int argc, char **argv)
 	folders(data + "/psgopher/config");
 	folders(data + "/games/n64/deep/er");
 	folders(data + "/other/a/b/c/d/e/f/g");
-	write(data + "/psgopher/roms/Alpha (U).z64", std::string(4096, 'a'));
-	write(data + "/psgopher/roms/beta.V64", "b");
+	write(data + "/psgopher/roms/Alpha (U).z64", romImage("COMET KART", "NCKE", "z64", 4096));
+	write(data + "/psgopher/roms/beta.V64", romImage("MOSS TEMPLE", "NMTP", "v64"));
 	write(data + "/psgopher/roms/packed.zip", zipNaming("inside.n64"));
 	write(data + "/psgopher/roms/notrom.zip", zipNaming("readme.txt"));
 	write(data + "/psgopher/roms/seven.7z", "7z");
-	write(data + "/games/n64/deep/er/gamma.n64", "g");
+	write(data + "/games/n64/deep/er/gamma.n64", romImage("HARBOR NIGHTS", "NHNJ", "n64"));
 	write(data + "/games/random.7z", "7z");           /* not in an N64 folder */
 	write(data + "/games/eboot.bin", "b");            /* .bin is never listed */
 	write(data + "/other/a/b/c/d/e/f/g/toodeep.z64", "x");
@@ -231,6 +270,19 @@ int main(int argc, char **argv)
 	}
 	CHECK(g_open_files == 0);
 
+	/* the headers: read in each byte order, Gopher64 asked for its facts */
+	const auto *alpha = find(games, "Alpha (U)"), *beta = find(games, "beta"), *gamma = find(games, "gamma");
+	CHECK(alpha && alpha->facts && alpha->id == "NCKE" && alpha->header == "COMET KART" && alpha->cic == 6102 && alpha->save == 1);
+	CHECK(beta && beta->facts && beta->id == "NMTP" && beta->header == "MOSS TEMPLE" && beta->cic == 6105 && beta->save == 32);
+	CHECK(gamma && gamma->facts && gamma->id == "NHNJ" && gamma->header == "HARBOR NIGHTS");
+	CHECK(find(games, "packed") && !find(games, "packed")->facts); /* a .zip: none */
+	CHECK(find(games, "Delta") && !find(games, "Delta")->facts);   /* not a ROM inside */
+	CHECK(g_facts_calls == 3);
+	CHECK(psgopher::regionText("NCKE") == "USA" && psgopher::regionText("NHNJ") == "Japan" && psgopher::regionText("NAAP") == "Europe");
+	CHECK(psgopher::saveText(1 | 4) == "EEPROM 4K or SRAM" && psgopher::saveText(32) == "Flash" && psgopher::saveText(0) == "None");
+	CHECK(psgopher::cicText(6102) == "CIC-6102" && psgopher::cicText(0) == "Unknown");
+	CHECK(psgopher::saveName(" Comet: Kart!  ") == "Comet Kart");
+
 	/* kept, and read back at the next start */
 	lib.load();
 	unsigned version2 = 0;
@@ -238,6 +290,36 @@ int main(int argc, char **argv)
 	CHECK(version2 != version);
 	CHECK(again.size() == games.size());
 	CHECK(find(again, "Delta") && find(again, "Delta")->tab == psgopher::TabNetwork && find(again, "Delta")->size == 0);
+	CHECK(find(again, "beta") && find(again, "beta")->facts && find(again, "beta")->header == "MOSS TEMPLE" &&
+		find(again, "beta")->cic == 6105 && find(again, "beta")->save == 32 && find(again, "beta")->id == "NMTP");
+	/* a second search reads no header it knows */
+	lib.rescan();
+	for (int i = 0; i < 500 && lib.scanning(); i++)
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	CHECK(g_facts_calls == 3);
+	CHECK(find(lib.games(), "beta") && find(lib.games(), "beta")->cic == 6105);
+
+	/* probes: Gopher64's states of the game by its header's name, newest first */
+	folders(data + "/psgopher/data/states");
+	write(data + "/psgopher/data/states/COMET KART-ABC.state1", "s");
+	write(data + "/psgopher/data/states/COMET KART-ABC.state4", "s");
+	write(data + "/psgopher/data/states/COMET KART-ABC.eep", "s");
+	write(data + "/psgopher/data/states/MOSS TEMPLE-XYZ.state2", "s");
+	{
+		struct utimbuf old = { time(nullptr) - 7200, time(nullptr) - 7200 };
+		utime((data + "/psgopher/data/states/COMET KART-ABC.state1").c_str(), &old);
+	}
+	const auto probes = psgopher::probesOf(*alpha);
+	CHECK(probes.size() == 2 && probes[0].slot == 4 && probes[1].slot == 1);
+	CHECK(psgopher::probesOf(*gamma).empty());
+
+	/* play time by name, added up and kept */
+	CHECK(psgopher::playedOf("Alpha (U)").seconds == 0 && psgopher::playedOf("Alpha (U)").last == 0);
+	psgopher::addPlayed("Alpha (U)", 600);
+	psgopher::addPlayed("beta", 30);
+	psgopher::addPlayed("Alpha (U)", 1200);
+	CHECK(psgopher::playedOf("Alpha (U)").seconds == 1800 && psgopher::playedOf("Alpha (U)").last > 0);
+	CHECK(psgopher::playedOf("beta").seconds == 30);
 
 	/* a share's ROM is copied, a local one is given as it is */
 	std::string error;

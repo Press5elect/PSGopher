@@ -685,6 +685,7 @@ struct Menu {
 
 void Menu::play(const Game &g)
 {
+	result.name = g.name;
 	if (g.tab != TabNetwork) {
 		result.play = true;
 		result.rom = g.path;

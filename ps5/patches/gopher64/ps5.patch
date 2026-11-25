@@ -761,6 +761,60 @@ index 0000000..fdb8cb9
 +    0x00000011, 0x00000015, 0x00050085, 0x00000007, 0x00000017, 0x0000000c, 0x00000016, 0x0003003e,
 +    0x00000009, 0x00000017, 0x000100fd, 0x00010038,
 +};
+diff --git a/src/device/cart/rom.rs b/src/device/cart/rom.rs
+index f35085d..d610980 100644
+--- a/src/device/cart/rom.rs
++++ b/src/device/cart/rom.rs
+@@ -178,25 +178,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
+     false
+ }
+ 
++/// The lockout chip a ROM's boot code (IPL3, 0x40-0x1000) was made for: 6101, 6102, 6103, 6105,
++/// 6106 or 5167, or 0 when the code is not one of these. (PSGopher: set_cic's table as a function
++/// of its own, so the front end names the chip with the same table.)
++pub fn ipl3_model(rom: &[u8]) -> u32 {
++    if rom.len() < 0x1000 {
++        return 0;
++    }
++    match calculate_hash(&rom[0x40..0x1000]).as_str() {
++        "B99F06C4802C2377E31E388435955EF3E99C618A6D55D24699D828EB1075F1EB" => 6101,
++        "61E88238552C356C23D19409FE5570EE6910419586BC6FC740F638F761ADC46E" => 6102,
++        "BF3620D30817007091EBE9BDDD1B88C23B8A0052170B3309CDE5B6B4238E45E7" => 6103,
++        "04B7BC6717A9F0EB724CF927E74AD3876C381CBB280D841736FC5E55580B756B" => 6105,
++        "36ADC40148AF56F0D78CD505EB6A90117D1FD6F11C6309E52ED36BC4C6BA340E" => 6106,
++        "53C0088FB777870D0AF32F0251E964030E2E8B72E830C26042FD191169508C05" => 5167,
++        _ => 0,
++    }
++}
++
+ fn set_cic(device: &mut device::Device) {
+-    let hash = calculate_hash(&device.cart.rom[0x40..0x1000]);
+-    match hash.as_str() {
+-        "B99F06C4802C2377E31E388435955EF3E99C618A6D55D24699D828EB1075F1EB" => {
+-            device.cart.cic_seed = 0x3F; // CicNus6101
+-        }
+-        "61E88238552C356C23D19409FE5570EE6910419586BC6FC740F638F761ADC46E" => {
+-            device.cart.cic_seed = 0x3F; // CicNus6102
+-        }
+-        "BF3620D30817007091EBE9BDDD1B88C23B8A0052170B3309CDE5B6B4238E45E7" => {
+-            device.cart.cic_seed = 0x78; // CicNus6103
+-        }
+-        "04B7BC6717A9F0EB724CF927E74AD3876C381CBB280D841736FC5E55580B756B" => {
+-            device.cart.cic_seed = 0x91; // CicNus6105
+-        }
+-        "36ADC40148AF56F0D78CD505EB6A90117D1FD6F11C6309E52ED36BC4C6BA340E" => {
+-            device.cart.cic_seed = 0x85; // CicNus6106
+-        }
+-        "53C0088FB777870D0AF32F0251E964030E2E8B72E830C26042FD191169508C05" => {
++    match ipl3_model(&device.cart.rom) {
++        6101 | 6102 => device.cart.cic_seed = 0x3F, // CicNus6101, CicNus6102
++        6103 => device.cart.cic_seed = 0x78,        // CicNus6103
++        6105 => device.cart.cic_seed = 0x91,        // CicNus6105
++        6106 => device.cart.cic_seed = 0x85,        // CicNus6106
++        5167 => {
+             device.cart.cic_seed = CIC_SEED_5167;
+             device.cart.sc64.cfg[device::cart::sc64::SC64_ROM_WRITE_ENABLE as usize] = 1;
+         }
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..7caeeb3 100644
 --- a/src/lib.rs
@@ -802,10 +856,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..18382dc
+index 0000000..2c03937
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,448 @@
+@@ -0,0 +1,503 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1081,6 +1135,61 @@ index 0000000..18382dc
 +    copy_out(&st, states, states_size)
 +}
 +
++/// What Gopher64 makes of a cartridge, for the front end's panel: its lockout chip, its save
++/// memory and its default pak, by Gopher64's own functions (rom::ipl3_model, storage::get_save_type,
++/// pif::init's pak choice).
++#[repr(C)]
++pub struct PsgopherRomFacts {
++    /// 6101, 6102, 6103, 6105, 6106, 5167; 0 for a boot code Gopher64 does not know (it runs it as a 6102)
++    pub cic: u32,
++    /// a bit per save memory Gopher64 gives it: 1 EEPROM 4K, 2 EEPROM 16K, 4 SRAM, 8 SRAM 768K,
++    /// 16 SRAM 1M, 32 Flash (0: none; 1|4, EEPROM 4K and SRAM, is its default for a game it does not list)
++    pub save: u32,
++    /// 1 when the controllers hold a Rumble Pak by default, 0 a Controller Pak
++    pub rumble: u32,
++}
++
++/// The facts of a ROM from its first 4 KiB, in Gopher64's byte order (big-endian, .z64); false when
++/// there is too little of it.
++///
++/// # Safety
++/// `rom` holds `len` bytes; `out` is writable.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_rom_facts(rom: *const u8, len: usize, out: *mut PsgopherRomFacts) -> bool {
++    if rom.is_null() || out.is_null() || len < 0x1000 {
++        return false;
++    }
++    let rom = unsafe { std::slice::from_raw_parts(rom, len) };
++    let facts = std::panic::catch_unwind(|| {
++        let game_id = String::from_utf8(rom[0x3B..0x3E].to_vec()).unwrap_or_else(|_| "UNK".into());
++        use crate::ui::storage::SaveTypes;
++        let save = crate::ui::storage::get_save_type(rom, &game_id)
++            .iter()
++            .map(|t| match t {
++                SaveTypes::Eeprom4k => 1,
++                SaveTypes::Eeprom16k => 2,
++                SaveTypes::Sram => 4,
++                SaveTypes::Sram768k => 8,
++                SaveTypes::Sram1m => 16,
++                SaveTypes::Flash => 32,
++                _ => 0,
++            })
++            .fold(0u32, |a, b| a | b);
++        PsgopherRomFacts {
++            cic: crate::device::cart::rom::ipl3_model(rom),
++            save,
++            rumble: (game_id == "NCT") as u32, // as pif::init
++        }
++    });
++    match facts {
++        Ok(f) => {
++            unsafe { *out = f };
++            true
++        }
++        Err(_) => false, // (an ED64 header with a save type Gopher64 does not know panics)
++    }
++}
++
 +/// # Safety
 +/// `argv` holds `argc` NUL-terminated strings, as C's `main` receives them.
 +#[unsafe(no_mangle)]
@@ -1294,9 +1403,18 @@ index ccced72..a9950e5 100644
          eprintln!("Error writing config: {}", e);
      }
 diff --git a/src/ui/storage.rs b/src/ui/storage.rs
-index 0fe2469..5fbdb7b 100644
+index 0fe2469..9625778 100644
 --- a/src/ui/storage.rs
 +++ b/src/ui/storage.rs
+@@ -98,7 +98,7 @@ impl Saves {
+     }
+ }
+ 
+-fn get_save_type(rom: &[u8], game_id: &str) -> Vec<SaveTypes> {
++pub(crate) fn get_save_type(rom: &[u8], game_id: &str) -> Vec<SaveTypes> {
+     if let Ok(header_type) = std::str::from_utf8(rom[0x3C..0x3E].try_into().unwrap())
+         && header_type == "ED"
+     {
 @@ -256,6 +256,9 @@ pub fn init(ui: &mut ui::Ui, rom: &[u8]) {
          "{}-{}.state{}",
          prefix, ui.game_hash, ui.storage.save_state_slot

@@ -287,7 +287,10 @@ int main()
          break;
       settings.load(); /* the list may have changed HDR10 */
       settings.applyHdr();
+      const double started = now_seconds();
       notice = play(chosen.rom) == 0 ? std::string() : last_error();
+      if (!chosen.name.empty() && now_seconds() - started > 5) /* (one that did not start is no play) */
+         psgopher::addPlayed(chosen.name, now_seconds() - started);
    }
    say("closing");
    return 0;

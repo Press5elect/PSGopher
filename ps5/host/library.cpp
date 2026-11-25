@@ -11,7 +11,9 @@
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <ctime>
 #include <mutex>
 #include <thread>
 
@@ -23,12 +25,21 @@
 
 extern "C" void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
+/* Gopher64's facts of a cartridge (vendor/gopher64/src/psgopher.rs); weak, so the host tests may
+ * give their own or none */
+struct PsgopherRomFacts {
+	uint32_t cic, save, rumble;
+};
+extern "C" bool psgopher_rom_facts(const uint8_t *rom, size_t len, PsgopherRomFacts *out) __attribute__((weak));
+
 namespace psgopher {
 
 namespace {
 
 std::string g_root = "/data"; // the console's /data (the host tests' folder)
 std::string listFile() { return g_root + "/psgopher/cache/library.tsv"; }
+std::string playedFile() { return g_root + "/psgopher/cache/played.tsv"; }
+std::string statesFolder() { return g_root + "/psgopher/data/states"; }
 std::string playFolder() { return g_root + "/psgopher/cache/play"; }
 constexpr int kDepth = 5;               // folders below a place
 constexpr unsigned kLocalBudget = 60000; // entries a local place may cost
@@ -118,6 +129,65 @@ bool zipHoldsRom(const std::string &path)
 	return rawRom(lower(std::string((const char *)head + 30, length)));
 }
 
+/* The ROM's first 4 KiB in Gopher64's byte order (.z64: big-endian; .v64 swaps each 16-bit pair,
+ * .n64 each 32-bit word), from the file or the share; false when it is not an N64 ROM. */
+bool readHeader(const std::string &path, uint8_t *head)
+{
+	size_t got = 0;
+	if (ps5vfs_is_virtual(path.c_str())) {
+		FILE *f = ps5vfs_fopen(path.c_str(), "rb");
+		if (!f)
+			return false;
+		got = ps5vfs_fread(head, 1, 0x1000, f);
+		ps5vfs_fclose(f);
+	} else {
+		FILE *f = fopen(path.c_str(), "rb");
+		if (!f)
+			return false;
+		got = fread(head, 1, 0x1000, f);
+		fclose(f);
+	}
+	if (got < 0x1000)
+		return false;
+	const uint32_t magic = (uint32_t)head[0] << 24 | head[1] << 16 | head[2] << 8 | head[3];
+	if (magic == 0x37804012u) { /* .v64 */
+		for (size_t i = 0; i + 1 < 0x1000; i += 2)
+			std::swap(head[i], head[i + 1]);
+	} else if (magic == 0x40123780u) { /* .n64 */
+		for (size_t i = 0; i + 3 < 0x1000; i += 4) {
+			std::swap(head[i], head[i + 3]);
+			std::swap(head[i + 1], head[i + 2]);
+		}
+	} else if (magic != 0x80371240u)
+		return false;
+	return true;
+}
+
+/* The game's facts from its ROM's header (left as they are for a .zip or .7z, or an unreadable one) */
+void readFacts(Game &g)
+{
+	const std::string l = lower(g.path);
+	if (!rawRom(l))
+		return;
+	uint8_t head[0x1000];
+	if (!readHeader(g.path, head))
+		return;
+	g.header.assign((const char *)head + 0x20, 20);
+	g.header = g.header.substr(0, g.header.find('\0'));
+	while (!g.header.empty() && g.header.back() == ' ')
+		g.header.pop_back();
+	g.id.clear();
+	for (int i = 0x3B; i < 0x3F; i++)
+		g.id += head[i] >= 0x20 && head[i] < 0x7f ? (char)head[i] : '-';
+	PsgopherRomFacts f = {};
+	if (psgopher_rom_facts && psgopher_rom_facts(head, sizeof(head), &f)) {
+		g.cic = f.cic;
+		g.save = f.save;
+		g.rumble = f.rumble != 0;
+	}
+	g.facts = true;
+}
+
 /* Folders not worth a look: the title's own (but its roms), systems' and other programs' data. */
 bool skipFolder(const std::string &full, const std::string &name)
 {
@@ -198,8 +268,16 @@ void sortGames(std::vector<Game> &games)
 void save(const std::vector<Game> &games)
 {
 	std::string text;
-	for (const Game &g : games)
-		text += std::to_string(g.tab) + "\t" + std::to_string(g.size) + "\t" + g.path + "\n";
+	/* v2: tab, size, facts, cic, save, rumble, id, header, path (the path last: it may hold anything
+	 * but a newline; the header's name has no tab) */
+	text += "#psgopher-library 2\n";
+	for (const Game &g : games) {
+		std::string header = g.header;
+		std::replace(header.begin(), header.end(), '\t', ' ');
+		text += std::to_string(g.tab) + "\t" + std::to_string(g.size) + "\t" + (g.facts ? "1" : "0") + "\t" +
+			std::to_string(g.cic) + "\t" + std::to_string(g.save) + "\t" + (g.rumble ? "1" : "0") + "\t" +
+			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + g.path + "\n";
+	}
 	const std::string file = listFile(), temporary = file + ".new";
 	if (FILE *f = fopen(temporary.c_str(), "wb")) {
 		const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size(); // one write: few and small
@@ -251,8 +329,14 @@ void search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 				rom = zipHoldsRom(full);
 			if (!rom && endsWith(l, ".7z"))
 				rom = n64Folder;
-			if (rom)
-				found.push_back({ stem(e.name), full, e.size, place.tab });
+			if (rom) {
+				Game g;
+				g.name = stem(e.name);
+				g.path = full;
+				g.size = e.size;
+				g.tab = place.tab;
+				found.push_back(g);
+			}
 		}
 	}
 	if (budget == 0)
@@ -287,16 +371,44 @@ void Library::load()
 	std::vector<Game> games;
 	if (FILE *f = fopen(listFile().c_str(), "rb")) {
 		char line[2048];
+		bool v2 = false;
 		while (fgets(line, sizeof(line), f)) {
-			int tab = 0;
-			unsigned long long size = 0;
-			char path[1900] = {};
-			if (sscanf(line, "%d\t%llu\t%1899[^\n]", &tab, &size, path) != 3)
+			std::string text = line;
+			while (!text.empty() && (text.back() == '\n' || text.back() == '\r'))
+				text.pop_back();
+			if (text == "#psgopher-library 2") {
+				v2 = true;
 				continue;
-			const std::string p = path;
-			const size_t slash = p.rfind('/');
-			games.push_back({ stem(slash == std::string::npos ? p : p.substr(slash + 1)), p, size,
-				std::clamp(tab, 0, TabCount - 1) });
+			}
+			std::vector<std::string> fields;
+			size_t at = 0;
+			const int count = v2 ? 9 : 3;
+			for (int i = 0; i < count - 1; i++) {
+				const size_t tab_at = text.find('\t', at);
+				if (tab_at == std::string::npos)
+					break;
+				fields.push_back(text.substr(at, tab_at - at));
+				at = tab_at + 1;
+			}
+			fields.push_back(text.substr(at));
+			if ((int)fields.size() != count)
+				continue;
+			Game g;
+			g.tab = std::clamp(atoi(fields[0].c_str()), 0, TabCount - 1);
+			g.size = strtoull(fields[1].c_str(), nullptr, 10);
+			g.path = fields.back();
+			const size_t slash = g.path.rfind('/');
+			g.name = stem(slash == std::string::npos ? g.path : g.path.substr(slash + 1));
+			if (v2) {
+				g.facts = fields[2] == "1";
+				g.cic = (uint32_t)strtoul(fields[3].c_str(), nullptr, 10);
+				g.save = (uint32_t)strtoul(fields[4].c_str(), nullptr, 10);
+				g.rumble = fields[5] == "1";
+				g.id = fields[6] == "-" ? "" : fields[6];
+				g.header = fields[7];
+			}
+			if (!g.path.empty())
+				games.push_back(g);
 		}
 		fclose(f);
 	}
@@ -316,6 +428,36 @@ void Library::rescan()
 		std::vector<std::string> seen;
 		for (const Place &p : places())
 			search(p, found, seen);
+		/* each ROM's header once: what the last list knew for the same file (path and size) stays */
+		{
+			std::vector<Game> known;
+			{
+				std::lock_guard lock(state().mutex);
+				known = state().games;
+			}
+			std::sort(known.begin(), known.end(), [](const Game &a, const Game &b) { return a.path < b.path; });
+			unsigned read = 0;
+			for (Game &g : found) {
+				auto it = std::lower_bound(known.begin(), known.end(), g.path,
+					[](const Game &k, const std::string &path) { return k.path < path; });
+				if (it != known.end() && it->path == g.path && it->size == g.size && it->facts) {
+					g.facts = true;
+					g.id = it->id;
+					g.header = it->header;
+					g.cic = it->cic;
+					g.save = it->save;
+					g.rumble = it->rumble;
+					continue;
+				}
+				{
+					std::lock_guard lock(state().mutex);
+					state().status = g.path;
+				}
+				readFacts(g);
+				read++;
+			}
+			say("library: %u ROM header(s) read", read);
+		}
 		/* one entry per file: a place inside another (/data/psgopher/roms in /data) is seen once */
 		sortGames(found);
 		save(found);
@@ -359,6 +501,138 @@ Library &library()
 {
 	static Library l;
 	return l;
+}
+
+std::string saveText(uint32_t save)
+{
+	if (save == 0)
+		return "None";
+	if (save == (1u | 4u))
+		return "EEPROM 4K or SRAM";
+	static const char *const names[] = { "EEPROM 4K", "EEPROM 16K", "SRAM", "SRAM 768K", "SRAM 1M", "Flash" };
+	std::string out;
+	for (int i = 0; i < 6; i++)
+		if (save & (1u << i))
+			out += (out.empty() ? "" : " + ") + std::string(names[i]);
+	return out;
+}
+
+std::string cicText(uint32_t cic)
+{
+	return cic ? "CIC-" + std::to_string(cic) : "Unknown";
+}
+
+std::string regionText(const std::string &id)
+{
+	if (id.size() < 4)
+		return "";
+	switch (id[3]) {
+	case 'E': return "USA";
+	case 'J': return "Japan";
+	case 'P': case 'X': case 'Y': return "Europe";
+	case 'D': return "Germany";
+	case 'F': return "France";
+	case 'I': return "Italy";
+	case 'S': return "Spain";
+	case 'U': return "Australia";
+	case 'A': return "Asia";
+	case 'B': return "Brazil";
+	case 'C': return "China";
+	case 'K': return "Korea";
+	default: return "";
+	}
+}
+
+std::string saveName(const std::string &header)
+{
+	std::string out;
+	for (const char c : header)
+		if (std::isalnum((unsigned char)c) || c == '_' || c == ' ' || c == '-')
+			out += c;
+	const size_t first = out.find_first_not_of(" \t"), last = out.find_last_not_of(" \t");
+	return first == std::string::npos ? std::string() : out.substr(first, last - first + 1);
+}
+
+std::vector<Probe> probesOf(const Game &g)
+{
+	std::vector<Probe> out;
+	const std::string prefix = saveName(g.header) + "-";
+	if (prefix.size() < 2)
+		return out;
+	if (DIR *d = opendir(statesFolder().c_str())) {
+		while (dirent *e = readdir(d)) {
+			const std::string name = e->d_name;
+			const size_t dot = name.rfind(".state");
+			if (name.rfind(prefix, 0) != 0 || dot == std::string::npos || dot + 7 != name.size() ||
+				!std::isdigit((unsigned char)name.back()))
+				continue;
+			struct stat st;
+			if (stat((statesFolder() + "/" + name).c_str(), &st) == 0)
+				out.push_back({ name.back() - '0', (int64_t)st.st_mtime });
+		}
+		closedir(d);
+	}
+	std::sort(out.begin(), out.end(), [](const Probe &a, const Probe &b) { return a.time > b.time; });
+	return out;
+}
+
+namespace {
+std::mutex g_played_mutex;
+std::vector<std::pair<std::string, Played>> readPlayed()
+{
+	std::vector<std::pair<std::string, Played>> all;
+	if (FILE *f = fopen(playedFile().c_str(), "rb")) {
+		char line[1024];
+		while (fgets(line, sizeof(line), f)) {
+			double seconds = 0;
+			long long last = 0;
+			char name[900] = {};
+			if (sscanf(line, "%lf\t%lld\t%899[^\n]", &seconds, &last, name) == 3)
+				all.push_back({ name, { seconds, (int64_t)last } });
+		}
+		fclose(f);
+	}
+	return all;
+}
+} // namespace
+
+Played playedOf(const std::string &name)
+{
+	std::lock_guard lock(g_played_mutex);
+	for (const auto &p : readPlayed())
+		if (p.first == name)
+			return p.second;
+	return {};
+}
+
+void addPlayed(const std::string &name, double seconds)
+{
+	std::lock_guard lock(g_played_mutex);
+	auto all = readPlayed();
+	bool there = false;
+	for (auto &p : all)
+		if (p.first == name) {
+			p.second.seconds += seconds;
+			p.second.last = (int64_t)time(nullptr);
+			there = true;
+		}
+	if (!there)
+		all.push_back({ name, { seconds, (int64_t)time(nullptr) } });
+	std::string text;
+	char line[1024];
+	for (const auto &p : all) {
+		snprintf(line, sizeof(line), "%.0f\t%lld\t%s\n", p.second.seconds, (long long)p.second.last, p.first.c_str());
+		text += line;
+	}
+	const std::string file = playedFile(), temporary = file + ".new";
+	if (FILE *f = fopen(temporary.c_str(), "wb")) {
+		const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+		fclose(f);
+		if (ok && rename(temporary.c_str(), file.c_str()) == 0)
+			chmod(file.c_str(), 0666);
+		else
+			unlink(temporary.c_str());
+	}
 }
 
 std::string localCopy(const std::string &path, std::string *error)
