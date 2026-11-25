@@ -140,3 +140,9 @@ platform_log_open(const char *path, const char *previous)
    (void)previous;
    return -1;
 }
+
+const char *
+platform_log_note(void)
+{
+   return "host build: no log";
+}

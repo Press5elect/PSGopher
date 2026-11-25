@@ -533,10 +533,10 @@ index 4e51a1b..35d03a2 100644
  mod ui;
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..fc91758
+index 0000000..80e4857
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,338 @@
+@@ -0,0 +1,352 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -659,6 +659,18 @@ index 0000000..fc91758
 +/// notice (the boot log has it too, through descriptor 2).
 +static LAST_ERROR: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 +
++unsafe extern "C" {
++    /// The title's logger (ps5/host/platform.c): the boot log and klog, whatever descriptor 2 is.
++    fn say(format: *const std::ffi::c_char, ...);
++}
++
++/// A line to the boot log through the title's logger.
++pub fn log_line(text: &str) {
++    if let Ok(line) = std::ffi::CString::new(text.replace('\0', " ")) {
++        unsafe { say(c"%s".as_ptr(), line.as_ptr()) };
++    }
++}
++
 +fn keep_error(text: String) {
 +    if let Ok(mut last) = LAST_ERROR.lock() {
 +        *last = text;
@@ -678,6 +690,8 @@ index 0000000..fc91758
 +                .or_else(|| info.payload().downcast_ref::<String>().cloned())
 +                .unwrap_or_else(|| "a panic".into());
 +            let place = info.location().map(|l| format!(" ({}:{})", l.file(), l.line())).unwrap_or_default();
++            let thread = std::thread::current().name().unwrap_or("unnamed").to_string();
++            log_line(&format!("psgopher: PANIC on thread {thread}: {message}{place}"));
 +            keep_error(format!("{message}{place}"));
 +            report(info);
 +        }));
@@ -716,7 +730,7 @@ index 0000000..fc91758
 +    // A panic must not unwind into C: it is reported, kept for the game list, and the list comes back.
 +    keep_error(String::new());
 +    keep_panics();
-+    eprintln!("psgopher: Gopher64 with {:?}", args);
++    log_line(&format!("psgopher: Gopher64 with {:?}", args));
 +    let result = std::panic::catch_unwind(move || {
 +        let dirs = dirs();
 +        for dir in [&dirs.config_dir, &dirs.cache_dir, &dirs.data_dir] {
@@ -736,7 +750,7 @@ index 0000000..fc91758
 +    match result {
 +        Ok(Ok(())) => 0,
 +        Ok(Err(e)) => {
-+            eprintln!("psgopher: {e}");
++            log_line(&format!("psgopher: Gopher64 ended with an error: {e}"));
 +            keep_error(e.to_string());
 +            1
 +        }

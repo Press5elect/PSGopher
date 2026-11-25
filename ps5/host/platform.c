@@ -65,6 +65,7 @@ platform_init(const char *title_name)
  * descriptor 2 (Gopher64's errors, a panic's message) would otherwise go nowhere. */
 static int log_fd = -1;
 static double log_start;
+static char log_note[128] = "no log";
 
 int
 platform_log_open(const char *path, const char *previous)
@@ -78,12 +79,43 @@ platform_log_open(const char *path, const char *previous)
    if (log_fd < 0)
       return -1;
    fchmod(log_fd, 0666);
+   /* open() gives the lowest free number: when 0 or 1 is free too (a title may start without
+    * them), those are taken first and given back after */
    fflush(stderr);
-   close(STDERR_FILENO);
-   const int two = open(path, O_WRONLY | O_APPEND);
-   if (two >= 0 && two != STDERR_FILENO)
-      close(two);
+   const int closed = close(STDERR_FILENO);
+   int lower[2], lowers = 0, two = -1;
+   for (int tries = 0; tries < 3; tries++) {
+      const int fd = open(path, O_WRONLY | O_APPEND);
+      if (fd < 0 || fd > STDERR_FILENO) {
+         if (fd > STDERR_FILENO)
+            close(fd);
+         two = fd;
+         break;
+      }
+      if (fd == STDERR_FILENO) {
+         two = fd;
+         break;
+      }
+      lower[lowers++] = fd;
+   }
+   /* a free descriptor 1 (standard output: Rust's println) stays the log too; 0 is given back */
+   int out_too = 0;
+   for (int i = 0; i < lowers; i++) {
+      if (lower[i] == STDOUT_FILENO)
+         out_too = 1;
+      else
+         close(lower[i]);
+   }
+   snprintf(log_note, sizeof(log_note), "descriptor 2 %s, descriptor 1 %s (close %d, %d lower free)",
+            two == STDERR_FILENO ? "is the log too" : "could not be made the log",
+            out_too ? "too" : "as it was", closed, lowers);
    return two == STDERR_FILENO ? 1 : 0;
+}
+
+const char *
+platform_log_note(void)
+{
+   return log_note;
 }
 
 void

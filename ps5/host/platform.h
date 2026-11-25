@@ -24,6 +24,8 @@ void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
  * written to descriptor 2. Before any thread starts. 1: descriptor 2 is the log too; 0: it is not;
  * -1: no log. */
 int platform_log_open(const char *path, const char *previous);
+/* How descriptor 2 went, for the log's first lines. */
+const char *platform_log_note(void);
 
 double now_seconds(void);
 

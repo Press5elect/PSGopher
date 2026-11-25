@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cctype>
 #include <cerrno>
 #include <cstdio>
@@ -310,7 +311,7 @@ void Library::rescan()
 	if (state().scanning.exchange(true))
 		return;
 	std::thread([] {
-		const double started = (double)clock() / CLOCKS_PER_SEC;
+		const auto started = std::chrono::steady_clock::now();
 		std::vector<Game> found;
 		std::vector<std::string> seen;
 		for (const Place &p : places())
@@ -318,7 +319,8 @@ void Library::rescan()
 		/* one entry per file: a place inside another (/data/psgopher/roms in /data) is seen once */
 		sortGames(found);
 		save(found);
-		say("library: %zu game(s) found (%.1f s of CPU)", found.size(), (double)clock() / CLOCKS_PER_SEC - started);
+		say("library: %zu game(s) found in %.1f s", found.size(),
+			std::chrono::duration<double>(std::chrono::steady_clock::now() - started).count());
 		{
 			std::lock_guard lock(state().mutex);
 			state().games = std::move(found);

@@ -211,7 +211,7 @@ int main()
       const int opened = platform_log_open(path.c_str(), previous.c_str());
       if (opened >= 0) {
          log_path = path;
-         log_note = opened ? "Gopher64's own messages too" : "Gopher64's own messages only in klog";
+         log_note = platform_log_note();
          break;
       }
    }
