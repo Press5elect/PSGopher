@@ -25,6 +25,7 @@
 
 #include <dirent.h>
 #include <sys/stat.h>
+#include <ctime>
 
 extern "C" {
 #include "platform.h"
@@ -135,6 +136,17 @@ extern "C" bool psgopher_setting_set(const char *name, int64_t value)
 	return true;
 }
 
+/* ---------------------------------------------------------------- Gopher64's facts, stood in for */
+
+struct PsgopherRomFacts {
+	uint32_t cic, save, rumble;
+};
+extern "C" bool psgopher_rom_facts(const uint8_t *rom, size_t len, PsgopherRomFacts *out)
+{
+	*out = { rom[0x3C] == 'B' ? 6105u : 6102u, rom[0x3C] == 'B' ? 32u : 1u | 4u, rom[0x3C] == 'K' ? 1u : 0u };
+	return len >= 0x1000;
+}
+
 /* ---------------------------------------------------------------- ps5vfs, stood in for (no shares) */
 
 extern "C" void ps5vfs_set_shadow_path(const char *) {}
@@ -163,56 +175,92 @@ int main(int argc, char **argv)
 	if (std::system(("rm -rf '" + work + "' && mkdir -p '" + work + "/data/psgopher/roms' '" + work +
 			"/data/psgopher/cache' '" + g_pictures + "'").c_str()) != 0)
 		return 2;
-	/* a list of the kind a console has: ROM files named as dumps are */
+	/* a list of the kind a console has: ROM files named as dumps are, with headers */
 	static const char *const names[] = { "Aero Racer (U)", "Bomb Squad 64 (E)", "Cave Diver (J)", "Dino Park (U) [!]",
 		"Echo Base (U)", "Fjord Fishing (E)", "Gem Keeper (U)", "Hover Cars (J)", "Ice Climb 64 (U)", "Jungle Run (E)",
 		"Kart Champs (U)", "Lunar Lander 64 (U)", "Moto Trial (E)", "Night Ops (U)", "Orbit (J)" };
-	for (const char *n : names)
-		write(work + "/data/psgopher/roms/" + n + ".z64", std::string(8u << 20, '\0').substr(0, 1024 * (strlen(n) * 37 % 900 + 100)));
+	for (const char *n : names) {
+		std::string rom(1024 * (strlen(n) * 37 % 900 + 100), '\0');
+		const unsigned char magic[4] = { 0x80, 0x37, 0x12, 0x40 };
+		memcpy(&rom[0], magic, 4);
+		std::string header = n;
+		header = header.substr(0, header.find(" ("));
+		for (char &c : header)
+			c = (char)std::toupper((unsigned char)c);
+		memset(&rom[0x20], ' ', 20);
+		memcpy(&rom[0x20], header.data(), std::min<size_t>(20, header.size()));
+		const char region = strstr(n, "(E)") ? 'P' : strstr(n, "(J)") ? 'J' : 'E';
+		const char code[5] = { 'N', header[0], header[1] == ' ' ? 'X' : header[1], region, 0 };
+		memcpy(&rom[0x3B], code, 4);
+		write(work + "/data/psgopher/roms/" + n + ".z64", rom);
+	}
+	/* one game played (it leads the strip), two probes of another */
+	if (std::system(("mkdir -p '" + work + "/data/psgopher/data/states'").c_str()) != 0)
+		return 2;
+	write(work + "/data/psgopher/cache/played.tsv", "36000\t" + std::to_string((long long)time(nullptr) - 86400) + "\tKart Champs (U)\n");
+	for (int slot : { 1, 3 }) {
+		std::string state(8192, '\0');
+		for (size_t i = 0; i < state.size(); i++)
+			state[i] = (char)((i * 2654435761u >> (slot * 3)) & 0xff);
+		write(work + "/data/psgopher/data/states/BOMB SQUAD 64-0123.state" + std::to_string(slot), state);
+	}
 	psgopher::libraryUseRoot(work + "/data");
+	psgopher::library().load();
 	psgopher::library().rescan();
 	for (int i = 0; i < 300 && psgopher::library().scanning(); i++)
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
 	const uint32_t none = 0;
 	g_script = {
-		{ none, nullptr, 4 },
-		{ none, "1-list", 2 },
-		{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, "2-list-moved", 2 },
-		{ PAD_R1, "3-usb", 2 },
-		{ PAD_R1, "4-network", 2 },
-		{ PAD_SQUARE, "5-shares", 2 },
-		{ PAD_CROSS, "6-share-form", 2 },        /* Add a share */
-		{ PAD_DOWN, nullptr, 2 },                /* Server */
-		{ PAD_CROSS, "7-keyboard", 2 },          /* the keyboard */
-		{ PAD_CROSS, nullptr, 2 },               /* types 'q' (the first key of the second row) */
-		{ PAD_RIGHT, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, /* 'w' */
-		{ PAD_SQUARE, nullptr, 2 },              /* deletes it */
-		{ PAD_UP, nullptr, 2 }, { PAD_CROSS, "8-keyboard-typed", 2 }, /* '2' */
-		{ PAD_OPTIONS, "9-share-form-filled", 2 }, /* done */
-		{ PAD_CIRCLE, nullptr, 2 },              /* the form left without saving */
-		{ PAD_CIRCLE, nullptr, 2 },              /* the shares left: the list's Network tab */
-		{ PAD_OPTIONS, "10-settings", 2 },
-		{ PAD_RIGHT, nullptr, 2 },               /* Resolution: 2x */
-		{ PAD_DOWN, nullptr, 2 }, { PAD_CROSS, "11-settings-changed", 2 }, /* SSAA on */
+		{ none, nullptr, 6 },
+		{ none, "1-home", 3 },
+		{ PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { none, nullptr, 6 }, { none, "2-home-moved", 3 },
+		{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 }, { none, "3-rack", 3 },
+		{ PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 },
+		{ PAD_SQUARE, nullptr, 2 }, { PAD_OPTIONS, nullptr, 2 }, { none, "4-rack-sorted-filtered", 3 },
 	};
-	for (int i = 0; i < 20; i++) /* down to About */
+	for (int i = 0; i < 6; i++)
+		g_script.push_back({ PAD_OPTIONS, nullptr, 2 }); /* the filter back to All */
+	for (int i = 0; i < 3; i++)
+		g_script.push_back({ PAD_SQUARE, nullptr, 2 }); /* the sort back to A-Z */
+	for (const Step &st : std::vector<Step>{
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 }, { none, "5-bench", 3 },
+			{ PAD_CROSS, nullptr, 2 },                     /* the crystal: 125 MHz */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, /* the video stage: 2x */
+			{ none, "6-bench-changed", 3 } })
+		g_script.push_back(st);
+	for (int i = 0; i < 17; i++) /* down to "Network shares" */
 		g_script.push_back({ PAD_DOWN, nullptr, 2 });
-	g_script.push_back({ none, "12-settings-about", 2 });
-	g_script.push_back({ PAD_CIRCLE, nullptr, 2 });
-	g_script.push_back({ PAD_L1, nullptr, 2 });
-	g_script.push_back({ PAD_L1, nullptr, 2 });   /* back to Internal */
-	g_script.push_back({ PAD_DOWN, nullptr, 2 }); /* the second game */
-	g_script.push_back({ PAD_CROSS, nullptr, 2 }); /* plays it */
+	for (const Step &st : std::vector<Step>{
+			{ none, "7-bench-console", 3 },
+			{ PAD_CROSS, "8-shares", 3 },
+			{ PAD_CROSS, "9-share-form", 3 },          /* Add a share */
+			{ PAD_DOWN, nullptr, 2 },                  /* Server */
+			{ PAD_CROSS, "10-keyboard", 3 },           /* the keyboard */
+			{ PAD_CROSS, nullptr, 2 },                 /* types 'q' (the first key of the second row) */
+			{ PAD_RIGHT, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, /* 'w' */
+			{ PAD_SQUARE, nullptr, 2 },                /* deletes it */
+			{ PAD_UP, nullptr, 2 }, { PAD_CROSS, "11-keyboard-typed", 3 }, /* '2' */
+			{ PAD_OPTIONS, "12-share-form-filled", 3 }, /* done */
+			{ PAD_CIRCLE, nullptr, 2 },                /* the form left without saving */
+			{ PAD_CIRCLE, nullptr, 2 },                /* the shares left: the bench */
+			{ PAD_L1, nullptr, 2 }, { PAD_L1, nullptr, 2 }, { none, nullptr, 6 }, /* home */
+			{ PAD_SQUARE, "13-home-probes", 3 },       /* the probe picker (Bomb Squad 64 has two) */
+			{ PAD_CIRCLE, nullptr, 2 },
+			{ PAD_CROSS, nullptr, 2 } })                /* power on */
+		g_script.push_back(st);
 
+	setenv("PSGOPHER_ART", (std::string(PSGOPHER_SOURCE) + "/ps5/art").c_str(), 1);
 	const psgopher::MenuResult r = psgopher::runMenu("A notice from the last game");
-	std::printf("menu returned: play %d, %s; Gopher64's settings read %d times\n", r.play, r.rom.c_str(), g_setting_reads);
+	std::printf("menu returned: play %d, %s (probe %d); Gopher64's settings read %d times\n", r.play, r.rom.c_str(), r.load_state,
+	            g_setting_reads);
 	CHECK(r.play);
 	CHECK(r.rom == work + "/data/psgopher/roms/Bomb Squad 64 (E).z64");
+	CHECK(r.name == "Bomb Squad 64 (E)" && r.load_state == -1);
+	CHECK(g_settings["emulation.overclock"] == 1);
 	CHECK(g_settings["video.upscale"] == 2);
-	CHECK(g_settings["video.ssaa"] == 1);
 	CHECK(g_setting_reads < 40); /* read once each, not every frame */
-	for (const char *shot : { "1-list", "7-keyboard", "8-keyboard-typed", "10-settings", "12-settings-about" }) {
+	for (const char *shot : { "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes" }) {
 		struct stat st;
 		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);
 	}

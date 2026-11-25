@@ -57,6 +57,8 @@ struct Played {
 	int64_t last{ 0 }; // when it was last played (0 never)
 };
 Played playedOf(const std::string &name);
+/* every game's, by name (one read of the file) */
+std::vector<std::pair<std::string, Played>> playedAll();
 void addPlayed(const std::string &name, double seconds);
 
 /* Whether a file name is one the list shows (.z64 .n64 .v64; .zip whose first file is one; .7z
@@ -75,6 +77,8 @@ public:
 	std::vector<Game> games(unsigned *version = nullptr) const;
 	/* What the search is looking at now ("" when none). */
 	std::string status() const;
+	/* Gopher64's save states' folder (data/states) */
+	std::string statesFolder() const;
 };
 
 Library &library();

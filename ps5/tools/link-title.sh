@@ -116,8 +116,11 @@ cp "$root/build/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
 # the front end's pictures (ps5/art: the Live Board's mainboard, made by make-board-art.mjs, and the logo)
 mkdir -p "$app/art"
 cp "$root/ps5/art/board.png" "$root/ps5/art/logo.png" "$app/art/"
-# the attributions kept and the other authors' parts (NOTICE)
+# the attributions kept and the other authors' parts (NOTICE), and the fonts' licence
 cp "$root/NOTICE" "$app/NOTICE.txt"
+mkdir -p "$app/licenses"
+cp "$root/.deps/src/bricolage/OFL.txt" "$app/licenses/OFL-BricolageGrotesque.txt"
+cp "$root/.deps/src/jetbrains-mono/OFL.txt" "$app/licenses/OFL-JetBrainsMono.txt"
 (cd "$vulkan/runtime" && sha256sum --check --strict --quiet libc.prx.sha256)
 cp "$vulkan/runtime/libc.prx" "$app/sce_module/libc.prx"
 mv "$work/eboot.elf.new" "$work/eboot.elf"

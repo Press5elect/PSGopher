@@ -48,6 +48,8 @@ deps="$root/ps5/tools/build-deps.sh"
 check libsmb2 "$(sed -n 's/^libsmb2_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/sahlberg/libsmb2.git refs/heads/master)"
 check libnfs "$(sed -n 's/^libnfs_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/sahlberg/libnfs.git refs/heads/master)"
 check "Dear ImGui" "$(sed -n 's/^imgui_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/ocornut/imgui.git refs/heads/master)"
+check "Bricolage Grotesque" "$(sed -n 's/^bricolage_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/ateliertriay/bricolage.git)"
+check "JetBrains Mono" "$(sed -n 's/^jetbrains_mono_revision=\([0-9a-f]*\).*/\1/p' "$deps")" "$(head_of https://github.com/JetBrains/JetBrainsMono.git)"
 # the sandbox exit's helper and the shares are OGBox's (ps5/elevation, ps5/vfs, ps5/host/shares.*,
 # sandbox.cpp, libc_gaps.c): said when OGBox's copies changed since they were taken
 ogbox=${OGBOX_DIR:-$root/../OGBox}

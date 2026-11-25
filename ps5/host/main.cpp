@@ -188,13 +188,17 @@ static std::string last_error()
    return std::string("The game ended with an error: ") + (text[0] ? text : "see the log");
 }
 
-/* Gopher64 with one ROM; its status */
-static int play(const std::string &rom)
+/* Gopher64 with one ROM (and a probe's slot to start from, or -1); its status */
+static int play(const std::string &rom, int load_state = -1)
 {
-   const char *argv[] = {"psgopher", "--fullscreen", rom.c_str()};
-   say("starting Gopher64 with %s", rom.c_str());
+   const std::string slot = std::to_string(load_state);
+   const char *argv[] = {"psgopher", "--fullscreen", "--load-state", slot.c_str(), rom.c_str()};
+   const int argc = load_state >= 0 ? 5 : 3;
+   if (load_state < 0)
+      argv[2] = rom.c_str();
+   say("starting Gopher64 with %s%s", rom.c_str(), load_state >= 0 ? (" from probe " + slot).c_str() : "");
    psgopher_video_reset();
-   const int status = psgopher_main(3, argv);
+   const int status = psgopher_main(argc, argv);
    say("Gopher64 returned %d", status);
    return status;
 }
@@ -288,7 +292,7 @@ int main()
       settings.load(); /* the list may have changed HDR10 */
       settings.applyHdr();
       const double started = now_seconds();
-      notice = play(chosen.rom) == 0 ? std::string() : last_error();
+      notice = play(chosen.rom, chosen.load_state) == 0 ? std::string() : last_error();
       if (!chosen.name.empty() && now_seconds() - started > 5) /* (one that did not start is no play) */
          psgopher::addPlayed(chosen.name, now_seconds() - started);
    }

@@ -28,11 +28,12 @@ ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=add
 lavapipe=${PSGOPHER_LAVAPIPE_ICD:-/opt/lavapipe/lvp_icd.json}
 imgui="$root/.deps/src/imgui"
 rdp="$root/vendor/gopher64/parallel-rdp/parallel-rdp-standalone"
-if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/menu_font.h ]]; then
+if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/font_mono.h ]]; then
     menu_flags=(-std=c++20 -O1 -g -fsanitize=address,undefined -DPSGOPHER_MENU_HOST -DPSGOPHER_SHARES_HOST_TEST
         -DIMGUI_IMPL_VULKAN_USE_VOLK -DIMGUI_DISABLE_DEFAULT_SHELL_FUNCTIONS -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS
         -I"$root/ps5/host" -I"$root/ps5/vfs"
-        -I"$imgui" -I"$imgui/backends" -I"$rdp/volk" -I"$rdp/vulkan-headers/include" -I"$root/build/ps5/gen")
+        -I"$imgui" -I"$imgui/backends" -I"$rdp/volk" -I"$rdp/vulkan-headers/include" -I"$root/build/ps5/gen"
+        -I"$root/ps5/third_party/stb" -DPSGOPHER_SOURCE="\"$root\"")
     ${CC:-gcc} -O1 -g -fsanitize=address,undefined -I"$rdp/vulkan-headers/include" -c "$rdp/volk/volk.c" -o "$out/volk.o"
     for source in imgui imgui_draw imgui_tables imgui_widgets backends/imgui_impl_vulkan; do
         [[ $out/imgui_${source##*/}.o -nt $imgui/$source.cpp ]] ||
@@ -41,6 +42,7 @@ if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/menu_
     ${CXX:-g++} "${menu_flags[@]}" -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-unused-function \
         -Wno-unused-variable \
         "$root/ps5/tests/test_menu.cpp" "$root/ps5/host/menu.cpp" "$root/ps5/host/library.cpp" \
+        "$root/ps5/host/frontend.cpp" "$root/ps5/host/board.cpp" "$root/ps5/host/image.cpp" \
         "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" "$root/ps5/host/sandbox.cpp" \
         "$out/volk.o" "$out"/imgui_*.o -o "$out/test_menu" -lpthread -ldl
     [[ -f $lavapipe ]] && export VK_ICD_FILENAMES=$lavapipe

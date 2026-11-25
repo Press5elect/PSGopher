@@ -35,8 +35,9 @@ MIT), volk (Arseny Kapoulkine, MIT), rcheevos (the RetroAchievements team, MIT) 
 it builds with (their own licences). The sandbox elevation helper and its client in ps5/elevation:
 BlackBearReloaded's ps5-native-app-boilerplate (GPL-3.0-or-later; ps5/elevation/LICENSE). libsmb2
 (Ronnie Sahlberg, LGPL-2.1-or-later) and libnfs (Ronnie Sahlberg, LGPL-2.1-or-later and BSD),
-linked for the network shares. Dear ImGui (Omar Cornut, MIT), the game list's drawing, and its
-Roboto Medium font (Christian Robertson, Apache License 2.0). stb_truetype (Sean Barrett, public
-domain or MIT). The PS5 layer in ps5/host/platform* (Mihawk's PS5 Vulkan Template, MIT); RADV
+linked for the network shares. Dear ImGui (Omar Cornut, MIT), the front end's and the quick menu's
+drawing. The front end's faces, under the SIL Open Font License 1.1 (their licences in the title
+folder's licenses/): Bricolage Grotesque (Mathieu Triay) and JetBrains Mono (JetBrains).
+stb_truetype and stb_image (Sean Barrett, public domain or MIT). The PS5 layer in ps5/host/platform* (Mihawk's PS5 Vulkan Template, MIT); RADV
 (Mesa, MIT) through Mihawk's PS5_Mesa and PS5_Vulkan, with Crux2's driver patches; the payload
 SDK and platform layer (Mihawk's PS5_PayloadSDK).

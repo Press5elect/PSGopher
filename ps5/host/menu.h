@@ -14,6 +14,7 @@ struct MenuResult {
 	bool play{ false }; // false: the title is to close
 	std::string rom;    // the ROM to play (a local path: a share's was copied)
 	std::string name;   // the game's name in the list (its play time is kept by it)
+	int load_state{ -1 }; // a probe (save state slot) to start from, -1 none
 };
 
 /* Shows the list until a game is chosen or the title is closed. `notice` is said at the top once

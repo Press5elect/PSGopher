@@ -145,6 +145,18 @@ at most 64 MiB) and that path is played. Saves are named by the ROM's hash, so t
 wherever the ROM is. On the console: the helper and the file layer run in OGBox and Crux2 [console];
 with PSGopher's title ID [unknown] until the first run.
 
+**D17. The front end is the Live Board.** The design the owner chose (`ps5/art/live-board.html`)
+is the specification: its stage (1920x1080, doubled at 4K), its board canvas (2000x1250), its CSS 3D
+pose per view, its colours, faces and timings. The board's still layer is rendered from the design
+itself (`make-board-art.mjs`, 4000x2500, mipmapped on upload) and drawn as a 41x26 grid through the
+same transform (translate, perspective 2600 px, rotateX, rotateZ, scale about the centre), eased
+between poses with the design's cubic-bezier(.2,.8,.2,1); the moving parts (`board.cpp`, the
+design's drawDynamic) are drawn in board pixels and projected with it. Labels are the design's
+generator, clipped as polygons so one label can be flat or seated in the slot. Everything else is
+Dear ImGui draw lists (`frontend.cpp`), the pad read directly. The panel shows what Gopher64 makes
+of the cartridge (D16's facts), not guesses. In a game the quick menu (`quickmenu.cpp`) is the
+design's LIVE panel, drawn over the frame through parallel-rdp's device.
+
 **D16. The game list.** Between games the title shows a list of every ROM found (`.z64 .n64 .v64`,
 a `.zip` whose first file is one, a `.7z` in a folder named for the N64 or in `roms/`): the console's
 `/data` (`/data/psgopher/roms` first), `/mnt/usb0-7`, `/mnt/ext0-1` and every share, each searched

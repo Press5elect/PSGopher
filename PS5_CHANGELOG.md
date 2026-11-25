@@ -14,6 +14,14 @@ console logs, 2026-11-25).
   log before the console closes the title. A `video:` line says when a game's first frame is shown,
   then its frames every 10 s.
 - Changed: the list's footer says how to leave a game (hold the touch pad + Options).
+- Added: the front end is the Live Board (`ps5/art/live-board.html`, the design chosen): HOME, the
+  live mainboard with the chosen cartridge sliding into its slot and its signals running, the panel
+  (Gopher64's facts of the cartridge, play time, probes drawn from the save states' own bytes), the
+  cartridge strip; RACK, every cartridge on shelves with letters, sorts and filters (Internal, USB,
+  Network among them); BENCH, the board's parts as the settings, each drawn to its part. The board
+  is the design's canvas rendered at 4000x2500 (`ps5/tools/make-board-art.mjs`) and drawn through
+  the design's own 3D transform; the faces are the design's (Bricolage Grotesque, JetBrains Mono).
+  A game can be powered on from a probe. It replaces the list and its settings page.
 - Added: the in-game quick menu, the Live Board's LIVE panel: a touch pad tap pauses the game and
   shows Resume, Take a memory probe and Load a probe (save states in slots 1-5, with their times),
   Press reset and Eject cartridge (back to the list), with the live frame rate, the emulation

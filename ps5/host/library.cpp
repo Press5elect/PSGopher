@@ -596,6 +596,17 @@ std::vector<std::pair<std::string, Played>> readPlayed()
 }
 } // namespace
 
+std::vector<std::pair<std::string, Played>> playedAll()
+{
+	std::lock_guard lock(g_played_mutex);
+	return readPlayed();
+}
+
+std::string Library::statesFolder() const
+{
+	return ::psgopher::statesFolder();
+}
+
 Played playedOf(const std::string &name)
 {
 	std::lock_guard lock(g_played_mutex);
