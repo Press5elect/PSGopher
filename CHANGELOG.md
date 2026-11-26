@@ -143,6 +143,12 @@ console: the cheats, variable refresh, HDR10.
 
 ### From the siblings (2026-11-26)
 
+- Fixed: lines across the picture in games that draw their backgrounds as strips: Native-Resolution
+  Texture Rectangles is On again by default (upscaled, the strips' edges did not meet), and
+  Deinterlacing is Blend again by default; a settings file from the build that changed them takes
+  the defaults again once. Triangle on HOME is labelled "Details & Cheats" (it opens the game's page).
+- Fixed: the 3.4 s stalls are gone on the console (Keep GPU Memory: 6,700 picture blocks reused
+  against 32 allocations in an hour's minute lines, none slow).
 - Added: large graphics memory blocks are kept for reuse (BENCH > Video > Keep GPU Memory, on by default).
   At 8x a 640x480 interlaced picture is a 75 MiB block that was taken from the console and given back every
   frame, and the console's kernel now and then took ~3.4 s to give one (the freezes at picture-mode

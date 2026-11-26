@@ -38,11 +38,12 @@ struct TitleSettings {
 	bool ditherFilter{ true };   // its dither filter (PSGOPHER_DITHER_FILTER)
 	bool divotFilter{ true };    // its divot filter (PSGOPHER_DIVOT_FILTER)
 	bool gammaDither{ false };   // its gamma dither (PSGOPHER_GAMMA_DITHER)
-	bool nativeTexRect{ false }; // texture rectangles drawn at the N64's resolution (PSGOPHER_NATIVE_TEXRECT)
+	bool nativeTexRect{ true }; // texture rectangles drawn at the N64's resolution (PSGOPHER_NATIVE_TEXRECT)
 	int cropOverscan{ 0 };       // pixels cropped at each edge: 0, 8 or 16 (PSGOPHER_CROP_OVERSCAN)
 	int downsample{ 0 };         // steps the upscaled picture is scaled down by, 0..3 (PSGOPHER_DOWNSAMPLE); SSAA
 	                             // downscaling takes it all the way, whatever this says
-	int deinterlace{ 0 };        // 0 bob, 1 blend (PSGOPHER_DEINTERLACE)
+	int deinterlace{ 1 };        // 0 bob, 1 blend (the default)
+	int pictureDefaults{ 2 };    // which picture defaults the file has taken (2: texture rectangles native, blend) (PSGOPHER_DEINTERLACE)
 	/* the controller's hotkeys (Gopher64's: its Hotkey Activator held, the touch pad by default, and
 	 * a button): on or off, and each action's N64 button (an input profile index, -1 none); the
 	 * actions are kHotkeyActions' (psgopher.rs's HOTKEY_ACTIONS, in its order) */

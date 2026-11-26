@@ -577,34 +577,47 @@ int main(int argc, char **argv)
 	/* the picture rows: their defaults, the file's words, values held in range, and the table a game's settings go through */
 	{
 		psgopher::TitleSettings d;
-		CHECK(d.finalFilter == 0 && d.viBilinear == 0 && d.viAa && d.ditherFilter && d.divotFilter && !d.gammaDither && !d.nativeTexRect &&
-		      d.cropOverscan == 0 && d.downsample == 0 && d.deinterlace == 0);
+		CHECK(d.finalFilter == 0 && d.viBilinear == 0 && d.viAa && d.ditherFilter && d.divotFilter && !d.gammaDither && d.nativeTexRect &&
+		      d.cropOverscan == 0 && d.downsample == 0 && d.deinterlace == 1);
 		d.finalFilter = 2, d.viBilinear = 1, d.viAa = false, d.ditherFilter = false, d.divotFilter = false, d.gammaDither = true;
-		d.nativeTexRect = true, d.cropOverscan = 16, d.downsample = 2, d.deinterlace = 1;
+		d.nativeTexRect = false, d.cropOverscan = 16, d.downsample = 2, d.deinterlace = 0;
 		d.file = data + "/psgopher/config/picture.ini";
 		CHECK(d.save());
 		const std::string text = slurp(d.file);
 		CHECK(text.find("final_filter = nearest") != std::string::npos && text.find("vi_bilinear = on") != std::string::npos &&
-		      text.find("deinterlace = blend") != std::string::npos && text.find("crop_overscan = 16") != std::string::npos);
+		      text.find("deinterlace = bob") != std::string::npos && text.find("crop_overscan = 16") != std::string::npos);
 		psgopher::TitleSettings e;
 		e.file = d.file;
 		e.load();
-		CHECK(e.finalFilter == 2 && e.viBilinear == 1 && !e.viAa && !e.ditherFilter && !e.divotFilter && e.gammaDither && e.nativeTexRect &&
-		      e.cropOverscan == 16 && e.downsample == 2 && e.deinterlace == 1);
+		CHECK(e.finalFilter == 2 && e.viBilinear == 1 && !e.viAa && !e.ditherFilter && !e.divotFilter && e.gammaDither && !e.nativeTexRect &&
+		      e.cropOverscan == 16 && e.downsample == 2 && e.deinterlace == 0);
 		write(d.file, "final_filter = fancy\ncrop_overscan = 11\ndownsample = 9\nvi_bilinear = maybe\ndeinterlace = weave\n");
 		psgopher::TitleSettings f;
 		f.file = d.file;
 		f.load();
-		CHECK(f.finalFilter == 0 && f.cropOverscan == 8 && f.downsample == 3 && f.viBilinear == 0 && f.deinterlace == 0);
+		CHECK(f.finalFilter == 0 && f.cropOverscan == 8 && f.downsample == 3 && f.viBilinear == 0 && f.deinterlace == 1 && f.nativeTexRect);
+		/* a file saved by the build whose defaults drew lines (no picture_defaults): the defaults again, once */
+		write(d.file, "native_texrect = off\ndeinterlace = bob\n");
+		psgopher::TitleSettings m;
+		m.file = d.file;
+		m.load();
+		CHECK(m.nativeTexRect && m.deinterlace == 1 && m.pictureDefaults == 2);
+		/* after that, the owner's own choice stays */
+		m.nativeTexRect = false, m.deinterlace = 0;
+		CHECK(m.save());
+		psgopher::TitleSettings k;
+		k.file = d.file;
+		k.load();
+		CHECK(!k.nativeTexRect && k.deinterlace == 0);
 		/* the environment the renderer reads once a game */
 		e.applyHdr();
 		CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "nearest") && !strcmp(getenv("PSGOPHER_VI_BILINEAR"), "on") && !strcmp(getenv("PSGOPHER_VI_AA"), "0") &&
-		      !strcmp(getenv("PSGOPHER_GAMMA_DITHER"), "1") && !strcmp(getenv("PSGOPHER_NATIVE_TEXRECT"), "1") && !strcmp(getenv("PSGOPHER_CROP_OVERSCAN"), "16") &&
-		      !strcmp(getenv("PSGOPHER_DOWNSAMPLE"), "2") && !strcmp(getenv("PSGOPHER_DEINTERLACE"), "blend"));
+		      !strcmp(getenv("PSGOPHER_GAMMA_DITHER"), "1") && !strcmp(getenv("PSGOPHER_NATIVE_TEXRECT"), "0") && !strcmp(getenv("PSGOPHER_CROP_OVERSCAN"), "16") &&
+		      !strcmp(getenv("PSGOPHER_DOWNSAMPLE"), "2") && !strcmp(getenv("PSGOPHER_DEINTERLACE"), "bob"));
 		psgopher::TitleSettings plain;
 		plain.applyHdr();
 		CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "sharp") && !strcmp(getenv("PSGOPHER_VI_BILINEAR"), "auto") && !strcmp(getenv("PSGOPHER_GAMMA_DITHER"), "0") &&
-		      !strcmp(getenv("PSGOPHER_DEINTERLACE"), "bob") && !strcmp(getenv("PSGOPHER_CROP_OVERSCAN"), "0"));
+		      !strcmp(getenv("PSGOPHER_DEINTERLACE"), "blend") && !strcmp(getenv("PSGOPHER_NATIVE_TEXRECT"), "1") && !strcmp(getenv("PSGOPHER_CROP_OVERSCAN"), "0"));
 		/* the table: a value in, the same out; a key that is not one */
 		CHECK(psgopher::TitleSettings::isField("downsample") && !psgopher::TitleSettings::isField("display") && !psgopher::TitleSettings::isField("hdr"));
 		psgopher::TitleSettings g;

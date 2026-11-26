@@ -821,7 +821,7 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		bool first;
 	};
 	const Act acts[3] = { { "\xE2\x9C\x95 Power on", true }, { "\xE2\x96\xA1 Probes", false },
-		                  { rack_panel ? "\xE2\x96\xB3 Seat it" : "\xE2\x96\xB3 Cheats", false } };
+		                  { rack_panel ? "\xE2\x96\xB3 Seat it" : "\xE2\x96\xB3 Details & Cheats", false } };
 	float ax = x + pad_x;
 	for (const Act &a : acts) {
 		const float aw = ink.width(f.mono_bold, 16, a.text) + 32;
@@ -1756,9 +1756,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(field_row("gamma_dither", "Gamma Dither", "When enabled, applies the N64's dither to the gamma curve, which adds fine noise to gradients. When disabled, the picture has no such noise.",
 		                           { { "Off", 0 }, { "On", 1 } }, 0));
 		s.rows.push_back(field_row("deinterlace", "Deinterlacing", "Selects how interlaced pictures are shown. Bob draws each field by itself, which keeps motion clean but can make thin lines flicker. Blend merges each field with the one before it, which softens flicker but can leave trails behind motion.",
-		                           { { "Bob", 0 }, { "Blend", 1 } }, 0));
-		s.rows.push_back(field_row("native_texrect", "Native-Resolution Texture Rectangles", "When enabled, draws texture rectangles, which games use for sprites and backgrounds, at the N64's resolution instead of the upscaled one. Can fix drawing errors in some games, but those parts stay soft at high resolutions.",
-		                           { { "Off", 0 }, { "On", 1 } }, 0));
+		                           { { "Bob", 0 }, { "Blend", 1 } }, 1));
+		s.rows.push_back(field_row("native_texrect", "Native-Resolution Texture Rectangles", "When enabled, draws texture rectangles, which games use for sprites and backgrounds, at the N64's resolution, which prevents lines between background strips. When disabled, they are sharper at high resolutions, but lines can appear in some games.",
+		                           { { "Off", 0 }, { "On", 1 } }, 1));
 		s.rows.push_back(field_row("crop_overscan", "Crop Overscan", "Selects how many pixels are cropped at each edge of the N64's picture, which hides the borders and noise that some games draw there. The picture is enlarged to fill the screen.",
 		                           { { "None", 0 }, { "8 Pixels", 8 }, { "16 Pixels", 16 } }, 0));
 		s.rows.push_back(choose("video.vsync", "VSync", "When enabled, each frame waits for the display's refresh, which prevents tearing. When disabled, frames are shown as soon as they are ready.",

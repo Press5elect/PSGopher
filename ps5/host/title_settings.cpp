@@ -39,6 +39,7 @@ void TitleSettings::load()
 		save();
 		return;
 	}
+	pictureDefaults = 0; /* (a file from before picture_defaults: see below) */
 	char line[256];
 	while (fgets(line, sizeof(line), f)) {
 		char key[64] = {}, value[128] = {};
@@ -86,14 +87,16 @@ void TitleSettings::load()
 			divotFilter = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "gamma_dither"))
 			gammaDither = !strcmp(value, "on");
+		else if (!strcmp(key, "picture_defaults"))
+			pictureDefaults = atoi(value);
 		else if (!strcmp(key, "native_texrect"))
-			nativeTexRect = !strcmp(value, "on");
+			nativeTexRect = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "crop_overscan"))
 			cropOverscan = atoi(value) >= 16 ? 16 : atoi(value) >= 8 ? 8 : 0;
 		else if (!strcmp(key, "downsample"))
 			downsample = std::clamp(atoi(value), 0, 3);
 		else if (!strcmp(key, "deinterlace"))
-			deinterlace = !strcmp(value, "blend") ? 1 : 0;
+			deinterlace = !strcmp(value, "bob") ? 0 : 1;
 		else if (!strcmp(key, "hotkeys"))
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
@@ -111,6 +114,15 @@ void TitleSettings::load()
 				}
 	}
 	fclose(f);
+	/* One test build (64d2321) saved native_texrect = off and deinterlace = bob as its defaults: the
+	   upscaled texture rectangles drew lines between the strips games draw backgrounds with (the
+	   console, 2026-11-26). A file from before picture_defaults 2 takes the defaults again, once. */
+	if (pictureDefaults < 2) {
+		nativeTexRect = true;
+		deinterlace = 1;
+		pictureDefaults = 2;
+		save();
+	}
 	setenv("PSGOPHER_WRITE_HELPER", writeHelper ? "1" : "0", 1); /* (read by the share copy: write_broker.cpp) */
 }
 
@@ -184,6 +196,8 @@ bool TitleSettings::save() const
 		"downsample = %d\n"
 		"# deinterlace: bob shows each field on its own; blend merges each with the one before\n"
 		"deinterlace = %s\n"
+		"# picture_defaults: which defaults of the picture rows this file has taken (not a setting)\n"
+		"picture_defaults = %d\n"
 		"\n"
 		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
 		"# hotkey_<action>: the N64 button by Gopher64's input number (0 D Right, 1 D Left, 2 D Down, 3 D Up,\n"
@@ -204,7 +218,7 @@ bool TitleSettings::save() const
 		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, keepGpuMemory ? "on" : "off",
 		finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto",
 		viAa ? "on" : "off", ditherFilter ? "on" : "off", divotFilter ? "on" : "off", gammaDither ? "on" : "off", nativeTexRect ? "on" : "off",
-		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
+		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", pictureDefaults, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)
