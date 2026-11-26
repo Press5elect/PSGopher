@@ -48,11 +48,9 @@
   "choices": "written",
   "default_field": "overclock"
  },
- "emulation.disable_expansion_pak": {
-  "label": "exact",
-  "label_source": "src/ui/gui/settings_page.slint:156",
-  "choices": "written",
-  "default_field": "disable_expansion_pak"
+ "expansion_pak": {
+  "label": "written",
+  "choices": "written"
  },
  "emulation.rewind": {
   "label": "exact",
@@ -168,6 +166,10 @@
   "choices": "written"
  },
  "keep_gpu_memory": {
+  "label": "written",
+  "choices": "written"
+ },
+ "rdp_threaded": {
   "label": "written",
   "choices": "written"
  },

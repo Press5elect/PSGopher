@@ -1,5 +1,54 @@
+diff --git a/parallel-rdp/command_ring.cpp b/parallel-rdp/command_ring.cpp
+index 5220cbc..d749827 100644
+--- a/parallel-rdp/command_ring.cpp
++++ b/parallel-rdp/command_ring.cpp
+@@ -26,6 +26,11 @@
+ #include "thread_id.hpp"
+ #include <assert.h>
+ 
++#ifdef PSGOPHER
++unsigned psgopher_rdp_worker_thread_index = 0;
++thread_local bool psgopher_on_rdp_worker = false;
++#endif
++
+ namespace RDP
+ {
+ void CommandRing::init(
+@@ -85,7 +90,12 @@ void CommandRing::enqueue_command(unsigned num_words, const uint32_t *words)
+ 
+ void CommandRing::thread_loop()
+ {
++#ifdef PSGOPHER
++	Util::register_thread_index(psgopher_rdp_worker_thread_index);
++	psgopher_on_rdp_worker = true;
++#else
+ 	Util::register_thread_index(0);
++#endif
+ 
+ #ifdef PARALLEL_RDP_SHADER_DIR
+ 	// Here to let the RDP play nice with full Granite.
+diff --git a/parallel-rdp/command_ring.hpp b/parallel-rdp/command_ring.hpp
+index c74c43d..7471060 100644
+--- a/parallel-rdp/command_ring.hpp
++++ b/parallel-rdp/command_ring.hpp
+@@ -31,6 +31,15 @@
+ #include "global_managers.hpp"
+ #endif
+ 
++#ifdef PSGOPHER
++// PSGopher (PS5): the command ring's thread (threaded command processing, psgopher.ini: rdp_threaded).
++// The Vulkan thread index it registers (1 when the device was made with two, interface.cpp; else 0),
++// and true on that thread only: PSGopher's freeze-watchdog places and the emulation thread's submit
++// and fence counters (ps5/host/bench.c) are the emulation thread's, so the ring's thread skips them.
++extern unsigned psgopher_rdp_worker_thread_index;
++extern thread_local bool psgopher_on_rdp_worker;
++#endif
++
+ namespace RDP
+ {
+ class CommandProcessor;
 diff --git a/parallel-rdp/rdp_device.cpp b/parallel-rdp/rdp_device.cpp
-index 2e874f1..37b2dda 100644
+index 2e874f1..12c3fec 100644
 --- a/parallel-rdp/rdp_device.cpp
 +++ b/parallel-rdp/rdp_device.cpp
 @@ -22,6 +22,24 @@
@@ -27,7 +76,21 @@ index 2e874f1..37b2dda 100644
  #include <chrono>
  
  #ifdef __SSE2__
-@@ -170,7 +188,7 @@ void CommandProcessor::begin_frame_context()
+@@ -154,7 +172,13 @@ CommandProcessor::CommandProcessor(Vulkan::Device &device_, void *rdram_ptr,
+ #ifdef PARALLEL_RDP_SHADER_DIR
+ 				Granite::Global::create_thread_context(),
+ #endif
++#ifdef PSGOPHER
++				// (PSGopher: 64 Ki words, not 4 Ki: a VI's commands can run ahead of the worker
++				// without the emulation thread waiting for room)
++				this, 64 * 1024);
++#else
+ 				this, 4 * 1024);
++#endif
+ 	}
+ 
+ 	if (const char *env = getenv("PARALLEL_RDP_BENCH"))
+@@ -170,7 +194,7 @@ void CommandProcessor::begin_frame_context()
  {
  	flush();
  	drain_command_ring();
@@ -36,7 +99,7 @@ index 2e874f1..37b2dda 100644
  }
  
  void CommandProcessor::init_renderer()
-@@ -249,8 +267,14 @@ void CommandProcessor::clear_buffer(Vulkan::Buffer &buffer, uint32_t value)
+@@ -249,8 +273,14 @@ void CommandProcessor::clear_buffer(Vulkan::Buffer &buffer, uint32_t value)
  		auto cmd = device.request_command_buffer();
  		cmd->fill_buffer(buffer, value);
  		Fence fence;
@@ -52,7 +115,7 @@ index 2e874f1..37b2dda 100644
  	}
  	else
  	{
-@@ -1094,9 +1118,15 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
+@@ -1094,9 +1124,15 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
  	Vulkan::QueryPoolHandle start_ts, end_ts;
  	if (measure_stall_time)
  		start_ts = device.write_calibrated_timestamp();
@@ -68,7 +131,7 @@ index 2e874f1..37b2dda 100644
  	if (measure_stall_time)
  	{
  		end_ts = device.write_calibrated_timestamp();
-@@ -1107,7 +1137,12 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
+@@ -1107,7 +1143,12 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
  Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImageLayout target_layout)
  {
  	Vulkan::QueryPoolHandle start_ts, end_ts;
@@ -82,7 +145,7 @@ index 2e874f1..37b2dda 100644
  
  	if (dump_writer)
  	{
-@@ -1118,8 +1153,16 @@ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImag
+@@ -1118,8 +1159,16 @@ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImag
  	}
  
  	// Block idle callbacks triggering while we're doing this.
@@ -100,7 +163,7 @@ index 2e874f1..37b2dda 100644
  		renderer.flush_and_signal();
  		if (!is_host_coherent)
  		{
-@@ -1130,6 +1173,9 @@ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImag
+@@ -1130,6 +1179,9 @@ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImag
  	}
  	renderer.unlock_command_processing();
  
@@ -110,7 +173,7 @@ index 2e874f1..37b2dda 100644
  	auto scanout = vi.scanout(target_layout, opts, renderer.get_scaling_factor());
  	return scanout;
  }
-@@ -1179,7 +1225,7 @@ void CommandProcessor::scanout_async_buffer(VIScanoutBuffer &buffer, const Scano
+@@ -1179,7 +1231,7 @@ void CommandProcessor::scanout_async_buffer(VIScanoutBuffer &buffer, const Scano
  	             VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
  
  	buffer.fence.reset();
@@ -119,7 +182,7 @@ index 2e874f1..37b2dda 100644
  }
  
  void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width, unsigned &height,
-@@ -1200,7 +1246,13 @@ void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width,
+@@ -1200,7 +1252,13 @@ void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width,
  	height = scanout.height;
  	colors.resize(width * height);
  
@@ -134,10 +197,10 @@ index 2e874f1..37b2dda 100644
  	       width * height * sizeof(uint32_t));
  	device.unmap_host_buffer(*scanout.buffer, Vulkan::MEMORY_ACCESS_READ_BIT);
 diff --git a/parallel-rdp/rdp_renderer.cpp b/parallel-rdp/rdp_renderer.cpp
-index b6d755f..42d8b33 100644
+index b6d755f..d695c6f 100644
 --- a/parallel-rdp/rdp_renderer.cpp
 +++ b/parallel-rdp/rdp_renderer.cpp
-@@ -36,6 +36,30 @@
+@@ -36,6 +36,32 @@
  #include "shaders/slangmosh.hpp"
  #endif
  
@@ -159,8 +222,10 @@ index b6d755f..42d8b33 100644
 +extern "C" int psgopher_where(int place);
 +extern "C" void psgopher_where_restore(int previous);
 +// (the numbers are ps5/host/bench.h's: 4 a GPU fence wait, 5 a Vulkan submit, 6 an RDRAM sync wait)
++// (on the command ring's thread, threaded command processing, the submit is not marked or counted:
++// both are the emulation thread's, command_ring.hpp)
 +#define PSGOPHER_TIMED_SUBMIT(...) \
-+	do { const int psgopher_place = psgopher_where(5); const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); psgopher_where_restore(psgopher_place); } while (0)
++	do { if (psgopher_on_rdp_worker) { __VA_ARGS__; break; } const int psgopher_place = psgopher_where(5); const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); psgopher_where_restore(psgopher_place); } while (0)
 +#else
 +#define PSGOPHER_TIMED_SUBMIT(...) __VA_ARGS__
 +#endif
@@ -168,7 +233,7 @@ index b6d755f..42d8b33 100644
  namespace RDP
  {
  Renderer::Renderer(CommandProcessor &processor_)
-@@ -71,6 +95,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
+@@ -71,6 +97,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
  			Granite::Global::create_thread_context(), { device }));
  #else
  	pipeline_worker.reset(new WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>({ device }));
@@ -183,7 +248,7 @@ index b6d755f..42d8b33 100644
  #endif
  
  #ifdef PARALLEL_RDP_SHADER_DIR
-@@ -542,6 +574,23 @@ void Renderer::RenderBuffersUpdater::init(Vulkan::Device &device)
+@@ -542,6 +576,23 @@ void Renderer::RenderBuffersUpdater::init(Vulkan::Device &device)
  	cpu.init(device, Vulkan::BufferDomain::Host, &gpu);
  }
  
@@ -207,7 +272,7 @@ index b6d755f..42d8b33 100644
  bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  {
  	unsigned factor = options.upscaling_factor;
-@@ -555,6 +604,8 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
+@@ -555,6 +606,8 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  	caps.super_sample_readback = options.super_sampled_readback;
  	caps.super_sample_readback_dither = options.super_sampled_readback_dither;
  
@@ -216,7 +281,7 @@ index b6d755f..42d8b33 100644
  	if (factor == 1)
  	{
  		upscaling_multisampled_hidden_rdram.reset();
-@@ -572,7 +623,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
+@@ -572,7 +625,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  	upscaling_reference_rdram = device->create_buffer(info);
  	device->set_name(*upscaling_reference_rdram, "reference-rdram");
  
@@ -225,7 +290,7 @@ index b6d755f..42d8b33 100644
  	// If we're super-sampling we'll need to carry forward a u8 writemask per unscaled pixel.
  	// The resolve pass will conditionally write a resolved pixel to avoid potential race conditions.
  	// We allocate 2 bits per pixel (color / depth write).
-@@ -584,7 +635,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
+@@ -584,7 +637,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  	upscaling_multisampled_rdram = device->create_buffer(info);
  	device->set_name(*upscaling_multisampled_rdram, "multisampled-rdram");
  
@@ -234,7 +299,7 @@ index b6d755f..42d8b33 100644
  	upscaling_multisampled_hidden_rdram = device->create_buffer(info);
  	device->set_name(*upscaling_multisampled_hidden_rdram, "multisampled-hidden-rdram");
  
-@@ -1788,7 +1839,7 @@ void Renderer::submit_span_setup_jobs(Vulkan::CommandBuffer &cmd, bool upscale)
+@@ -1788,7 +1841,7 @@ void Renderer::submit_span_setup_jobs(Vulkan::CommandBuffer &cmd, bool upscale)
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -243,7 +308,7 @@ index b6d755f..42d8b33 100644
  	}
  	cmd.end_region();
  }
-@@ -1906,11 +1957,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+@@ -1906,11 +1959,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
  			if (pending_async_pipelines.count(compile.hash) == 0)
  			{
  				pending_async_pipelines.insert(compile.hash);
@@ -271,7 +336,7 @@ index b6d755f..42d8b33 100644
  
  		cmd.dispatch_indirect(*indirect_dispatch_buffer, 4 * sizeof(uint32_t) * i);
  	}
-@@ -1918,7 +1985,7 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+@@ -1918,7 +1987,7 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -280,7 +345,7 @@ index b6d755f..42d8b33 100644
  	}
  	cmd.end_region();
  }
-@@ -2021,7 +2088,7 @@ void Renderer::submit_tile_binning_combined(Vulkan::CommandBuffer &cmd, bool ups
+@@ -2021,7 +2090,7 @@ void Renderer::submit_tile_binning_combined(Vulkan::CommandBuffer &cmd, bool ups
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -289,7 +354,7 @@ index b6d755f..42d8b33 100644
  	}
  
  	cmd.enable_subgroup_size_control(false);
-@@ -2079,7 +2146,7 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
+@@ -2079,7 +2148,7 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
  	cmd.set_specialization_constant(1, pixel_size_log2);
  	cmd.set_specialization_constant(2, int(addr == depth_addr));
  	cmd.set_specialization_constant(3, ImplementationConstants::DefaultWorkgroupSize);
@@ -298,7 +363,7 @@ index b6d755f..42d8b33 100644
  	if (stage == ResolveStage::SSAAResolve)
  	{
  		cmd.set_specialization_constant(5, uint32_t(caps.super_sample_readback_dither));
-@@ -2118,13 +2185,20 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
+@@ -2118,13 +2187,20 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
  	cmd.push_constants(&push, 0, sizeof(push));
  
  	Vulkan::QueryPoolHandle start_ts, end_ts;
@@ -322,7 +387,7 @@ index b6d755f..42d8b33 100644
  	}
  }
  
-@@ -2144,7 +2218,7 @@ void Renderer::submit_clear_super_sample_write_mask(Vulkan::CommandBuffer &cmd,
+@@ -2144,7 +2220,7 @@ void Renderer::submit_clear_super_sample_write_mask(Vulkan::CommandBuffer &cmd,
  	cmd.set_program(shader_bank->clear_super_sampled_write_mask);
  #endif
  
@@ -331,7 +396,7 @@ index b6d755f..42d8b33 100644
  	                       2 * Limits::MaxWidth * Limits::MaxHeight / 8);
  
  	cmd.set_specialization_constant_mask(1);
-@@ -2191,7 +2265,8 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
+@@ -2191,7 +2267,8 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
  	cmd.set_specialization_constant(5, Limits::MaxPrimitives);
  	cmd.set_specialization_constant(6, upscaled ? caps.max_width : Limits::MaxWidth);
  	cmd.set_specialization_constant(7, uint32_t(force_write_mask || (!is_host_coherent && !upscaled)) |
@@ -341,7 +406,7 @@ index b6d755f..42d8b33 100644
  
  	if (upscaled)
  		cmd.set_storage_buffer(0, 0, *upscaling_multisampled_rdram);
-@@ -2308,7 +2383,7 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
+@@ -2308,7 +2385,7 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -350,7 +415,7 @@ index b6d755f..42d8b33 100644
  	}
  
  	cmd.end_region();
-@@ -2510,7 +2585,7 @@ void Renderer::submit_to_queue()
+@@ -2510,7 +2587,7 @@ void Renderer::submit_to_queue()
  		if (pending_host_visible_render_passes)
  		{
  			Vulkan::Fence fence;
@@ -359,7 +424,7 @@ index b6d755f..42d8b33 100644
  			enqueue_fence_wait(fence);
  		}
  		return;
-@@ -2530,7 +2605,7 @@ void Renderer::submit_to_queue()
+@@ -2530,7 +2607,7 @@ void Renderer::submit_to_queue()
  
  	if (is_host_coherent)
  	{
@@ -368,7 +433,7 @@ index b6d755f..42d8b33 100644
  		if (pending_host_visible_render_passes)
  			enqueue_fence_wait(fence);
  	}
-@@ -2540,7 +2615,7 @@ void Renderer::submit_to_queue()
+@@ -2540,7 +2617,7 @@ void Renderer::submit_to_queue()
  		if (pending_host_visible_render_passes)
  			resolve_coherency_gpu_to_host(op, *stream.cmd);
  
@@ -377,7 +442,7 @@ index b6d755f..42d8b33 100644
  
  		if (pending_host_visible_render_passes)
  		{
-@@ -2784,7 +2859,7 @@ void Renderer::resolve_coherency_external(unsigned offset, unsigned length)
+@@ -2784,7 +2861,7 @@ void Renderer::resolve_coherency_external(unsigned offset, unsigned length)
  	mark_pages_for_gpu_read(offset, length);
  	ensure_command_buffer();
  	resolve_coherency_host_to_gpu(*stream.cmd);
@@ -386,23 +451,28 @@ index b6d755f..42d8b33 100644
  	stream.cmd.reset();
  }
  
-@@ -3053,7 +3128,15 @@ void Renderer::flush_queues()
+@@ -3053,7 +3130,20 @@ void Renderer::flush_queues()
  		Vulkan::QueryPoolHandle start_ts, end_ts;
  		if (caps.timestamp)
  			start_ts = device->write_calibrated_timestamp();
 +#ifdef PSGOPHER
-+		const uint64_t psgopher_fence_begin = __rdtsc();
-+		const int psgopher_place = psgopher_where(4);
-+		sync.fence->wait();
-+		psgopher_where_restore(psgopher_place);
-+		psgopher_bench_fence(__rdtsc() - psgopher_fence_begin);
++		if (psgopher_on_rdp_worker)
++			sync.fence->wait(); // (the command ring's thread: the emulation thread's place and count stay as they are)
++		else
++		{
++			const uint64_t psgopher_fence_begin = __rdtsc();
++			const int psgopher_place = psgopher_where(4);
++			sync.fence->wait();
++			psgopher_where_restore(psgopher_place);
++			psgopher_bench_fence(__rdtsc() - psgopher_fence_begin);
++		}
 +#else
  		sync.fence->wait();
 +#endif
  		if (caps.timestamp)
  		{
  			end_ts = device->write_calibrated_timestamp();
-@@ -3677,8 +3760,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
+@@ -3677,8 +3767,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
  
  void Renderer::PipelineExecutor::perform_work(const Vulkan::DeferredPipelineCompile &compile) const
  {

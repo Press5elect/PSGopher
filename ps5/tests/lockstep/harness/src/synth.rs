@@ -124,6 +124,16 @@ fn main_code() -> Vec<u32> {
     a.ori(S4, ZERO, 0); // index
     a.li(S5, 0x0F0F_1357);
 
+    // (cpuopt) TLB entry 0: virtual 0x406000/0x407000 -> physical 0x6000/0x7000, cached
+    a.mtc0(ZERO, 0); // Index
+    a.li(T0, 0x19F);
+    a.mtc0(T0, 2); // EntryLo0
+    a.li(T0, 0x1DF);
+    a.mtc0(T0, 3); // EntryLo1
+    a.mtc0(ZERO, 5); // PageMask
+    a.li(T0, 0x0040_6000);
+    a.mtc0(T0, 10); // EntryHi
+    a.w(0x4200_0002); // tlbwi
     a.label("loop");
     a.ori(T9, ZERO, 48); // CPU block rounds
     a.label("cpu");
@@ -286,6 +296,113 @@ fn main_code() -> Vec<u32> {
     a.sw(T1, 4, T0); // DPC_END
     a.label("no_rdp");
 
+    // (cpuopt) code written at run time and the instruction cache
+    a.li(T0, 0xA000_6000);
+    a.andi(T2, S1, 0x7FFF);
+    a.li(T1, 0x2610_0000);
+    a.or(T1, T1, T2);
+    a.sw(T1, 0, T0); // addiu s0, s0, round
+    a.li(T1, r(38, S0, S1, S0, 0));
+    a.sw(T1, 4, T0); // xor s0, s0, s1
+    a.li(T1, r(8, RA, 0, 0, 0));
+    a.sw(T1, 8, T0); // jr ra
+    a.sw(ZERO, 0xC, T0);
+    // a routine that invalidates its own line, then runs the word after it (changed each round)
+    a.li(T1, i(47, T3, 0x10, 0x20));
+    a.sw(T1, 0x20, T0); // cache hit invalidate, 0x20(t3)
+    a.xori(T2, T2, 0x5A5A);
+    a.li(T1, 0x2610_0000);
+    a.or(T1, T1, T2);
+    a.sw(T1, 0x24, T0); // addiu s0, s0, ...
+    a.li(T1, r(8, RA, 0, 0, 0));
+    a.sw(T1, 0x28, T0);
+    a.sw(ZERO, 0x2C, T0);
+    // a routine in the TLB-mapped page that remaps its own page, then runs on in the same line
+    a.li(T1, 0x4080_0000 | (T7 << 16) | (2 << 11));
+    a.sw(T1, 0x40, T0); // mtc0 t7, EntryLo0
+    a.li(T1, 0x4200_0002);
+    a.sw(T1, 0x44, T0); // tlbwi
+    a.li(T1, 0x2610_0011);
+    a.sw(T1, 0x48, T0); // addiu s0, s0, 0x11 (this page)
+    a.li(T1, r(8, RA, 0, 0, 0));
+    a.sw(T1, 0x4C, T0);
+    a.sw(ZERO, 0x50, T0);
+    a.li(T1, 0x2610_2222);
+    a.sw(T1, 0x1048, T0); // addiu s0, s0, 0x2222 (the page it maps instead)
+    a.li(T1, r(8, RA, 0, 0, 0));
+    a.sw(T1, 0x104C, T0);
+    a.sw(ZERO, 0x1050, T0);
+    a.li(T3, 0x8000_6000);
+    a.jalr(RA, T3); // may run last round's code from the cache
+    a.nop();
+    a.andi(T2, S1, 3);
+    a.bne(T2, ZERO, "c1");
+    a.nop();
+    a.cache(0x10, 0, T3); // I hit invalidate
+    a.label("c1");
+    a.ori(T1, ZERO, 1);
+    a.bne(T2, T1, "c2");
+    a.nop();
+    a.cache(0x00, 0, T3); // I index invalidate
+    a.label("c2");
+    a.ori(T1, ZERO, 2);
+    a.bne(T2, T1, "c3");
+    a.nop();
+    a.cache(0x14, 0, T3); // I fill
+    a.label("c3");
+    a.ori(T1, ZERO, 3);
+    a.bne(T2, T1, "c4");
+    a.nop();
+    a.mtc0(ZERO, 28); // TagLo = 0
+    a.cache(0x08, 0, T3); // I store tag: invalid
+    a.cache(0x04, 0, T3); // I load tag
+    a.mfc0(T1, 28);
+    a.addu(S0, S0, T1);
+    a.label("c4");
+    a.jalr(RA, T3);
+    a.nop();
+    a.li(T3, 0x0040_6000); // the same code through the TLB
+    a.jalr(RA, T3);
+    a.nop();
+    a.li(T3, 0x8000_6000);
+    a.li(T1, 0x8000_6020);
+    a.jalr(RA, T1); // invalidates its own line
+    a.nop();
+    a.li(T3, 0x0040_6000);
+    a.li(T1, 0x0040_6020);
+    a.jalr(RA, T1); // the same through the TLB
+    a.nop();
+    a.li(T7, 0x1DF); // EntryLo0: physical 0x7000
+    a.li(T1, 0x0040_6040);
+    a.jalr(RA, T1); // remaps its own page
+    a.nop();
+    a.li(T7, 0x19F); // back to physical 0x6000
+    a.mtc0(T7, 2);
+    a.w(0x4200_0002); // tlbwi
+    // (cpuopt) data cache misses and dirty writebacks: 4 KiB copied between two regions that
+    // share the cache's lines, at a 16-byte stride, the source made dirty too
+    a.andi(T5, S1, 0xF);
+    a.sll(T5, T5, 12);
+    a.li(T0, 0x8010_0000);
+    a.addu(T0, T0, T5);
+    a.li(T1, 0x8020_0000);
+    a.addu(T1, T1, T5);
+    a.ori(T2, ZERO, 256);
+    a.label("mloop");
+    a.lw(T3, 0, T0);
+    a.addu(T3, T3, S0);
+    a.sw(T3, 0, T1);
+    a.sw(T3, 4, T0);
+    a.ld(T6, 8, T1);
+    a.daddu(T6, T6, T3);
+    a.sd(T6, 8, T0);
+    a.addiu(T0, T0, 16);
+    a.addiu(T1, T1, 16);
+    a.addiu(T2, T2, -1);
+    a.bgtz(T2, "mloop");
+    a.nop();
+    a.xor(S0, S0, T3);
+    a.xor(S0, S0, T6);
     a.lui(T0, 0x8000);
     a.sw(S0, 0x104, T0);
     a.lw(T1, 0x100, T0); // interrupts taken

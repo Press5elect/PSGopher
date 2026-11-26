@@ -137,6 +137,9 @@ cp "$root/build/write-broker.elf" "$app/write-broker.elf"
 # the front end's pictures (ps5/art: the Live Board's mainboard, made by make-board-art.mjs, and the logo)
 mkdir -p "$app/art"
 cp "$root/ps5/art/board.png" "$root/ps5/art/logo.png" "$app/art/"
+# which games use the Expansion Pak (ps5/host/expansion_pak.h)
+mkdir -p "$app/gamedata"
+cp "$root/ps5/gamedata/expansion-pak.tsv" "$app/gamedata/"
 # the attributions kept and the other authors' parts (NOTICE), and the fonts' licence
 cp "$root/NOTICE" "$app/NOTICE.txt"
 mkdir -p "$app/licenses"

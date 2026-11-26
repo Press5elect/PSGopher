@@ -29,6 +29,7 @@ extern "C" {
 }
 
 #include "board.h"
+#include "expansion_pak.h"
 #include "game_settings.h"
 #include "imgui.h"
 #include "library.h"
@@ -150,6 +151,19 @@ private:
 	GameSettings marker_overrides_;
 	unsigned marker_version_ = ~0u;
 	const GameSettings &markersOf(const Game &g);
+	/* a game's Expansion Pak: what the table says of it, the row as set for it (its own, else the global one) and whether
+	 * the pak is on for it */
+	struct PakView {
+		PakInfo info;
+		int setting = PakAuto;
+		bool on = true;
+	};
+	PakView pakView(const Game &g);
+	/* a game started: asked first when it needs the Expansion Pak and that is set to Off */
+	void startGame(const Game &g, int slot);
+	bool pak_ask_ = false;
+	Game pak_game_;
+	int pak_slot_ = -1;
 	std::string bench_profile_;       // the profile BENCH's Profiles section edits
 	/* binding an input: the profile and input, when it began, and whether the button that began it
 	 * was let go */

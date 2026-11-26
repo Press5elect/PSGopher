@@ -10,6 +10,7 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "expansion_pak.h"
 #include "game_settings.h"
 #include "image.h"
 #include "library.h"
@@ -390,7 +391,7 @@ int main(int argc, char **argv)
 		write(work + "/data/psgopher/roms/" + n + ".z64", rom);
 	}
 	/* one game played (it leads the strip), two probes of another */
-	if (std::system(("mkdir -p '" + work + "/data/psgopher/data/states'").c_str()) != 0)
+	if (std::system(("mkdir -p '" + work + "/data/psgopher/data/states' '" + work + "/gamedata'").c_str()) != 0)
 		return 2;
 	write(work + "/data/psgopher/cache/played.tsv", "36000\t" + std::to_string((long long)time(nullptr) - 86400) + "\tKart Champs (U)\n");
 	for (int slot : { 1, 3 }) {
@@ -425,6 +426,16 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 300 && psgopher::library().scanning(); i++)
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
+	/* the table of games that use the Expansion Pak: the three of the list that are in it (the shipped table is checked below) */
+	write(work + "/gamedata/expansion-pak.tsv", "NKAE\tenhanced\twikipedia\tcited\nNBOP\tincompatible\tpj64\tunverified\nNAEE\trequired\tnintendo,wikipedia\tverified\n");
+	psgopher::pakUseFile(work + "/gamedata/expansion-pak.tsv");
+	{
+		psgopher::PakTable shipped;
+		CHECK(shipped.loadFile(std::string(PSGOPHER_SOURCE) + "/ps5/gamedata/expansion-pak.tsv") && shipped.size() > 100);
+		CHECK(shipped.find("NDOE-00", "").status == psgopher::PakStatus::Required && shipped.find("NZSJ-01", "").status == psgopher::PakStatus::Required);
+		CHECK(shipped.find("NSVE-00", "BFE23884-EF48EAAF-C:45").status == psgopher::PakStatus::Incompatible && shipped.find("NSVE-00", "").status == psgopher::PakStatus::NotListed);
+		CHECK(shipped.find("NAEE-00", "").status == psgopher::PakStatus::NotListed);
+	}
 	{
 		psgopher::update::Status up;
 		up.state = psgopher::update::State::UpToDate, up.version = "1.0.0", up.tag = "v1.0.0";
@@ -583,6 +594,44 @@ int main(int argc, char **argv)
 			CHECK(g_settings["video.upscale"] == global_upscale && scope.settings().finalFilter == 0);
 		}
 	}
+	/* The Expansion Pak on HOME's panel and its notice: a game's panel says what the table says; a game that needs the Expansion Pak,
+	 * set to Off on its page, asks before it starts (Circle goes back, Cross starts it anyway); a game set to On, or Auto, does not ask */
+	{
+		psgopher::GameSettings off;
+		off.set("expansion_pak", psgopher::PakOff);
+		CHECK(psgopher::saveGameSettings("NAEE-00", off));
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = {
+			{ none, nullptr, 6 }, { none, "30-pak-fact", 3 },                                      /* Kart Champs: Enhanced, 8 MB */
+			{ PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { none, nullptr, 6 }, { none, "31-pak-fact-required", 3 }, /* Aero Racer: Required, 4 MB (Off) */
+			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 4 }, { none, "32-pak-notice", 3 },        /* the notice */
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 },                                      /* back: nothing starts */
+			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 4 },                                       /* the notice again */
+			{ PAD_CROSS, nullptr, 2 } };                                                           /* start anyway */
+		const psgopher::MenuResult rp = psgopher::runMenu("");
+		CHECK(rp.play && rp.name == "Aero Racer (U)" && rp.key == "NAEE-00" && rp.crc.size() > 17);
+		/* with it On, the game starts at once: Cross and nothing between */
+		off.set("expansion_pak", psgopher::PakOn);
+		CHECK(psgopher::saveGameSettings("NAEE-00", off));
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { none, nullptr, 6 }, { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult ro = psgopher::runMenu("");
+		CHECK(ro.play && ro.key == "NAEE-00");
+		/* a game that is incompatible: its panel says it must be off (Bomb Squad 64, the fifth cartridge of the strip) */
+		CHECK(psgopher::saveGameSettings("NAEE-00", psgopher::GameSettings{}));
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { none, nullptr, 6 }, { none, "33-pak-fact-must-be-off", 3 },
+		             { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult rb = psgopher::runMenu("");
+		CHECK(rb.play && rb.key == "NBOP-00");
+		/* the game's page: the row, Auto first and marked */
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_TRIANGLE, nullptr, 2 }, { none, nullptr, 6 }, { R2, nullptr, 2 }, { R2, nullptr, 2 }, { R2, nullptr, 2 },
+		             { none, "34-game-page-emulation", 3 }, { PAD_DOWN, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, { none, "35-game-page-pak-set", 3 },
+		             { PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 }, { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult rq = psgopher::runMenu("");
+		CHECK(rq.play && rq.key == "NKAE-00");
+	}
 	/* Circle and the letters (a fresh menu each): the library back to HOME, HOME asking before it
 	 * closes, L2 / R2 across the letters */
 	{
@@ -613,7 +662,7 @@ int main(int argc, char **argv)
 		const psgopher::MenuResult r3 = psgopher::runMenu(""); /* Cross on the question: the menu ends, no game */
 		CHECK(!r3.play && r3.rom.empty());
 	}
-	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask", "25-game-page", "26-game-page-video", "27-game-page-set", "28-game-page-controllers", "29-bench-marker" }) {
+	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask", "25-game-page", "26-game-page-video", "27-game-page-set", "28-game-page-controllers", "29-bench-marker", "30-pak-fact", "31-pak-fact-required", "32-pak-notice", "33-pak-fact-must-be-off", "34-game-page-emulation", "35-game-page-pak-set" }) {
 		struct stat st;
 		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);
 	}

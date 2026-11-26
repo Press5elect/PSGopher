@@ -969,6 +969,7 @@ void Menu::play(const Game &g)
 		return;
 	result.name = g.name;
 	result.key = gameKey(g, &result.keyFromHeader);
+	result.crc = g.crc;
 	if (g.tab != TabNetwork) {
 		result.play = true;
 		result.rom = g.path;
@@ -1265,6 +1266,7 @@ std::string g_displayAtStart;
 void startShares(const std::string &titleDir)
 {
 	g_titleDir = titleDir;
+	pakUseFile(titleDir + "/gamedata/expansion-pak.tsv");
 	static std::string shadow;
 	shadow = titleDir + "/sce_sys/param.json";
 	ps5vfs_set_shadow_path(shadow.c_str());

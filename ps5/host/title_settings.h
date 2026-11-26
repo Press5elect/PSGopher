@@ -19,6 +19,8 @@ struct TitleSettings {
 	int hdrWhite{ 203 };         // nits, 80..400
 	int hdrPeak{ 1000 };         // nits, 0 (off) or up to 4000
 	bool stats{ false };         // the stats overlay in a game
+	int expansionPak{ 0 };       // the Expansion Pak (expansion_pak.h): 0 Auto (on, except for a game that is incompatible
+	                             // with it), 1 On, 2 Off; applied to Gopher64's setting when a game starts (game_settings.cpp)
 	int audioBuffer{ 4 };        // the audio Gopher64 keeps queued, in VIs (2 is its own; 4, 6, 8)
 	std::string shaderCompile{ "1" }; // parallel-rdp's specialised shading pipelines: "1" one background
 	                                  // thread (Gopher64's), "4" four ("now" is read as "1")
@@ -31,6 +33,8 @@ struct TitleSettings {
 	                            // (PSGOPHER_KEEP_GPU_MEMORY: its allocations stalled the game for seconds)
 	int rdpLayout{ 2 };          // the upscaled RDRAM's layout (PSGOPHER_RDP_LAYOUT): 2 per pixel (measured at
 	                             // 8x: depth blending ~15 times faster), 0 parallel-rdp's own
+	bool rdpThreaded{ true };    // parallel-rdp's command processing on a thread of its own (PSGOPHER_RDP_THREADED;
+	                             // vendor/gopher64/parallel-rdp/interface.cpp: rdp_threaded); off: on the emulation thread
 	/* the picture (BENCH > Video; vendor/gopher64/parallel-rdp/interface.cpp reads them once a game) */
 	int finalFilter{ 0 };        // the final blit's filter (PSGOPHER_FINAL_FILTER): 0 sharp bilinear, 1 bilinear, 2 nearest
 	int viBilinear{ 0 };         // the video interface's bilinear scaling (PSGOPHER_VI_BILINEAR): 0 auto (off from 4x up), 1 on, 2 off
@@ -55,6 +59,7 @@ struct TitleSettings {
 	bool quickmenuTap{ true };   // a touch pad tap opens the quick menu (kept on when nothing else leaves a game)
 	/* a game can be left: by the quick menu's tap or the hotkey's Leave game */
 	bool canLeaveGame() const { return quickmenuTap || (hotkeys && hotkey[2] >= 0); }
+	bool expansionPakRead{ false }; // load() found an expansion_pak line (else the file is from before it: main.cpp takes Gopher64's old row over)
 	std::string file;            // "" is /data/psgopher/config/psgopher.ini (the host tests give another)
 
 	/* A setting by its BENCH row's key (the rows that a game can have of its own: game_settings.h). value() is -1 for

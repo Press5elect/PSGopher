@@ -5,6 +5,7 @@
  */
 #include "game_settings.h"
 
+#include "expansion_pak.h"
 #include "library.h"
 
 #include <cerrno>
@@ -30,10 +31,14 @@ std::string journal() { return folder() + "/restore.txt"; }
 
 bool startsWith(const std::string &s, const char *head) { return s.rfind(head, 0) == 0; }
 
+/* Gopher64's own switch for the Expansion Pak: not a row of BENCH any more (the row is "expansion_pak": Auto, On, Off),
+ * set for a game's length from what the row and the table of games say */
+const char kGopherPak[] = "emulation.disable_expansion_pak";
+
 bool gopher64Row(const std::string &key)
 {
 	if (startsWith(key, "video.") || startsWith(key, "emulation."))
-		return key != "video.fullscreen" && key != "emulation.usb"; // (always on; not supported on the console)
+		return key != "video.fullscreen" && key != "emulation.usb" && key != kGopherPak; // (always on; not supported on the console; the pak's below)
 	if (startsWith(key, "input.controller_enabled.") || startsWith(key, "input.transfer_pak."))
 		return key.size() > 0 && key.back() >= '0' && key.back() <= '3';
 	return key == "input.emulate_vru";
@@ -127,9 +132,15 @@ std::string gameSettingsFile(const std::string &key) { return folder() + "/" + k
 GameSettings loadGameSettings(const std::string &key)
 {
 	GameSettings out;
-	for (const auto &kv : readLines(gameSettingsFile(key)))
+	const auto lines = readLines(gameSettingsFile(key));
+	for (const auto &kv : lines)
 		if (gameSettingEligible(kv.first))
 			out.set(kv.first, kv.second);
+	/* a file from before the Expansion Pak row was Auto, On or Off: Gopher64's "Disable Expansion Pak" it held */
+	if (!out.find("expansion_pak"))
+		for (const auto &kv : lines)
+			if (kv.first == kGopherPak)
+				out.set("expansion_pak", kv.second ? PakOff : PakOn);
 	return out;
 }
 
@@ -149,23 +160,34 @@ bool saveGameSettings(const std::string &key, const GameSettings &settings)
 	return writeFile(path, text);
 }
 
-GameScope::GameScope(const std::string &key, bool key_from_header, const TitleSettings &global) : effective_(global)
+GameScope::GameScope(const std::string &key, bool key_from_header, const TitleSettings &global, const std::string &crc) : effective_(global)
 {
-	if (key.empty())
-		return;
-	if (!key_from_header)
-		say("settings: the cartridge's header could not be read: its per-game settings are kept by the file's name (%s)", key.c_str());
-	const GameSettings game = loadGameSettings(key);
-	if (game.empty()) {
-		say("settings: no per-game settings for %s", key.c_str());
-		return;
+	GameSettings game;
+	if (!key.empty()) {
+		if (!key_from_header)
+			say("settings: the cartridge's header could not be read: its per-game settings are kept by the file's name (%s)", key.c_str());
+		game = loadGameSettings(key);
+		if (game.empty())
+			say("settings: no per-game settings for %s", key.c_str());
+		else
+			say("settings: per-game for %s: %s", key.c_str(), game.text().c_str());
 	}
-	say("settings: per-game for %s: %s", key.c_str(), game.text().c_str());
+	/* what Gopher64's config is to hold for the game: its rows, then the Expansion Pak (the game's own choice, or the global
+	 * one, and for Auto what the table of games says) */
+	std::vector<std::pair<std::string, int64_t>> wanted;
 	for (const auto &kv : game.values) {
-		if (TitleSettings::isField(kv.first)) {
+		if (TitleSettings::isField(kv.first))
 			effective_.assign(kv.first, kv.second);
-			continue;
-		}
+		else
+			wanted.push_back(kv);
+	}
+	{
+		const PakInfo info = pakInfoOf(key_from_header ? key : std::string(), crc);
+		const bool on = pakIsOn(effective_.expansionPak, info.status);
+		say("settings: expansion pak %s (%s; %s)", on ? "on" : "off", pakStatusName(info.status), info.source.empty() ? "-" : info.source.c_str());
+		wanted.emplace_back(kGopherPak, on ? 0 : 1);
+	}
+	for (const auto &kv : wanted) {
 		const int64_t was = psgopher_setting_get(kv.first.c_str());
 		if (was < 0) {
 			say("settings: Gopher64 has no %s: left out", kv.first.c_str());
@@ -176,12 +198,13 @@ GameScope::GameScope(const std::string &key, bool key_from_header, const TitleSe
 		if (before_.empty()) {
 			/* the journal first: the globals to come back to, whatever happens to the game */
 			std::string text;
-			for (const auto &other : game.values)
-				if (!TitleSettings::isField(other.first)) {
-					const int64_t value = psgopher_setting_get(other.first.c_str());
-					if (value >= 0)
-						text += other.first + " = " + std::to_string(value) + "\n";
-				}
+			for (const auto &other : wanted) {
+				const int64_t value = psgopher_setting_get(other.first.c_str());
+				if (other.first == kGopherPak && value == other.second)
+					continue; /* (the pak's only when this game changes it) */
+				if (value >= 0)
+					text += other.first + " = " + std::to_string(value) + "\n";
+			}
 			ensureFolder();
 			writeFile(journal(), text);
 		}
@@ -214,7 +237,7 @@ void recoverGameSettings()
 		return;
 	}
 	for (const auto &kv : lines)
-		if (gopher64Row(kv.first))
+		if (gopher64Row(kv.first) || kv.first == kGopherPak)
 			psgopher_setting_set(kv.first.c_str(), kv.second);
 	unlink(journal().c_str());
 	say("settings: a game did not end: its per-game settings are taken out of Gopher64's config again (%zu)", lines.size());

@@ -11,11 +11,12 @@ console: the cheats, variable refresh, HDR10.
 
 ### Front end
 
+- Added: the Expansion Pak row (BENCH > Emulation, and a game's page) is **Auto (Default)**, On or Off, in place of Gopher64's "Disable Expansion Pak". `ps5/gamedata/expansion-pak.tsv` lists the cartridges that need the Expansion Pak (3 games, 9 codes), use it for more (133 codes) and misbehave with it (4 cartridges), from Nintendo's accessories page, Wikipedia, Project64's database and Mupen64Plus's, each entry with its sources (`docs/dev/expansion-pak.md`). Auto turns the Expansion Pak on except for a game that misbehaves with it; a game's own choice wins; the boot log says `settings: expansion pak <on|off> (<status>; <source>)`. HOME's panel and the game's page show Expansion Pak (Required, Enhanced, Must be off, Not used) and the N64's memory (8 MB or 4 MB); starting a game that needs the Expansion Pak with it set to Off asks first. A psgopher.ini or a game's file from before reads Gopher64's old switch as the new row. Host-tested; not run on a console.
 - Added: updates from inside the title (BENCH > Console > Check for Updates): the newest release's notes, its download checked against its SHA-256, installed with a backup of the files it replaces and put back after an interrupted install (from OGBox). The check also runs once at the title's start, as OGBox's does (BENCH > Console > Check for Updates at Start, on by default; nothing is downloaded without asking). The offer shows the notes of every newer release under the rows, with Download Update (a progress bar with size and speed, Cancel Download), Install Update (asked first: the title closes when it is done), Skip This Version, and Roll Back to the version kept from before the last update. Untested on a console.
 - Added: copied games are written to the console's storage by a helper (write-broker.elf, from OGBox), which keeps its speed past the first gigabyte; the title writes them itself if the helper can't (BENCH > Console > Fast Writes (Helper), on by default).
 - Changed: BENCH's words follow Gopher64's and the sibling titles' rules: Gopher64's own labels
   wherever it has the setting (Resolution, SSAA downscaling, VSync, Apply CRT shader, Overclock N64
-  CPU (may cause bugs), Disable Expansion Pak, Enable Rewind, Emulate UNFLoader, Emulate VRU, the
+  CPU (may cause bugs), Enable Rewind, Emulate UNFLoader, Emulate VRU, the
   N64's inputs, Deadzone Percentage, Use DirectInput), written descriptions in one style, Title Case,
   the standard choice marked "(Default)"; `ps5/tools/settings-words.py check` keeps them so
   (`docs/dev/settings-words.md`).
@@ -143,6 +144,12 @@ console: the cheats, variable refresh, HDR10.
 
 ### From the siblings (2026-11-26)
 
+- Changed: the emulation is faster where a game's work is heaviest. The VR4300 interpreter does
+  about a fifth less work per instruction (instruction fetch within a cache line, cached RAM loads
+  and stores, cache-line fills, FPU dispatch) and the RSP interpreter is 1.25-1.75 times as fast
+  (a straight-line loop, SIMD loads and stores); both still interpreters, their results identical to
+  Gopher64's in the lockstep harness. The RDP's command processing runs on a thread of its own
+  (BENCH > Video > Threaded RDP, on; per game too), with texture loads tracked as Gopher64 needs.
 - Fixed: lines across the picture in games that draw their backgrounds as strips: Native-Resolution
   Texture Rectangles is On again by default (upscaled, the strips' edges did not meet), and
   Deinterlacing is Blend again by default; a settings file from the build that changed them takes

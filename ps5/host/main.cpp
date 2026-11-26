@@ -403,6 +403,15 @@ int main()
    settings.load();
    settings.applyDisplay(title_dir);
    psgopher::recoverGameSettings(); /* (a game that did not end left its own settings in Gopher64's config) */
+   if (!settings.expansionPakRead) {
+      /* from before the Expansion Pak row was Auto, On or Off: Gopher64's "Disable Expansion Pak" it held, once */
+      if (psgopher_setting_get("emulation.disable_expansion_pak") == 1) {
+         settings.expansionPak = 2;
+         psgopher_setting_set("emulation.disable_expansion_pak", 0);
+         say("settings: Disable Expansion Pak was on: the Expansion Pak row is Off");
+      }
+      settings.save();
+   }
 
    if (exists(std::string(ROOT) + "/probe.txt")) {
       probe();
@@ -468,7 +477,7 @@ int main()
       const double started = now_seconds();
       {
          /* the game's own settings over the global ones for its length (game_settings.h) */
-         psgopher::GameScope scope(chosen.key, chosen.keyFromHeader, settings);
+         psgopher::GameScope scope(chosen.key, chosen.keyFromHeader, settings, chosen.crc);
          scope.settings().applyHdr();
          notice = play(chosen.rom, chosen.load_state) == 0 ? std::string() : last_error();
       }

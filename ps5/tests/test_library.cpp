@@ -6,6 +6,7 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "expansion_pak.h"
 #include "game_settings.h"
 #include "library.h"
 #include "shares.h"
@@ -62,7 +63,7 @@ static bool said(const std::string &text)
 
 /* Gopher64's settings, stood in for (the rows a game's own settings change) */
 static std::map<std::string, int64_t> g_gopher = { { "video.upscale", 2 }, { "video.ssaa", 0 }, { "video.crt", 0 },
-	{ "emulation.overclock", 0 }, { "input.controller_enabled.1", 0 } };
+	{ "emulation.overclock", 0 }, { "emulation.disable_expansion_pak", 0 }, { "input.controller_enabled.1", 0 } };
 extern "C" int64_t psgopher_setting_get(const char *name)
 {
 	const auto it = g_gopher.find(name);
@@ -554,11 +555,15 @@ int main(int argc, char **argv)
 	t.rdpLayout = 0;
 	CHECK(t.keepGpuMemory); /* on by default */
 	t.keepGpuMemory = false;
+	CHECK(t.rdpThreaded); /* on by default */
+	t.rdpThreaded = false;
 	CHECK(t.save());
 	psgopher::TitleSettings u;
 	u.file = t.file;
 	u.load();
-	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0 && !u.keepGpuMemory);
+	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0 && !u.keepGpuMemory && !u.rdpThreaded);
+	CHECK(slurp(t.file).find("rdp_threaded = off") != std::string::npos);
+	CHECK(u.isField("rdp_threaded") && u.value("rdp_threaded") == 0 && u.assign("rdp_threaded", 1) && u.rdpThreaded);
 	write(t.file, "shader_compile = now\ndisplay = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\nrdp_layout = 3\n");
 	psgopher::TitleSettings v;
 	v.file = t.file;
@@ -572,7 +577,7 @@ int main(int argc, char **argv)
 	CHECK(!w.writeHelper && !psgopher::helperEnabled() && access(t.file.c_str(), F_OK) == 0 && slurp(t.file).find("write_helper = off") != std::string::npos);
 	t.writeHelper = true;
 	CHECK(t.save() && psgopher::helperEnabled());
-	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1" && v.keepGpuMemory);
+	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1" && v.keepGpuMemory && v.rdpThreaded);
 
 	/* the picture rows: their defaults, the file's words, values held in range, and the table a game's settings go through */
 	{
@@ -698,6 +703,124 @@ int main(int argc, char **argv)
 			CHECK(said("settings: Gopher64 has no input.controller_enabled.3: left out"));
 		}
 		CHECK(saveGameSettings("NXXX-01", GameSettings{}) && access(gameSettingsFile("NXXX-01").c_str(), F_OK) != 0);
+	}
+
+	/* which games use the Expansion Pak (expansion_pak.h): the table, Auto's choice, a game's own choice over it, the log */
+	{
+		using namespace psgopher;
+		PakTable t;
+		CHECK(t.parse("# a comment\n"
+		              "NRQE\trequired\tnintendo,wikipedia\tverified\n"
+		              "nenp\tenhanced\twikipedia\tcited\n"
+		              "NBAD-01\tincompatible\tpj64\tunverified\n"
+		              "NBAD\tenhanced\twikipedia\tcited\n"
+		              "01234567-89ABCDEF\tincompatible\tm64p\tunverified\n"
+		              "NRQE\tenhanced\tduplicate\tcited\n"      /* (the first of a key stays) */
+		              "NXX\trequired\tshort\tx\n"                  /* (not a key) */
+		              "NXXE\tsometimes\tsource\tx\n"             /* (not a status) */
+		              "NXXF\trequired\n"                            /* (no source) */
+		              "\n") == 5 && t.size() == 5);
+		CHECK(t.find("NRQE-00", "").status == PakStatus::Required && t.find("NRQE-00", "").source == "nintendo,wikipedia");
+		CHECK(t.find("NRQE-7F", "").status == PakStatus::Required); /* (any revision) */
+		CHECK(t.find("NENP-02", "").status == PakStatus::Enhanced && t.find("NENP-00", "").source == "wikipedia"); /* (a lower-case key is read as upper) */
+		CHECK(t.find("NBAD-01", "").status == PakStatus::Incompatible && t.find("NBAD-00", "").status == PakStatus::Enhanced); /* (the revision's entry first) */
+		CHECK(t.find("NZZE-00", "").status == PakStatus::NotListed && t.find("NZZE-00", "").source.empty());
+		CHECK(t.find("file-NRQE", "").status == PakStatus::NotListed && t.find("NRQ", "").status == PakStatus::NotListed);
+		CHECK(t.find("NZZE-00", "01234567-89ABCDEF-C:45").status == PakStatus::Incompatible); /* (Game::crc: CRC1-CRC2-C:country) */
+		CHECK(t.find("NRQE-00", "01234567-89ABCDEF-C:45").status == PakStatus::Incompatible); /* (the CRC before the code) */
+		CHECK(t.find("file-x", "01234567-89ABCDEF-C:45").status == PakStatus::Incompatible && t.find("file-x", "01234567-89ABCDEE-C:45").status == PakStatus::NotListed);
+		CHECK(!strcmp(pakStatusName(PakStatus::Incompatible), "incompatible") && !strcmp(pakStatusName(PakStatus::NotListed), "not listed") &&
+		      !strcmp(pakFactText(PakStatus::Required), "Required") && !strcmp(pakFactText(PakStatus::Enhanced), "Enhanced") &&
+		      !strcmp(pakFactText(PakStatus::Incompatible), "Must be off") && !strcmp(pakFactText(PakStatus::NotListed), "Not listed"));
+		/* Auto: on for every status but incompatible; On and Off as set */
+		for (PakStatus s : { PakStatus::NotListed, PakStatus::Required, PakStatus::Enhanced })
+			CHECK(pakIsOn(PakAuto, s) && pakIsOn(PakOn, s) && !pakIsOn(PakOff, s));
+		CHECK(!pakIsOn(PakAuto, PakStatus::Incompatible) && pakIsOn(PakOn, PakStatus::Incompatible) && !pakIsOn(PakOff, PakStatus::Incompatible));
+
+		/* the title's file: the row, kept in psgopher.ini */
+		const std::string ini = data + "/psgopher/config/pak.ini";
+		{
+			TitleSettings s;
+			s.file = ini;
+			CHECK(s.expansionPak == 0);
+			s.expansionPak = 2;
+			CHECK(s.save());
+			TitleSettings r;
+			r.file = ini;
+			r.load();
+			CHECK(r.expansionPak == 2 && r.expansionPakRead && r.value("expansion_pak") == 2 && TitleSettings::isField("expansion_pak"));
+			write(ini, "display = 60\n");
+			TitleSettings old;
+			old.file = ini;
+			old.load();
+			CHECK(old.expansionPak == 0 && !old.expansionPakRead);
+		}
+
+		/* applied at a game's start, over Gopher64's switch for the length of the game */
+		write(data + "/pak.tsv", "NRQE\trequired\tnintendo,wikipedia\tverified\nNENP\tenhanced\twikipedia\tcited\nNBAD\tincompatible\tpj64\tunverified\n"
+		                         "01234567-89ABCDEF\tincompatible\tm64p\tunverified\n");
+		pakUseFile(data + "/pak.tsv");
+		CHECK(pakTable().size() == 4 && pakInfoOf("NBAD-00", "").status == PakStatus::Incompatible);
+		TitleSettings global; /* Auto */
+		auto run = [&](const std::string &key, const TitleSettings &settings, const std::string &crc, int64_t *during) {
+			g_log.clear();
+			GameScope scope(key, true, settings, crc);
+			*during = g_gopher["emulation.disable_expansion_pak"];
+		};
+		int64_t during = -1;
+		run("NRQE-00", global, "", &during);
+		CHECK(during == 0 && said("settings: expansion pak on (required; nintendo,wikipedia)") && g_gopher["emulation.disable_expansion_pak"] == 0);
+		run("NENP-01", global, "", &during);
+		CHECK(during == 0 && said("settings: expansion pak on (enhanced; wikipedia)"));
+		run("NZZE-00", global, "", &during);
+		CHECK(during == 0 && said("settings: expansion pak on (not listed; -)"));
+		run("NBAD-00", global, "", &during);
+		CHECK(during == 1 && said("settings: expansion pak off (incompatible; pj64)") && g_gopher["emulation.disable_expansion_pak"] == 0); /* (put back) */
+		run("NZZE-00", global, "01234567-89ABCDEF-C:45", &during);
+		CHECK(during == 1 && said("settings: expansion pak off (incompatible; m64p)"));
+		/* On and Off as the global setting force it */
+		TitleSettings forced_on = global, forced_off = global;
+		forced_on.expansionPak = PakOn, forced_off.expansionPak = PakOff;
+		run("NBAD-00", forced_on, "", &during);
+		CHECK(during == 0 && said("settings: expansion pak on (incompatible; pj64)"));
+		run("NRQE-00", forced_off, "", &during);
+		CHECK(during == 1 && said("settings: expansion pak off (required; nintendo,wikipedia)"));
+		/* the game's own choice wins over Auto, and over a global On or Off */
+		GameSettings own;
+		own.set("expansion_pak", PakOn);
+		CHECK(saveGameSettings("NBAD-00", own));
+		run("NBAD-00", global, "", &during);
+		CHECK(during == 0 && said("settings: per-game for NBAD-00: expansion_pak=1") && said("settings: expansion pak on (incompatible; pj64)"));
+		own.set("expansion_pak", PakOff);
+		CHECK(saveGameSettings("NZZE-02", own));
+		run("NZZE-02", global, "", &during);
+		CHECK(during == 1 && said("settings: expansion pak off (not listed; -)") && g_gopher["emulation.disable_expansion_pak"] == 0);
+		own.set("expansion_pak", PakAuto);
+		CHECK(saveGameSettings("NRQE-00", own));
+		run("NRQE-00", forced_off, "", &during);
+		CHECK(during == 0 && said("settings: expansion pak on (required; nintendo,wikipedia)")); /* (the game's Auto over a global Off) */
+		{
+			GameScope scope("NRQE-00", true, forced_off);
+			CHECK(scope.settings().expansionPak == PakAuto && forced_off.expansionPak == PakOff);
+		}
+		/* a game that did not end: the next start puts Gopher64's switch back too */
+		{
+			g_gopher["emulation.disable_expansion_pak"] = 0;
+			GameScope scope("NBAD-02", true, global);
+			CHECK(g_gopher["emulation.disable_expansion_pak"] == 1);
+			g_log.clear();
+			recoverGameSettings();
+			CHECK(g_gopher["emulation.disable_expansion_pak"] == 0 && said("settings: a game did not end: its per-game settings are taken out of Gopher64's config again (1)"));
+		}
+		/* a file from before the row was Auto, On or Off held Gopher64's own switch */
+		write(gameSettingsFile("NOLD-00"), "emulation.disable_expansion_pak = 1\nvideo.crt = 1\n");
+		const GameSettings legacy = loadGameSettings("NOLD-00");
+		CHECK(legacy.find("expansion_pak") && *legacy.find("expansion_pak") == PakOff && !legacy.find("emulation.disable_expansion_pak") && legacy.find("video.crt"));
+		write(gameSettingsFile("NOLD-00"), "emulation.disable_expansion_pak = 0\n");
+		CHECK(*loadGameSettings("NOLD-00").find("expansion_pak") == PakOn);
+		write(gameSettingsFile("NOLD-00"), "emulation.disable_expansion_pak = 1\nexpansion_pak = 0\n");
+		CHECK(*loadGameSettings("NOLD-00").find("expansion_pak") == PakAuto);
+		CHECK(gameSettingEligible("expansion_pak") && !gameSettingEligible("emulation.disable_expansion_pak"));
 	}
 
 	/* the shares file (OGBox's format), written and read back with the accounts encoded */

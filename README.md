@@ -31,13 +31,19 @@ storage, and on network shares.
   final filter, the video interface's smoothing, anti-aliasing and filters, gamma dither, deinterlacing,
   native-resolution texture rectangles, crop overscan, VSync, shader compiles, the graphics driver's thread), Screen & Sound (CRT shader, widescreen, integer scaling,
   the audio buffer: 33 to 133 ms, 67 by default), TV Output (59.94 Hz, 119.88 Hz or variable refresh;
-  HDR10 and its brightness), Emulation (overclock, Expansion Pak, rewind, UNFLoader), Controllers
+  HDR10 and its brightness), Emulation (overclock, Expansion Pak: Auto, On or Off, rewind, UNFLoader), Controllers
   (each port: enabled, which DualSense, its input profile, its Transfer Pak with the Game Boy
   ROM and save), Profiles (every N64 button's DualSense control: ✕ then press it; the deadzone),
   Hotkeys, Console (network shares, the sandbox, searching again, fast writes, updates, exiting) and PC Only (what
   Gopher64 has on a PC alone, and why). ▲ ▼ setting, ◄ ► change, ✕ choose; the line below says what
   the setting does. Gopher64's settings keep its labels. A ◆ beside a row means the chosen game has a
   setting of its own for it (below).
+- **The Expansion Pak** (the N64's extra 4 MB): PSGopher knows which games need it, which use it for more
+  and which misbehave with it (`gamedata/expansion-pak.tsv` in the title folder; sources in
+  `docs/dev/expansion-pak.md`). **Auto** (the default) turns it on, except for a game that must run
+  without it; **On** and **Off** force it. HOME's panel and a game's page say **Expansion Pak: Required,
+  Enhanced, Must be off** or **Not listed** (a game the list does not know) and the memory the game gets (8 MB or 4 MB). Starting a game that needs it
+  with it set to Off asks first (✕ starts anyway, ○ goes back).
 - **A game's page** (△ on HOME): **Cheats**, and the Video, Screen & Sound, Emulation and Controllers
   rows that a game can have of its own (each port's Enabled and Transfer Pak, Emulate VRU; not the
   profiles or the Game Boy files). Each row starts at **Use Global Setting** (and shows what that is

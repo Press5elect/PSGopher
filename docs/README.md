@@ -18,6 +18,7 @@ The index of everything written about PSGopher. The user's guide is the reposito
 | [`dev/architecture.md`](dev/architecture.md) | The layers and the numbered decisions (D1-D18) that code comments cite; the milestones |
 | [`dev/building.md`](dev/building.md) | The sibling checkouts, host packages, the build's steps, the pins and moving them, changing Gopher64 |
 | [`dev/testing.md`](dev/testing.md) | The host tests, the interface pictures, the renderer's conformance suites |
+| [`dev/expansion-pak.md`](dev/expansion-pak.md) | Which games need, use or must run without the Expansion Pak: the data file, its sources and licences, how Auto decides |
 | [`dev/settings-words.md`](dev/settings-words.md) | The naming rules of BENCH's settings and the check that keeps them |
 | [`dev/debugging.md`](dev/debugging.md) | Reading the boot log (each prefix), crash reports, running a build on the console, the files the title reads |
 | [`dev/dependencies.md`](dev/dependencies.md) | Every dependency, what it needs from the console, FreeBSD 11 under Rust's 12, the imports |

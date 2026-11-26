@@ -18,6 +18,7 @@ struct MenuResult {
 	bool benchmark{ false }; // a benchmark from that probe (1x 2x 4x 8x), not a game to play
 	std::string key;    // the game's key for its own settings (library.h's gameKey)
 	bool keyFromHeader{ true }; // false: the key is the file's name (no header facts)
+	std::string crc;    // the game's Game::crc (the Expansion Pak's table is keyed by it too)
 };
 
 /* Shows the list until a game is chosen or the title is closed. `notice` is said at the top once

@@ -43,10 +43,13 @@ bool saveGameSettings(const std::string &key, const GameSettings &settings);
  * rows over it (what applyHdr is given); Gopher64's config has the game's rows until restore() (also
  * the destructor), with the globals kept in restore.txt meanwhile so that a game that never ended
  * (the console closed, a crash) is put right at the next start (recoverGameSettings). Logs
- * "settings: per-game for <key>: ..." or "settings: no per-game settings for <key>". */
+ * "settings: per-game for <key>: ..." or "settings: no per-game settings for <key>". The Expansion Pak is Gopher64's too
+ * (its "Disable Expansion Pak"), set the same way from the row's Auto, On or Off (expansion_pak.h) and logged as
+ * "settings: expansion pak <on|off> (<required|enhanced|incompatible|not listed>; <source>)". */
 class GameScope {
 public:
-	GameScope(const std::string &key, bool key_from_header, const TitleSettings &global);
+	/* crc: the game's Game::crc ("" none), for the Expansion Pak's table */
+	GameScope(const std::string &key, bool key_from_header, const TitleSettings &global, const std::string &crc = std::string());
 	~GameScope();
 	GameScope(const GameScope &) = delete;
 	GameScope &operator=(const GameScope &) = delete;

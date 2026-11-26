@@ -377,6 +377,29 @@ void Frontend::setView(board::View v)
 	blend_ = 0;
 }
 
+Frontend::PakView Frontend::pakView(const Game &g)
+{
+	PakView v;
+	const GameSettings &own = markersOf(g);
+	const int64_t *set = own.find("expansion_pak");
+	v.setting = set ? (int)*set : host_.title ? host_.title->expansionPak : PakAuto;
+	v.info = pakInfoOf(marker_key_, g.crc);
+	v.on = pakIsOn(v.setting, v.info.status);
+	return v;
+}
+
+void Frontend::startGame(const Game &g, int slot)
+{
+	if (!host_.play)
+		return;
+	const PakView v = pakView(g);
+	if (v.info.status == PakStatus::Required && !v.on) {
+		pak_ask_ = true, pak_game_ = g, pak_slot_ = slot;
+		return;
+	}
+	host_.play(g, slot);
+}
+
 /* a game's page: its file's settings, BENCH's place kept and the pose of BENCH's board taken */
 void Frontend::openGamePage(const Game &g)
 {
@@ -497,7 +520,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 	/* "Close PSGopher?" has the pad while it is up: Cross closes (the title's clean exit), Circle stays */
 	PadInput quiet;
 	quiet.now = pad_in.now;
-	const PadInput &pad = close_open_ || update_ask_ ? quiet : pad_in;
+	const PadInput &pad = close_open_ || update_ask_ || pak_ask_ ? quiet : pad_in;
 	/* "Install vX.Y.Z?" and "Roll back to ...?" (BENCH, Console) are asked the same way: Cross does it,
 	 * Circle stays. An install that is in place closes the title the clean way, as the exit row does;
 	 * a roll back runs on the updater's thread and closes it when it is done */
@@ -524,6 +547,16 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 				host_.close();
 		} else if (st.state == update::State::Failed || st.state == update::State::Idle)
 			rollback_wanted_ = false;
+	}
+	/* a game that needs the Expansion Pak, started with it set to Off: Cross starts it anyway, Circle goes back */
+	if (pak_ask_) {
+		if (pad_in.pressed & PAD_CIRCLE)
+			pak_ask_ = false;
+		else if (pad_in.pressed & PAD_CROSS) {
+			pak_ask_ = false;
+			if (host_.play)
+				host_.play(pak_game_, pak_slot_);
+		}
 	}
 	if (close_open_) {
 		if (pad_in.pressed & PAD_CIRCLE)
@@ -556,7 +589,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 	projector_.unit = u_;
 
 	/* the board's machine: the seated cartridge, the settings it shows */
-	machine_.expansion = host_.get ? host_.get("emulation.disable_expansion_pak") == 0 : true;
+	machine_.expansion = g ? pakView(*g).on : !host_.title || host_.title->expansionPak != PakOff;
 	machine_.overclock = host_.get ? host_.get("emulation.overclock") == 1 : false;
 	machine_.upscale = host_.get ? (int)std::max<int64_t>(1, host_.get("video.upscale")) : 1;
 	machine_.crt = host_.get ? host_.get("video.crt") == 1 : false;
@@ -601,6 +634,26 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 			if (!on)
 				ink.frame(bx, py + 176, bw, 50, kLine, 25, 1);
 			ink.text(f.mono_bold, 18, bx + 24, py + 191, on ? kInk : kText, label, .08f);
+			bx += bw + 14;
+		}
+	}
+	if (pak_ask_) {
+		const float pw = 760, ph = 230, px = (1920 - pw) / 2, py = (1080 - ph) / 2;
+		ink.rect(0, 0, 1920, 1080, IM_COL32(1, 5, 7, 170));
+		ink.glow(px, py, pw, ph, IM_COL32(255, 182, 72, 64), 24, 20);
+		ink.rect(px, py, pw, ph, IM_COL32(7, 17, 21, 245), 20);
+		ink.frame(px, py, pw, ph, kAmber, 20, 2);
+		ink.text(f.mono, 13, px + 40, py + 36, kDim, "EXPANSION PAK", .2f);
+		ink.text(f.mono, 17, px + 40, py + 78, kText, "This game needs the Expansion Pak, and it is set to Off.");
+		float bx = px + 40;
+		int which = 0;
+		for (const char *label : { "\xE2\x9C\x95  START ANYWAY", "\xE2\x97\x8B  BACK" }) {
+			const bool on = which++ == 0;
+			const float bw = ink.width(f.mono_bold, 18, label, .08f) + 48;
+			ink.rect(bx, py + 140, bw, 50, on ? kText : IM_COL32(16, 34, 38, 255), 25);
+			if (!on)
+				ink.frame(bx, py + 140, bw, 50, kLine, 25, 1);
+			ink.text(f.mono_bold, 18, bx + 24, py + 155, on ? kInk : kText, label, .08f);
 			bx += bw + 14;
 		}
 	}
@@ -749,21 +802,24 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		snprintf(rom_size, sizeof(rom_size), "%llu KB", (unsigned long long)(g.size / 1024));
 	else
 		snprintf(rom_size, sizeof(rom_size), "-");
-	const std::string facts[6][2] = {
+	const PakView pak = pakView(g);
+	const std::string facts[8][2] = {
 		{ "GAME ID", g.facts && !g.id.empty() ? g.id : "-" },
 		{ "ROM", rom_size },
 		{ "LOCKOUT CHIP", g.facts ? cicText(g.cic) : "-" },
 		{ "SAVE MEMORY", g.facts ? saveText(g.save) : "-" },
 		{ "PAK", g.facts ? (g.rumble ? "Rumble" : "Controller Pak") : "-" },
 		{ "REGION", regionName(regionOf(g)).empty() ? "-" : regionName(regionOf(g)) },
+		{ "EXPANSION PAK", g.facts || !g.crc.empty() ? pakFactText(pak.info.status) : "-" },
+		{ "N64 MEMORY", pak.on ? "8 MB" : "4 MB" },
 	};
 	const float cell_w = (inner - 1) / 2, cell_h = 62;
 	const float gx = x + pad_x, gy = cy;
-	ink.rect(gx, gy, inner, cell_h * 3 + 2, kLine, 10);
-	for (int i = 0; i < 6; i++) {
+	ink.rect(gx, gy, inner, cell_h * 4 + 3, kLine, 10);
+	for (int i = 0; i < 8; i++) {
 		const float cx = gx + (i % 2) * (cell_w + 1), cyy = gy + (i / 2) * (cell_h + 1);
 		const ImDrawFlags corners = i == 0 ? ImDrawFlags_RoundTopLeft : i == 1 ? ImDrawFlags_RoundTopRight
-		                            : i == 4 ? ImDrawFlags_RoundBottomLeft : i == 5 ? ImDrawFlags_RoundBottomRight
+		                            : i == 6 ? ImDrawFlags_RoundBottomLeft : i == 7 ? ImDrawFlags_RoundBottomRight
 		                                     : ImDrawFlags_RoundNone;
 		dl->AddRectFilled(S(cx + .5f, cyy + .5f), S(cx + cell_w - .5f, cyy + cell_h - .5f), kCellBg, L(9), corners);
 		ink.text(f.mono, 12, cx + 14, cyy + 10, withAlpha(kDim, alpha), facts[i][0], .14f);
@@ -777,7 +833,7 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		}
 		ink.text(f.mono_bold, 18, vx, cyy + 30, withAlpha(kText, alpha), value);
 	}
-	cy += cell_h * 3 + 2 + 18;
+	cy += cell_h * 4 + 3 + 18;
 
 	/* the probes */
 	ink.text(f.mono_bold, 13, x + pad_x, cy, withAlpha(game, alpha), "MEMORY PROBES \xC2\xB7 YOUR SAVE STATES", .2f);
@@ -923,7 +979,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		close_open_ = true;
 	g = selected();
 	if (g && (pad.pressed & PAD_CROSS) && host_.play && !(host_.busy && host_.busy()))
-		host_.play(*g, -1);
+		startGame(*g, -1);
 	if (g && (pad.pressed & PAD_SQUARE)) {
 		probes_for_.clear(); /* (the panel looks them up again, with their files) */
 		probes_ = probesOf(*g);
@@ -999,7 +1055,7 @@ void Frontend::probePicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 	if ((pad.pressed & PAD_CROSS) && n > 0 && host_.play) {
 		const int slot = probes_[probes_open_].slot;
 		probes_open_ = -1;
-		host_.play(g, slot);
+		startGame(g, slot);
 		return;
 	}
 	/* the same scene at 1x, 2x, 4x and 8x (benchmark mode, docs/dev/performance.md): back to the board after */
@@ -1279,7 +1335,7 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		setView(board::View::Home);
 	const Game *g = n ? &games_[rack_[rack_sel_]] : nullptr;
 	if (g && (pad.pressed & PAD_CROSS) && host_.play && !(host_.busy && host_.busy()))
-		host_.play(*g, -1);
+		startGame(*g, -1);
 	if (g && (pad.pressed & PAD_TRIANGLE)) {
 		/* seat it: to the home strip, chosen there */
 		for (size_t k = 0; k < strip_.size(); k++)
@@ -1782,6 +1838,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(title_row("keep_gpu_memory", "Keep GPU Memory", "When enabled, keeps large blocks of graphics memory for reuse instead of returning them to the console, which can freeze a game for seconds when it switches picture modes at high resolutions. Uses up to 768 MB more memory.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.keepGpuMemory; },
 		                           [](TitleSettings &t, int64_t v) { t.keepGpuMemory = v != 0; }, 1));
+		s.rows.push_back(title_row("rdp_threaded", "Threaded RDP", "When enabled, processes the graphics commands on a separate thread, which leaves more time for the N64's processors. When disabled, they are processed between the processors' work, which can fix wrong textures in some games.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.rdpThreaded; },
+		                           [](TitleSettings &t, int64_t v) { t.rdpThreaded = v != 0; }, 1));
 		s.rows.push_back(title_row("slow_capture", "Slow Moments", "When enabled, a game that runs below 95% speed for 3 seconds has the next 10 seconds recorded in the log, up to three times per game. Used to find what slows a game down.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
 		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }, 1));
@@ -1825,8 +1884,8 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		Section s{ "Emulation", "xtal", "Controls the emulated N64: its clock, its memory and what the cartridge slot holds.", {} };
 		s.rows.push_back(choose("emulation.overclock", "Overclock N64 CPU (may cause bugs)", "When enabled, runs the emulated CPU at 125 MHz instead of 93.75 MHz. Can reduce slowdowns in heavy games, but may cause issues in some games.",
 		                        { { "Off", 0 }, { "On", 1 } }, 0));
-		s.rows.push_back(choose("emulation.disable_expansion_pak", "Disable Expansion Pak", "When enabled, the N64 has its standard 4 MB of memory instead of the 8 MB it has with the Expansion Pak. Some games need the Expansion Pak, and a few misbehave with it.",
-		                        { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(field_row("expansion_pak", "Expansion Pak", "Selects whether the N64 has the 8 MB it has with the Expansion Pak or its standard 4 MB. Auto turns it on, except for a game that misbehaves with it. Some games need the Expansion Pak, and a few misbehave with it.",
+		                           { { "Auto", PakAuto }, { "On", PakOn }, { "Off", PakOff } }, PakAuto));
 		s.rows.push_back(choose("emulation.rewind", "Enable Rewind", "When enabled, keeps a snapshot every second so the Rewind hotkey can go back in time. Uses additional memory.", { { "Off", 0 }, { "On", 1 } }, 0));
 		s.rows.push_back(choose("emulation.usb", "Emulate UNFLoader", "When enabled, emulates the USB link of development cartridges that homebrew uses. Not supported on PS5.", { { "Off", 0 }, { "On", 1 } }, 0));
 		sections.push_back(std::move(s));
@@ -2112,6 +2171,8 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 					marker_path_.clear(); /* (BENCH's markers read the file again) */
 				};
 				p.help = r.help + " Use Global Setting leaves it to the setting in BENCH.";
+				if (key == "expansion_pak")
+					p.help += std::string(" For this game: ") + pakFactText(pakInfoOf(page_key_, page_game_.crc).status) + ".";
 				out.rows.push_back(std::move(p));
 			}
 			if (!out.rows.empty())
