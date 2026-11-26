@@ -13,8 +13,8 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 upstream=https://github.com/gopher64/gopher64.git
-# master of 2026-11-25 ("correct touch overlay hiding (#1445)"), Cargo version 1.2.4
-revision=4b824cb8f629a2cffd89507f043de838062d30af
+# master of 2026-11-26 (pull request 1452: an FPU comparison fix and per-game ROM fixes)
+revision=680769b7e548231bf3012625034cc1632b4bdf65
 patch="$root/ps5/patches/gopher64/ps5.patch"
 vendor="$root/vendor/gopher64"
 # parallel-rdp is a submodule of Gopher64's (its own repository, at the commit Gopher64's pin

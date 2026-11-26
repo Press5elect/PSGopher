@@ -1023,10 +1023,10 @@ index 0000000..fdb8cb9
 +    0x00000009, 0x00000017, 0x000100fd, 0x00010038,
 +};
 diff --git a/src/device/cart/rom.rs b/src/device/cart/rom.rs
-index f35085d..d610980 100644
+index a6dd9a7..82ae466 100644
 --- a/src/device/cart/rom.rs
 +++ b/src/device/cart/rom.rs
-@@ -178,25 +178,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
+@@ -336,25 +336,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
      false
  }
  

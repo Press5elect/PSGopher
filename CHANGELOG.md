@@ -110,6 +110,8 @@ console: the cheats, variable refresh, HDR10.
   its own; it is not offered. Eleven of parallel-rdp's compiled shaders are made again
   (`ps5/tools/make-rdp-shaders.py`); with Original they compute the same addresses as before (784
   specialisations compared on the PC).
+- Changed: Gopher64's pin moved to `680769b7e548` (upstream's FPU comparison fix: subnormals and
+  signed zeros compared as the VR4300 does, and per-game ROM fixes).
 - Added: the benchmark window reports the time in the driver's submits and parallel-rdp's time off
   the CPU; RSP bursts are a VI's, not the window's total.
 - Fixed: audio underruns are not counted while the quick menu holds the game.
