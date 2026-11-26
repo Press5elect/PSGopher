@@ -10,9 +10,12 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "image.h"
 #include "library.h"
+#include "probe_picture.h"
 #include "web.h"
 #include "menu.h"
+#include "update.h"
 
 #include <chrono>
 #include <cstdarg>
@@ -68,6 +71,7 @@ struct Step {
 	uint32_t buttons;
 	const char *shot;
 	int frames;
+	void (*before)() = nullptr; /* run when the step begins (the updater's stand-in is told what to answer) */
 };
 static std::vector<Step> g_script;
 static size_t g_step = 0;
@@ -83,6 +87,8 @@ extern "C" void pad_poll(struct pad *pad)
 	if (g_step < g_script.size()) {
 		const Step &s = g_script[g_step];
 		const int hold = s.frames;
+		if (g_frame_in_step == 0 && s.before)
+			s.before();
 		if (g_frame_in_step < hold)
 			held = s.buttons;
 		g_frame_in_step++;
@@ -252,6 +258,84 @@ extern "C" int psgopher_about(const char *name, char *buffer, size_t size)
 	return 200;
 }
 
+/* ---------------------------------------------------------------- the updater (update.cpp), stood in for */
+
+namespace updater_stub {
+using psgopher::update::State;
+static psgopher::update::Status g_status;       /* what GetStatus() says */
+static psgopher::update::Status g_on_check;     /* what a Check() finds */
+static int g_checks = 0, g_downloads = 0, g_cancels = 0, g_skips = 0, g_installs = 0, g_rollbacks = 0;
+static void releaseOffered()
+{
+	psgopher::update::Status s;
+	s.state = State::Available, s.version = "1.2.0", s.tag = "v1.2.0", s.name = "Sharper Pictures";
+	psgopher::update::ReleaseNotes a, b;
+	a.version = "1.2.0", a.tag = "v1.2.0", a.name = "Sharper Pictures", a.date = "2026-12-01";
+	a.text = "Added: the variable refresh option, for a TV that has it.\nAdded: probes keep a picture of the moment they were taken.\n"
+	         "Fixed: the quick menu moved two places for one press.\nFixed: a share's ROM is copied again when its size changes.";
+	b.version = "1.1.0", b.tag = "v1.1.0", b.name = "Rack Filters", b.date = "2026-11-28";
+	b.text = "Added: the rack's filters (internal, USB, network).\nChanged: the letters are shown large for a moment after a jump.";
+	s.newer = { a, b };
+	s.notes = a.text + "\n\n" + b.text;
+	s.previous = "1.0.1", s.previous_label = "v1.0.1";
+	g_on_check = s;
+}
+static void downloading()
+{
+	g_status.state = State::Downloading, g_status.done = 18u * 1024 * 1024, g_status.total = 48u * 1024 * 1024, g_status.speed = 3.2 * 1024 * 1024;
+}
+static void failed()
+{
+	g_status.state = State::Failed;
+	g_status.error = "The download did not match its SHA-256 checksum; nothing in the title's folder was changed.";
+}
+static void ready()
+{
+	g_status.state = State::Ready;
+}
+static void upToDateWithPrevious()
+{
+	psgopher::update::Status s;
+	s.state = State::UpToDate, s.version = "1.2.0", s.tag = "v1.2.0", s.previous = "1.1.0", s.previous_label = "v1.1.0";
+	g_status = s;
+}
+static void gone()
+{
+	g_status.state = State::Installed, g_status.rollback = true;
+}
+} // namespace updater_stub
+
+namespace psgopher::update {
+Status GetStatus() { return updater_stub::g_status; }
+void Check()
+{
+	updater_stub::g_checks++;
+	updater_stub::g_status = updater_stub::g_on_check;
+}
+void Download()
+{
+	updater_stub::g_downloads++;
+	updater_stub::downloading();
+}
+void Cancel() { updater_stub::g_cancels++; }
+void Skip()
+{
+	updater_stub::g_skips++;
+	updater_stub::g_status.skipped = true;
+}
+bool Install()
+{
+	updater_stub::g_installs++;
+	updater_stub::g_status.state = State::Installed;
+	return true;
+}
+void RollBack()
+{
+	updater_stub::g_rollbacks++;
+	updater_stub::g_status.state = State::Verifying, updater_stub::g_status.rollback = true;
+}
+} // namespace psgopher::update
+
 /* ---------------------------------------------------------------- ps5vfs, stood in for (no shares) */
 
 extern "C" void ps5vfs_set_shadow_path(const char *) {}
@@ -273,6 +357,8 @@ static void write(const std::string &path, const std::string &bytes)
 	std::fclose(f);
 }
 
+namespace psgopher { extern FILE *g_settings_words_dump; } /* (frontend.cpp) */
+
 int main(int argc, char **argv)
 {
 	const std::string work = argc > 1 ? argv[1] : "/tmp/psgopher-menu-test";
@@ -280,10 +366,13 @@ int main(int argc, char **argv)
 	if (std::system(("rm -rf '" + work + "' && mkdir -p '" + work + "/data/psgopher/roms' '" + work +
 			"/data/psgopher/cache' '" + g_pictures + "'").c_str()) != 0)
 		return 2;
+	/* every BENCH row's words, dumped once for ps5/tools/settings-words.py */
+	psgopher::g_settings_words_dump = fopen((work + "/settings-words.jsonl").c_str(), "w");
 	/* a list of the kind a console has: ROM files named as dumps are, with headers */
 	static const char *const names[] = { "Aero Racer (U)", "Bomb Squad 64 (E)", "Cave Diver (J)", "Dino Park (U) [!]",
 		"Echo Base (U)", "Fjord Fishing (E)", "Gem Keeper (U)", "Hover Cars (J)", "Ice Climb 64 (U)", "Jungle Run (E)",
-		"Kart Champs (U)", "Lunar Lander 64 (U)", "Moto Trial (E)", "Night Ops (U)", "Orbit (J)" };
+		"Kart Champs (U)", "Lunar Lander 64 (U)", "Moto Trial (E)", "Night Ops (U)", "Orbit (J)",
+		"007 Agent (U)", "1080 Racer (U)" };
 	for (const char *n : names) {
 		std::string rom(1024 * (strlen(n) * 37 % 900 + 100), '\0');
 		const unsigned char magic[4] = { 0x80, 0x37, 0x12, 0x40 };
@@ -307,7 +396,26 @@ int main(int argc, char **argv)
 		std::string state(8192, '\0');
 		for (size_t i = 0; i < state.size(); i++)
 			state[i] = (char)((i * 2654435761u >> (slot * 3)) & 0xff);
-		write(work + "/data/psgopher/data/states/BOMB SQUAD 64-0123.state" + std::to_string(slot), state);
+		const std::string state_file = work + "/data/psgopher/data/states/BOMB SQUAD 64-0123.state" + std::to_string(slot);
+		write(state_file, state);
+		/* probe 1 has a picture (a 640x480 VI frame, not square pixels), probe 3 none (an older probe) */
+		if (slot == 1) {
+			std::vector<uint8_t> rgb(640 * 480 * 3);
+			for (int y = 0; y < 480; y++)
+				for (int x = 0; x < 640; x++) {
+					const bool bar = (x / 80) % 2 == (y / 80) % 2;
+					uint8_t *px = &rgb[((size_t)y * 640 + x) * 3];
+					px[0] = (uint8_t)(bar ? 40 + x * 200 / 640 : 220 - y * 160 / 480), px[1] = (uint8_t)(y * 255 / 480), px[2] = bar ? 200 : 60;
+				}
+			CHECK(psgopher::writePng(psgopher::probePicturePath(state_file), 640, 480, rgb.data()));
+		}
+	}
+	/* a picture claiming more than 2048 pixels a side is not decoded (FE-030), one of 640x480 is */
+	{
+		std::vector<uint8_t> wide(2049 * 3, 90);
+		CHECK(psgopher::writePng(work + "/too-wide.png", 2049, 1, wide.data()));
+		CHECK(psgopher::decodeImage(work + "/too-wide.png").rgba.empty());
+		CHECK(!psgopher::decodeImage(psgopher::probePicturePath(work + "/data/psgopher/data/states/BOMB SQUAD 64-0123.state1")).rgba.empty());
 	}
 	psgopher::webStart(work + "/data/psgopher/cache/covers");
 	psgopher::libraryUseRoot(work + "/data");
@@ -316,11 +424,17 @@ int main(int argc, char **argv)
 	for (int i = 0; i < 300 && psgopher::library().scanning(); i++)
 		std::this_thread::sleep_for(std::chrono::milliseconds(10));
 
+	{
+		psgopher::update::Status up;
+		up.state = psgopher::update::State::UpToDate, up.version = "1.0.0", up.tag = "v1.0.0";
+		updater_stub::g_on_check = up;
+	}
 	const uint32_t none = 0;
 	g_script = {
 		{ none, nullptr, 6 },
 		{ none, "1-home", 3 },
-		{ PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { none, nullptr, 6 }, { none, "2-home-moved", 3 },
+		{ PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, /* (past the two digit titles) */
+		{ none, nullptr, 6 }, { none, "2-home-moved", 3 },
 		{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 }, { none, "3-rack", 3 },
 		{ PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 }, { PAD_RIGHT, nullptr, 2 },
 		{ PAD_SQUARE, nullptr, 2 }, { PAD_OPTIONS, nullptr, 2 }, { none, "4-rack-sorted-filtered", 3 },
@@ -346,10 +460,10 @@ int main(int argc, char **argv)
 			{ PAD_TRIANGLE, "6g-bench-bound", 3 },         /* to Triangle */
 			{ R2, "6h-bench-hotkeys", 3 } })
 		g_script.push_back(st);
-	for (int i = 0; i < 5; i++) /* down to Leave the game (Hotkeys, Quick menu tap, Activator, Save, Load, Leave) */
+	for (int i = 0; i < 5; i++) /* down to Leave Game (Hotkeys, Quick menu tap, Activator, Save, Load, Leave) */
 		g_script.push_back({ PAD_DOWN, nullptr, 2 });
 	for (const Step &st : std::vector<Step>{
-			{ PAD_LEFT, nullptr, 2 },                      /* Leave the game: off */
+			{ PAD_LEFT, nullptr, 2 },                      /* Leave Game: off */
 			{ none, "6i-bench-hotkey-changed", 3 },
 			{ R2, nullptr, 2 }, { R2, "6j-bench-pc-only", 3 }, { L2, nullptr, 2 },
 			{ none, "7-bench-console", 3 },
@@ -381,7 +495,78 @@ int main(int argc, char **argv)
 	CHECK(g_settings["video.upscale"] == 2);
 	CHECK(g_setting_reads < 60); /* read once each, not every frame */
 	CHECK(g_profiles["default"].kind[7] == 1 && g_profiles["default"].id[7] == 3); /* A bound to Triangle */
-	for (const char *shot : { "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes" }) {
+	CHECK(updater_stub::g_checks == 1); /* the check at the title's start (Check for Updates at Start is on), once */
+	/* BENCH, Console, the updater: Check for Updates, the offer with its notes, the download, the install
+	 * asked first and closing the title; then Roll Back */
+	{
+		using namespace updater_stub;
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_status = {};
+		g_checks = 0;
+		g_script = {
+			{ none, nullptr, 6 },
+			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, /* Check for Updates */
+			{ none, "17-update-idle", 3 },
+			{ none, nullptr, 1, releaseOffered },
+			{ PAD_CROSS, "18-update-available", 3 },
+			{ PAD_DOWN, nullptr, 2 },                                  /* Download Update */
+			{ PAD_CROSS, nullptr, 2 }, { none, "19-update-downloading", 3 },
+			{ none, nullptr, 1, failed }, { none, "20-update-failed", 3 },
+			{ none, nullptr, 1, ready }, { none, "21-update-ready", 3 }, /* Install Update, then Roll Back */
+			{ PAD_CROSS, "22-update-install-ask", 3 },
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 },          /* cancelled: nothing installed */
+			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 3 },
+			{ PAD_CROSS, nullptr, 2 },                                 /* installed: the title closes */
+		};
+		const psgopher::MenuResult r4 = psgopher::runMenu("");
+		CHECK(!r4.play && r4.rom.empty());
+		CHECK(g_checks == 1 && g_downloads == 1 && g_installs == 1 && g_rollbacks == 0 && g_skips == 0);
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = {
+			{ none, nullptr, 6 },
+			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6, upToDateWithPrevious }, /* BENCH, Console */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 },
+			{ PAD_DOWN, nullptr, 2 },                                  /* Roll Back */
+			{ none, "23-update-rollback", 3 },
+			{ PAD_CROSS, "24-update-rollback-ask", 3 },
+			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 6 },           /* it is checked (the updater's thread) */
+			{ none, nullptr, 20, gone }, { none, nullptr, 6 },         /* and put back: the title closes */
+		};
+		const psgopher::MenuResult r5 = psgopher::runMenu("");
+		CHECK(!r5.play && g_rollbacks == 1 && g_installs == 1 && g_checks == 1);
+	}
+	/* Circle and the letters (a fresh menu each): the library back to HOME, HOME asking before it
+	 * closes, L2 / R2 across the letters */
+	{
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = {
+			{ none, nullptr, 6 },
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 },
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 },   /* the library: back to HOME */
+			{ PAD_CIRCLE, nullptr, 2 }, { none, "14-close-confirm", 3 }, /* HOME: "Close PSGopher?" */
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 },       /* (the question has the pad: no view change) */
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 },   /* stay */
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 6 },       /* the library again, at Aero Racer */
+		};
+		for (int i = 0; i < 13; i++)                            /* B .. N: Orbit's letter is the 14th */
+			g_script.push_back({ R2, nullptr, 2 });
+		g_script.push_back({ R2, "15-rack-letter-O", 2 });
+		for (const Step &st : std::vector<Step>{
+				{ R2, "16-rack-letter-hash", 2 },                /* O to '#' (007 Agent) */
+				{ R2, nullptr, 2 },                            /* the last letter: its last game (1080 Racer) */
+				{ L2, nullptr, 2 },                            /* its first (007 Agent) */
+				{ L2, nullptr, 2 },                            /* the letter before: Orbit */
+				{ PAD_CROSS, nullptr, 2 } })
+			g_script.push_back(st);
+		const psgopher::MenuResult r2 = psgopher::runMenu("");
+		CHECK(r2.play && r2.rom == work + "/data/psgopher/roms/Orbit (J).z64");
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 }, { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult r3 = psgopher::runMenu(""); /* Cross on the question: the menu ends, no game */
+		CHECK(!r3.play && r3.rom.empty());
+	}
+	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask" }) {
 		struct stat st;
 		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);
 	}

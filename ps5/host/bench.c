@@ -415,6 +415,189 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
    }
 }
 
+
+/* ---- where the emulation thread is, and the freeze watchdog --------------------------------------
+ * The emulation thread marks the places it can block in (psgopher_where, bench.h); a thread of its
+ * own samples the mark every 20 ms. When no VI has completed for 250 ms it says so once, with the
+ * place the thread is in; when VIs resume it says how long the stall was and the places its 20 ms
+ * samples found it in, and the CPU time the thread used meanwhile (a stall where the CPU time stays
+ * low is a block off the CPU: the place names the call). Logging only. */
+static _Atomic int where_place;
+static _Atomic uint64_t where_since_tsc;
+static _Atomic uint32_t where_pauses;
+
+int psgopher_where(int place)
+{
+   const int previous = atomic_load_explicit(&where_place, memory_order_relaxed);
+   atomic_store_explicit(&where_place, place, memory_order_relaxed);
+   atomic_store_explicit(&where_since_tsc, __rdtsc(), memory_order_relaxed);
+   if (place == PSGOPHER_WHERE_PAUSED)
+      atomic_store_explicit(&where_pauses, atomic_load_explicit(&where_pauses, memory_order_relaxed) + 1, memory_order_relaxed);
+   return previous;
+}
+
+void psgopher_where_restore(int previous)
+{
+   atomic_store_explicit(&where_place, previous, memory_order_relaxed);
+   atomic_store_explicit(&where_since_tsc, __rdtsc(), memory_order_relaxed);
+}
+
+const char *psgopher_where_name(int place)
+{
+   static const char *const names[PSGOPHER_WHERE_COUNT] = {
+      "the VR4300 or other code", "the RSP", "parallel-rdp commands", "parallel-rdp frame", "a GPU fence wait",
+      "a Vulkan submit", "an RDRAM sync wait", "present (vsync/FIFO wait)", "the speed limiter", "the audio queue",
+      "a cartridge DMA", "save data", "a save state", "paused", "a main-thread call", "controller input", "achievements",
+   };
+   return place >= 0 && place < PSGOPHER_WHERE_COUNT ? names[place] : "an unknown place";
+}
+
+int pthread_getcpuclockid(pthread_t thread, clockid_t *clock) __attribute__((weak));
+
+static _Atomic uint64_t stall_vis;
+static _Atomic bool stall_running, stall_emu_known;
+static pthread_t stall_thread, stall_emu;
+static bool stall_started;
+static int stall_threshold_ms = 250, stall_period_ms = 20;
+
+void psgopher_stall_configure(int threshold_ms, int period_ms)
+{
+   stall_threshold_ms = threshold_ms > 0 ? threshold_ms : 250;
+   stall_period_ms = period_ms > 0 ? period_ms : 20;
+}
+
+/* a VI completed on the emulation thread (the first call says which thread that is) */
+void psgopher_stall_vi(void)
+{
+   if (!atomic_load_explicit(&stall_emu_known, memory_order_relaxed)) {
+      stall_emu = pthread_self();
+      atomic_store(&stall_emu_known, true);
+   }
+   atomic_store_explicit(&stall_vis, atomic_load_explicit(&stall_vis, memory_order_relaxed) + 1, memory_order_relaxed);
+}
+
+static void stall_sleep_ms(int ms)
+{
+   struct timespec t = { ms / 1000, (long)(ms % 1000) * 1000000L };
+   nanosleep(&t, NULL);
+}
+
+/* the emulation thread's CPU clock, ns; UINT64_MAX when the console cannot give another thread's */
+static uint64_t stall_emu_cpu(int *resolved, clockid_t *id)
+{
+   if (!atomic_load(&stall_emu_known) || !pthread_getcpuclockid)
+      return UINT64_MAX;
+   if (!*resolved) {
+      if (pthread_getcpuclockid(stall_emu, id) != 0)
+         return UINT64_MAX;
+      *resolved = 1;
+   }
+   return now_ns(*id);
+}
+
+static void stall_report(uint64_t total_ms, const unsigned *histogram, uint64_t cpu_ns, const char *how)
+{
+   char list[640] = "";
+   unsigned left[PSGOPHER_WHERE_COUNT];
+   memcpy(left, histogram, sizeof(left));
+   size_t used = 0;
+   for (int k = 0; k < PSGOPHER_WHERE_COUNT; k++) {
+      int best = -1;
+      for (int i = 0; i < PSGOPHER_WHERE_COUNT; i++)
+         if (left[i] && (best < 0 || left[i] > left[best]))
+            best = i;
+      if (best < 0)
+         break;
+      const int n = snprintf(list + used, sizeof(list) - used, "%s%s %u", used ? ", " : "", psgopher_where_name(best), left[best]);
+      if (n < 0 || (size_t)n >= sizeof(list) - used)
+         break;
+      used += (size_t)n;
+      left[best] = 0;
+   }
+   char cpu[96] = "; the emulation thread's CPU time is not readable here";
+   if (cpu_ns != UINT64_MAX)
+      snprintf(cpu, sizeof(cpu), "; the emulation thread used %.1f ms of CPU", (double)cpu_ns / 1e6);
+   say("stall over: %llu ms without a VI%s; where it was (%d ms samples): %s%s", (unsigned long long)total_ms, how, stall_period_ms,
+       list, cpu);
+}
+
+static void *stall_main(void *unused)
+{
+   (void)unused;
+   unsigned histogram[PSGOPHER_WHERE_COUNT] = { 0 };
+   int clock_resolved = 0;
+   clockid_t clock_id = 0;
+   uint64_t seen_vis = atomic_load(&stall_vis), seen_pauses = atomic_load(&where_pauses);
+   uint64_t since_ns = now_ns(CLOCK_MONOTONIC), cpu_then = UINT64_MAX;
+   bool stalled = false;
+   /* TSC ticks a ms, from a short sleep (the place's age is in ticks) */
+   double ticks_per_ms;
+   {
+      const uint64_t t0 = __rdtsc(), n0 = now_ns(CLOCK_MONOTONIC);
+      stall_sleep_ms(10);
+      ticks_per_ms = (double)(__rdtsc() - t0) / ((double)(now_ns(CLOCK_MONOTONIC) - n0) / 1e6);
+   }
+   while (atomic_load(&stall_running)) {
+      stall_sleep_ms(stall_period_ms);
+      const uint64_t vis = atomic_load(&stall_vis), pauses = atomic_load_explicit(&where_pauses, memory_order_relaxed);
+      const int place = atomic_load_explicit(&where_place, memory_order_relaxed);
+      const uint64_t now = now_ns(CLOCK_MONOTONIC);
+      /* a held game (paused, the quick menu) is no stall; before the first VI there is nothing to wait for */
+      const bool held = place == PSGOPHER_WHERE_PAUSED || pauses != seen_pauses;
+      if (vis != seen_vis || held || vis == 0) {
+         if (stalled) {
+            const uint64_t cpu_now = stall_emu_cpu(&clock_resolved, &clock_id);
+            stall_report((now - since_ns) / 1000000u, histogram,
+                         cpu_then == UINT64_MAX || cpu_now == UINT64_MAX ? UINT64_MAX : cpu_now - cpu_then,
+                         vis != seen_vis ? "" : " (ended by a pause)");
+         }
+         stalled = false;
+         memset(histogram, 0, sizeof(histogram));
+         seen_vis = vis, seen_pauses = pauses, since_ns = now;
+         cpu_then = stall_emu_cpu(&clock_resolved, &clock_id);
+         continue;
+      }
+      histogram[place >= 0 && place < PSGOPHER_WHERE_COUNT ? place : 0]++;
+      if (!stalled && (now - since_ns) / 1000000u >= (uint64_t)stall_threshold_ms) {
+         stalled = true;
+         const uint64_t ticks = __rdtsc() - atomic_load_explicit(&where_since_tsc, memory_order_relaxed);
+         say("stall: no VI for %d ms; the emulation thread in %s for %.0f ms", stall_threshold_ms, psgopher_where_name(place),
+             ticks_per_ms > 0 ? (double)ticks / ticks_per_ms : -1.0);
+      }
+   }
+   return NULL;
+}
+
+void psgopher_stall_start(void)
+{
+   if (stall_started)
+      return;
+   const char *e = getenv("PSGOPHER_SLOW_CAPTURE"); /* (Slow moments: logging only, on unless the setting is off) */
+   if (e && !strcmp(e, "0"))
+      return;
+   atomic_store(&stall_vis, 0);
+   atomic_store(&stall_emu_known, false);
+   atomic_store(&where_place, PSGOPHER_WHERE_CPU);
+   atomic_store(&where_pauses, 0);
+   atomic_store(&stall_running, true);
+   pthread_attr_t attributes;
+   pthread_attr_init(&attributes);
+   pthread_attr_setstacksize(&attributes, 128 << 10);
+   stall_started = pthread_create(&stall_thread, &attributes, stall_main, NULL) == 0;
+   pthread_attr_destroy(&attributes);
+   if (!stall_started)
+      atomic_store(&stall_running, false);
+}
+
+void psgopher_stall_stop(void)
+{
+   if (!stall_started)
+      return;
+   atomic_store(&stall_running, false);
+   pthread_join(stall_thread, NULL);
+   stall_started = false;
+}
+
 static uint64_t video_since_ns, video_count, video_total, video_underruns_at;
 
 /* a new game: its first frame is said again */
@@ -473,6 +656,7 @@ static void video_heartbeat(uint64_t end_ns)
 
 void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns)
 {
+   psgopher_stall_vi();
    if (w_state == W_OFF || w_state == W_DONE)
       video_heartbeat(end_ns); /* (no logging inside a benchmark window) */
    live_frame(begin_ns, end_ns);

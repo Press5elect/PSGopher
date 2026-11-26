@@ -50,7 +50,7 @@ index d7459cd..d0e7372 100644
  inherits = "release"
  debug = true
 diff --git a/build.rs b/build.rs
-index d4bd4a1..2b35144 100644
+index d4bd4a1..4b19cd4 100644
 --- a/build.rs
 +++ b/build.rs
 @@ -1,4 +1,22 @@
@@ -104,11 +104,19 @@ index d4bd4a1..2b35144 100644
      volk_build.flag(opt_flag);
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
+@@ -213,6 +231,7 @@ fn main() {
+         .allowlist_function("rdp_check_rdram")
+         .allowlist_function("rdp_state_size")
+         .allowlist_function("rdp_save_state")
++        .allowlist_function("rdp_probe_picture")
+         .allowlist_function("rdp_load_state")
+         .allowlist_function("rdp_idle")
+         .allowlist_function("rdp_set_fps")
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..f848dbb 100644
+index b741e0d..7412b39 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,75 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,88 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
@@ -161,6 +169,15 @@ index b741e0d..f848dbb 100644
 +static bool psgopher_gpu_timing;
 +static unsigned psgopher_gpu_frames;
 +#include <x86intrin.h>
++// where the emulation thread is, for the freeze watchdog (ps5/host/bench.c; the numbers are bench.h's)
++extern "C" int psgopher_where(int place);
++extern "C" void psgopher_where_restore(int previous);
++enum { PSGOPHER_WHERE_RDP_COMMANDS = 2, PSGOPHER_WHERE_RDP_FRAME = 3, PSGOPHER_WHERE_PRESENT = 7 };
++struct PsgopherWhere {
++  int previous;
++  explicit PsgopherWhere(int place) : previous(psgopher_where(place)) {}
++  ~PsgopherWhere() { psgopher_where_restore(previous); }
++};
 +struct PsgopherRdpTime {
 +  uint64_t begin = __rdtsc();
 +  ~PsgopherRdpTime() { psgopher_bench_rdp(__rdtsc() - begin); }
@@ -169,11 +186,15 @@ index b741e0d..f848dbb 100644
 +  int part;
 +  uint64_t begin = __rdtsc();
 +  uint64_t cpu = 0; // the thread's CPU clock at the start (commands and frame only, inside a window; else 0)
-+  explicit PsgopherRdpPart(int p) : part(p) {
++  int previous_place;
++  // (the sync part, 1, is a submit inside the commands: its own submits mark themselves)
++  explicit PsgopherRdpPart(int p) : part(p), previous_place(p == 1 ? -1 : psgopher_where(p == 0 ? PSGOPHER_WHERE_RDP_COMMANDS : PSGOPHER_WHERE_RDP_FRAME)) {
 +    if (p != 1)
 +      cpu = psgopher_bench_cpu_now();
 +  }
 +  ~PsgopherRdpPart() {
++    if (previous_place >= 0)
++      psgopher_where_restore(previous_place);
 +    psgopher_bench_rdp_part(part, __rdtsc() - begin);
 +    if (cpu)
 +      psgopher_bench_rdp_part_cpu(cpu);
@@ -184,7 +205,7 @@ index b741e0d..f848dbb 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -427,6 +496,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
+@@ -427,6 +509,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
      case USER_EVENT_FAST_FORWARD:
        callback.enable_speedlimiter = !callback.enable_speedlimiter;
        break;
@@ -221,7 +242,7 @@ index b741e0d..f848dbb 100644
      default:
        break;
      }
-@@ -496,6 +595,26 @@ static void rdp_new_processor() {
+@@ -496,6 +608,26 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -248,7 +269,7 @@ index b741e0d..f848dbb 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -582,6 +701,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -582,6 +714,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -258,7 +279,7 @@ index b741e0d..f848dbb 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -606,6 +728,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -606,6 +741,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
  
    callback.emu_running = true;
    callback.enable_speedlimiter = true;
@@ -275,7 +296,7 @@ index b741e0d..f848dbb 100644
    callback.paused = false;
    callback.save_state_slot = save_state_slot;
    crop_letterbox = false;
-@@ -642,6 +774,10 @@ void rdp_close() {
+@@ -642,6 +787,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -286,7 +307,7 @@ index b741e0d..f848dbb 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +869,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +882,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -579,7 +600,7 @@ index b741e0d..f848dbb 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +1205,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1218,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -601,7 +622,7 @@ index b741e0d..f848dbb 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +1255,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1268,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -618,7 +639,7 @@ index b741e0d..f848dbb 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,10 +1291,25 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,10 +1304,25 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -644,7 +665,7 @@ index b741e0d..f848dbb 100644
  }
  
  void rdp_set_vi_register(uint32_t reg, uint32_t value) {
-@@ -857,6 +1317,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
+@@ -857,6 +1330,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
  }
  
  void rdp_render_frame() {
@@ -655,17 +676,20 @@ index b741e0d..f848dbb 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1334,50 @@ void rdp_update_screen() {
+@@ -870,9 +1347,53 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
 +#endif
 +#ifdef PSGOPHER
 +    const uint64_t present_begin = psgopher_now_ns(), present_begin_tsc = __rdtsc();
++    {
++      PsgopherWhere where(PSGOPHER_WHERE_PRESENT);
  #endif
      wsi->end_frame();
      wsi->begin_frame();
 +#ifdef PSGOPHER
++    }
 +    psgopher_bench_window_present(present_begin_tsc, __rdtsc());
 +    psgopher_bench_present(present_begin, psgopher_now_ns());
 +    psgopher_quickmenu_check();
@@ -706,7 +730,7 @@ index b741e0d..f848dbb 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1409,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1425,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -722,7 +746,64 @@ index b741e0d..f848dbb 100644
  }
  
  size_t rdp_state_size() {
-@@ -1076,6 +1587,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -933,6 +1460,56 @@ void rdp_save_state(uint8_t *state) {
+          &snapshot, sizeof(snapshot));
+ }
+ 
++// PSGopher (PS5): a probe's picture. The picture the video interface outputs now, at the N64's own
++// resolution (the upscaling is averaged away again, no crop, no overlay), as 8-bit RGB for the
++// host's writer (ps5/host/probe_picture.h), which makes the PNG next to the save state. The video
++// interface's history is untouched (ScanoutOptions::snapshot). Returns 0 when the picture was
++// written, -1 when there is no frame to read or the host has no writer, -2 when the writer failed.
++#ifdef PSGOPHER
++extern "C" int psgopher_probe_picture_write(const char *path, int width, int height, const uint8_t *rgb)
++    __attribute__((weak));
++#endif
++int rdp_probe_picture(const char *path) {
++#ifdef PSGOPHER
++  if (!processor || !psgopher_probe_picture_write) {
++    psgopher_say("probes: picture not taken: %s", processor ? "no writer in this build" : "no video yet");
++    return -1;
++  }
++  const uint64_t begin = psgopher_now_ns();
++  RDP::ScanoutOptions options = {};
++  options.snapshot = true;
++  options.persist_frame_on_invalid_input = false;
++  options.blend_previous_frame = false;
++  options.upscale_deinterlacing = false;
++  for (unsigned scale = gfx_info.upscale; scale > 1; scale >>= 1)
++    options.downscale_steps++;
++
++  std::vector<RDP::RGBA> colors;
++  unsigned width = 0, height = 0;
++  processor->scanout_sync(colors, width, height, options);
++  if (!width || !height || colors.size() < size_t(width) * height) {
++    psgopher_say("probes: picture not taken: the video interface has no picture now (blank screen)");
++    return -1;
++  }
++  std::vector<uint8_t> rgb(size_t(width) * height * 3);
++  for (size_t i = 0; i < size_t(width) * height; i++) {
++    rgb[i * 3 + 0] = colors[i].r;
++    rgb[i * 3 + 1] = colors[i].g;
++    rgb[i * 3 + 2] = colors[i].b;
++  }
++  if (psgopher_probe_picture_write(path, int(width), int(height), rgb.data()) != 0) {
++    psgopher_say("probes: picture %ux%u not written (%s)", width, height, path);
++    return -2;
++  }
++  const uint64_t ns = psgopher_now_ns() - begin;
++  psgopher_say("probes: picture %ux%u written in %.1f ms", width, height, double(ns) / 1e6);
++  return 0;
++#else
++  (void)path;
++  return -1;
++#endif
++}
++
+ void rdp_load_state(GFX_INFO _gfx_info, const uint8_t *state,
+                     size_t state_size) {
+   gfx_info = _gfx_info;
+@@ -1076,6 +1653,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
@@ -735,7 +816,7 @@ index b741e0d..f848dbb 100644
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1233,8 +1750,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +1816,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -749,7 +830,7 @@ index b741e0d..f848dbb 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +1785,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +1851,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  
@@ -771,6 +852,18 @@ index b741e0d..f848dbb 100644
    if (display_fps) {
      FPS_DATA *data = new FPS_DATA;
      data->fps = fps;
+diff --git a/parallel-rdp/interface.hpp b/parallel-rdp/interface.hpp
+index 019469d..dab9d2d 100644
+--- a/parallel-rdp/interface.hpp
++++ b/parallel-rdp/interface.hpp
+@@ -66,6 +66,7 @@ void rdp_onscreen_message(const char *message, MESSAGE_LENGTH milliseconds);
+ void rdp_check_rdram(uint32_t address, uint32_t length, bool write);
+ size_t rdp_state_size();
+ void rdp_save_state(uint8_t *state);
++int rdp_probe_picture(const char *path);
+ void rdp_load_state(GFX_INFO _gfx_info, const uint8_t *state,
+                     size_t state_size);
+ void rdp_set_fps(uint32_t fps, uint32_t vis);
 diff --git a/parallel-rdp/psgopher_hdr_spirv.hpp b/parallel-rdp/psgopher_hdr_spirv.hpp
 new file mode 100644
 index 0000000..9ea3936
@@ -1076,6 +1169,47 @@ index 3994201..2260fc6 100644
              device.cart.cic_seed = CIC_SEED_5167;
              device.cart.sc64.cfg[device::cart::sc64::SC64_ROM_WRITE_ENABLE as usize] = 1;
          }
+diff --git a/src/device/controller.rs b/src/device/controller.rs
+index 714ed70..72331ec 100644
+--- a/src/device/controller.rs
++++ b/src/device/controller.rs
+@@ -55,6 +55,8 @@ pub fn process(
+             } else if let Some(playback) = &device.bk2_playback {
+                 playback.input(channel)
+             } else {
++                #[cfg(psgopher)]
++                let _where = crate::psgopher::where_in(crate::psgopher::place::INPUT);
+                 ui::input::get(&mut device.ui, channel)
+             };
+ 
+diff --git a/src/device/pi.rs b/src/device/pi.rs
+index dea4bf3..88abe58 100644
+--- a/src/device/pi.rs
++++ b/src/device/pi.rs
+@@ -68,7 +68,11 @@ fn dma_read(device: &mut device::Device) {
+     // check RDP before PI reads from RDRAM
+     ui::video::check_rdram_read(dram_addr, length);
+ 
++    #[cfg(psgopher)]
++    let place = crate::psgopher::where_in(crate::psgopher::place::PI_DMA);
+     let cycles = (handler.read)(device, cart_addr, dram_addr, length);
++    #[cfg(psgopher)]
++    drop(place);
+ 
+     device::events::create_event(device, device::events::EVENT_TYPE_PI, cycles);
+ 
+@@ -97,7 +101,11 @@ fn dma_write(device: &mut device::Device) {
+     // check RDP before PI writes to RDRAM
+     ui::video::check_rdram_write(dram_addr, length);
+ 
++    #[cfg(psgopher)]
++    let place = crate::psgopher::where_in(crate::psgopher::place::PI_DMA);
+     let cycles = (handler.write)(device, cart_addr, dram_addr, length);
++    #[cfg(psgopher)]
++    drop(place);
+ 
+     device::events::create_event(device, device::events::EVENT_TYPE_PI, cycles);
+ 
 diff --git a/src/device/rsp_interface.rs b/src/device/rsp_interface.rs
 index 2823aef..9a81814 100644
 --- a/src/device/rsp_interface.rs
@@ -1109,19 +1243,23 @@ index 593659b..3c0c51f 100644
  
      if !in_rollback {
 diff --git a/src/lib.rs b/src/lib.rs
-index 4e51a1b..7caeeb3 100644
+index 4e51a1b..b97e584 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
-@@ -3,6 +3,8 @@
+@@ -3,6 +3,12 @@
  mod cheats;
  mod device;
  mod netplay;
 +#[cfg(psgopher)]
 +mod psgopher;
++#[cfg(psgopher)]
++mod psgopher_http;
++#[cfg(psgopher)]
++mod psgopher_zip;
  mod retroachievements;
  mod savestates;
  mod ui;
-@@ -127,6 +129,11 @@ pub fn create_runtime() -> (tokio::sync::oneshot::Sender<()>, tokio::runtime::Ha
+@@ -127,6 +133,11 @@ pub fn create_runtime() -> (tokio::sync::oneshot::Sender<()>, tokio::runtime::Ha
      let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
  
      std::thread::spawn(move || {
@@ -1133,7 +1271,7 @@ index 4e51a1b..7caeeb3 100644
          let rt = tokio::runtime::Runtime::new().expect("Failed to build runtime");
          tx.send(rt.handle().clone()).unwrap();
          rt.block_on(close_rx).unwrap();
-@@ -227,7 +234,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+@@ -227,7 +238,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
                  }
              }
  
@@ -1149,10 +1287,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..f87ee09
+index 0000000..c8141ae
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,1218 @@
+@@ -0,0 +1,1260 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1362,26 +1500,68 @@ index 0000000..f87ee09
 +    fn psgopher_bench_rsp_end(cycles: u64);
 +    fn psgopher_bench_limiter_begin();
 +    fn psgopher_bench_limiter_end();
++    /// Where the emulation thread is, for the freeze watchdog (bench.c): the place entered returns
++    /// the one it was in
++    fn psgopher_where(place: i32) -> i32;
++    fn psgopher_where_restore(previous: i32);
 +}
++
++/// The places the freeze watchdog names (the numbers are ps5/host/bench.h's `psgopher_place`).
++pub mod place {
++    pub const RSP: i32 = 1;
++    pub const LIMITER: i32 = 8;
++    pub const AUDIO: i32 = 9;
++    pub const PI_DMA: i32 = 10;
++    pub const SAVE_DATA: i32 = 11;
++    pub const SAVE_STATE: i32 = 12;
++    pub const PAUSED: i32 = 13;
++    pub const INPUT: i32 = 15;
++    pub const ACHIEVEMENTS: i32 = 16;
++}
++
++/// A region the emulation thread may block in: the place is marked until this is dropped, then the
++/// enclosing one is back. Two relaxed stores and a TSC read; only the emulation thread makes one.
++pub struct Where(i32);
++
++#[inline]
++pub fn where_in(place: i32) -> Where {
++    Where(unsafe { psgopher_where(place) })
++}
++
++impl Drop for Where {
++    #[inline]
++    fn drop(&mut self) {
++        unsafe { psgopher_where_restore(self.0) }
++    }
++}
++
++/// The RSP's and the limiter's regions are a begin and an end call apart (they nest in nothing of
++/// their own kind, so one slot each keeps the place to return to).
++static RSP_RETURN: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
++static LIMITER_RETURN: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(0);
 +
 +/// An RSP task begins and ends (its time, less the RDP work started inside it, is the line's RSP).
 +#[inline]
 +pub fn rsp_begin() {
++    RSP_RETURN.store(unsafe { psgopher_where(place::RSP) }, std::sync::atomic::Ordering::Relaxed);
 +    unsafe { psgopher_bench_rsp_begin() }
 +}
 +#[inline]
 +pub fn rsp_end(cycles: u64) {
-+    unsafe { psgopher_bench_rsp_end(cycles) }
++    unsafe { psgopher_bench_rsp_end(cycles) };
++    unsafe { psgopher_where_restore(RSP_RETURN.load(std::sync::atomic::Ordering::Relaxed)) }
 +}
 +
 +/// The speed limiter's sleep (benchmark analysis B1: kept apart from the emulation's work).
 +#[inline]
 +pub fn limiter_begin() {
++    LIMITER_RETURN.store(unsafe { psgopher_where(place::LIMITER) }, std::sync::atomic::Ordering::Relaxed);
 +    unsafe { psgopher_bench_limiter_begin() }
 +}
 +#[inline]
 +pub fn limiter_end() {
-+    unsafe { psgopher_bench_limiter_end() }
++    unsafe { psgopher_bench_limiter_end() };
++    unsafe { psgopher_where_restore(LIMITER_RETURN.load(std::sync::atomic::Ordering::Relaxed)) }
 +}
 +
 +/// A line to the boot log through the title's logger.
@@ -2371,6 +2551,791 @@ index 0000000..f87ee09
 +    })
 +    .unwrap_or(-1)
 +}
+diff --git a/src/psgopher_http.rs b/src/psgopher_http.rs
+new file mode 100644
+index 0000000..895d20a
+--- /dev/null
++++ b/src/psgopher_http.rs
+@@ -0,0 +1,518 @@
++//! PSGopher (PS5): HTTPS GET for the updater (ps5/host/update_net.cpp): to a buffer or to a file,
++//! with redirects. Added by PSGopher's ps5.patch.
++//!
++//! The same way `psgopher::https_get` reaches a server (Tokio's sockets are refused on the
++//! console, so this is rustls over a blocking IPv4 socket; the roots are webpki-roots', the console
++//! has no store), but streaming: a release's ZIP is tens of megabytes and goes to its file as it
++//! comes. GitHub serves a release's file from another host (objects.githubusercontent.com,
++//! release-assets.githubusercontent.com): a redirect is followed, to HTTPS only, at most
++//! `MAX_REDIRECTS` times, and nothing but the status, the location, the length and the way the
++//! body is framed is read from the head.
++
++use std::ffi::{c_char, c_void};
++use std::io::{Read, Write};
++use std::time::{Duration, Instant};
++
++const MAX_REDIRECTS: usize = 5;
++const MAX_HEAD: usize = 32 << 10;
++/// A transfer that brings nothing for this long is stopped.
++const STALL: Duration = Duration::from_secs(30);
++
++/// How a request ended without an answer.
++#[derive(Debug, PartialEq)]
++enum Failure {
++    Network,
++    /// The caller's callback said stop.
++    Stopped,
++    /// The body is longer than the caller allows.
++    TooLarge,
++}
++
++/// What the receiver of a body says after each piece.
++#[derive(PartialEq)]
++enum Next {
++    Go,
++    Stop,
++    TooLarge,
++}
++
++fn log(host: &str, what: &str, why: &str) {
++    crate::psgopher::log_line(&format!("update: net: {host}: {what}: {why}"));
++}
++
++fn tls_config() -> std::sync::Arc<rustls::ClientConfig> {
++    crate::ui::install_default_crypto_provider();
++    static CONFIG: std::sync::OnceLock<std::sync::Arc<rustls::ClientConfig>> = std::sync::OnceLock::new();
++    CONFIG
++        .get_or_init(|| {
++            let roots = rustls::RootCertStore { roots: webpki_roots::TLS_SERVER_ROOTS.to_vec() };
++            std::sync::Arc::new(rustls::ClientConfig::builder().with_root_certificates(roots).with_no_client_auth())
++        })
++        .clone()
++}
++
++/// "https://host[:port]/path" into its parts. None for any other scheme, an empty host, or a
++/// character that could end the request line early.
++fn split_url(url: &str) -> Option<(String, u16, String)> {
++    let rest = url.strip_prefix("https://")?;
++    if url.bytes().any(|b| b <= 0x20 || b == 0x7f) {
++        return None;
++    }
++    let (authority, path) = match rest.find(['/', '?', '#']) {
++        Some(at) if rest.as_bytes()[at] == b'/' => (&rest[..at], rest[at..].to_string()),
++        Some(at) => (&rest[..at], format!("/{}", &rest[at..])),
++        None => (rest, "/".to_string()),
++    };
++    let path = path.split('#').next().unwrap_or("/").to_string();
++    if authority.contains('@') {
++        return None;
++    }
++    let (host, port) = match authority.rsplit_once(':') {
++        Some((host, port)) => (host, port.parse::<u16>().ok()?),
++        None => (authority, 443),
++    };
++    if host.is_empty() || port == 0 {
++        return None;
++    }
++    Some((host.to_string(), port, path))
++}
++
++/// Where a redirect leads, from the address it came from. HTTPS only.
++fn resolve(from_host: &str, from_port: u16, location: &str) -> Option<String> {
++    if location.starts_with("https://") {
++        Some(location.to_string())
++    } else if location.starts_with('/') && !location.starts_with("//") {
++        Some(if from_port == 443 {
++            format!("https://{from_host}{location}")
++        } else {
++            format!("https://{from_host}:{from_port}{location}")
++        })
++    } else {
++        None
++    }
++}
++
++struct Head {
++    status: u16,
++    location: Option<String>,
++    length: Option<u64>,
++    chunked: bool,
++}
++
++fn parse_head(raw: &[u8]) -> Option<Head> {
++    let text = String::from_utf8_lossy(raw);
++    let mut lines = text.split("\r\n");
++    let status: u16 = lines.next()?.split_whitespace().nth(1)?.parse().ok()?;
++    let mut head = Head { status, location: None, length: None, chunked: false };
++    for line in lines {
++        let Some((name, value)) = line.split_once(':') else { continue };
++        let value = value.trim();
++        match name.trim().to_ascii_lowercase().as_str() {
++            "location" => head.location = Some(value.to_string()),
++            "content-length" => head.length = value.parse().ok(),
++            "transfer-encoding" => head.chunked = value.to_ascii_lowercase().contains("chunked"),
++            _ => {}
++        }
++    }
++    Some(head)
++}
++
++/// Chunked transfer coding, streamed.
++#[derive(Default)]
++struct Chunks {
++    line: Vec<u8>,
++    left: usize,
++    state: ChunkState,
++    done: bool,
++}
++
++#[derive(Default, PartialEq, Clone, Copy)]
++enum ChunkState {
++    #[default]
++    Size,
++    Data,
++    DataEnd,
++    Trailer,
++}
++
++impl Chunks {
++    /// Feeds raw bytes; the plain ones go to `out`. False: the framing is wrong or `out` refused.
++    fn feed(&mut self, mut raw: &[u8], out: &mut dyn FnMut(&[u8]) -> Next) -> Result<(), Failure> {
++        while !raw.is_empty() && !self.done {
++            match self.state {
++                ChunkState::Size | ChunkState::Trailer | ChunkState::DataEnd => {
++                    let b = raw[0];
++                    raw = &raw[1..];
++                    if b != b'\n' {
++                        if self.line.len() > 4096 {
++                            return Err(Failure::Network);
++                        }
++                        self.line.push(b);
++                        continue;
++                    }
++                    let line = std::mem::take(&mut self.line);
++                    let line = String::from_utf8_lossy(&line).trim().to_string();
++                    match self.state {
++                        ChunkState::Size => {
++                            let size = line.split(';').next().unwrap_or("").trim();
++                            let size = usize::from_str_radix(size, 16).map_err(|_| Failure::Network)?;
++                            if size == 0 {
++                                self.state = ChunkState::Trailer;
++                            } else {
++                                self.left = size;
++                                self.state = ChunkState::Data;
++                            }
++                        }
++                        ChunkState::DataEnd => self.state = ChunkState::Size,
++                        // (trailer lines are ignored; the empty line ends the body)
++                        _ => {
++                            if line.is_empty() {
++                                self.done = true;
++                            }
++                        }
++                    }
++                }
++                ChunkState::Data => {
++                    let n = self.left.min(raw.len());
++                    match out(&raw[..n]) {
++                        Next::Go => {}
++                        Next::Stop => return Err(Failure::Stopped),
++                        Next::TooLarge => return Err(Failure::TooLarge),
++                    }
++                    raw = &raw[n..];
++                    self.left -= n;
++                    if self.left == 0 {
++                        self.state = ChunkState::DataEnd;
++                    }
++                }
++            }
++        }
++        Ok(())
++    }
++}
++
++/// How the final answer's body is framed, and how much of it came.
++struct Body {
++    chunked: bool,
++    length: Option<u64>,
++    got: u64,
++    chunks: Chunks,
++    empty: bool,
++}
++
++impl Body {
++    fn complete(&self) -> bool {
++        if self.chunked { self.chunks.done } else { self.length.is_some_and(|l| self.got >= l) }
++    }
++
++    fn feed(&mut self, raw: &[u8], sink: &mut dyn FnMut(&[u8]) -> Next) -> Result<(), Failure> {
++        if raw.is_empty() {
++            return Ok(());
++        }
++        self.empty = false;
++        if self.chunked {
++            return self.chunks.feed(raw, sink);
++        }
++        let take = match self.length {
++            Some(l) => l.saturating_sub(self.got).min(raw.len() as u64) as usize,
++            None => raw.len(),
++        };
++        self.got += take as u64;
++        match sink(&raw[..take]) {
++            Next::Go => Ok(()),
++            Next::Stop => Err(Failure::Stopped),
++            Next::TooLarge => Err(Failure::TooLarge),
++        }
++    }
++}
++
++/// GET `url`, redirects followed. For the final answer `receive(status, length, piece)` is called
++/// with each piece of its body (and once with an empty piece when the body is empty), whatever
++/// the status. Returns the status.
++fn fetch(
++    url: &str,
++    accept: &str,
++    total: Option<Duration>,
++    receive: &mut dyn FnMut(u16, Option<u64>, &[u8]) -> Next,
++) -> Result<u16, Failure> {
++    let started = Instant::now();
++    let mut address = url.to_string();
++    for _ in 0..=MAX_REDIRECTS {
++        let Some((host, port, path)) = split_url(&address) else {
++            log("-", "address", "not an https address");
++            return Err(Failure::Network);
++        };
++        let Ok(name) = rustls::pki_types::ServerName::try_from(host.clone()) else {
++            log(&host, "name", "not a host name");
++            return Err(Failure::Network);
++        };
++        let target = match std::net::ToSocketAddrs::to_socket_addrs(&(host.as_str(), port)) {
++            Ok(mut list) => match list.find(|a| a.is_ipv4()) {
++                Some(a) => a,
++                None => {
++                    log(&host, "address", "none for IPv4");
++                    return Err(Failure::Network);
++                }
++            },
++            Err(e) => {
++                log(&host, "address", &e.to_string());
++                return Err(Failure::Network);
++            }
++        };
++        let socket = match std::net::TcpStream::connect_timeout(&target, Duration::from_secs(10)) {
++            Ok(s) => s,
++            Err(e) => {
++                log(&host, "connect", &e.to_string());
++                return Err(Failure::Network);
++            }
++        };
++        let wait = total.map_or(STALL, |t| t.min(STALL));
++        let _ = socket.set_read_timeout(Some(wait));
++        let _ = socket.set_write_timeout(Some(wait));
++        let connection = match rustls::ClientConnection::new(tls_config(), name) {
++            Ok(c) => c,
++            Err(e) => {
++                log(&host, "TLS", &e.to_string());
++                return Err(Failure::Network);
++            }
++        };
++        let mut tls = rustls::StreamOwned::new(connection, socket);
++        let request = format!(
++            "GET {path} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: PSGopher (PlayStation 5 homebrew)\r\nAccept: {accept}\r\nAccept-Encoding: identity\r\nConnection: close\r\n\r\n"
++        );
++        if let Err(e) = tls.write_all(request.as_bytes()) {
++            log(&host, "request", &e.to_string());
++            return Err(Failure::Network);
++        }
++
++        // the head, and whatever of the body came with it
++        let mut data: Vec<u8> = Vec::new();
++        let mut chunk = vec![0u8; 64 << 10];
++        let end = loop {
++            if let Some(at) = data.windows(4).position(|w| w == b"\r\n\r\n") {
++                break at;
++            }
++            if data.len() > MAX_HEAD {
++                log(&host, "answer", "head too long");
++                return Err(Failure::Network);
++            }
++            match tls.read(&mut chunk) {
++                Ok(0) => {
++                    log(&host, "answer", "no HTTP head");
++                    return Err(Failure::Network);
++                }
++                Ok(n) => data.extend_from_slice(&chunk[..n]),
++                Err(e) => {
++                    log(&host, "answer", &e.to_string());
++                    return Err(Failure::Network);
++                }
++            }
++        };
++        let Some(head) = parse_head(&data[..end]) else {
++            log(&host, "answer", "no status");
++            return Err(Failure::Network);
++        };
++        let body_start = data[end + 4..].to_vec();
++        drop(data);
++
++        if matches!(head.status, 301 | 302 | 303 | 307 | 308) {
++            let Some(next) = head.location.as_deref().and_then(|l| resolve(&host, port, l)) else {
++                log(&host, "redirect", "to nowhere, or not to https");
++                return Err(Failure::Network);
++            };
++            address = next;
++            continue;
++        }
++
++        // the body
++        let status = head.status;
++        let mut body = Body { chunked: head.chunked, length: head.length, got: 0, chunks: Chunks::default(), empty: true };
++        let mut sink = |piece: &[u8]| receive(status, head.length, piece);
++        body.feed(&body_start, &mut sink)?;
++        while !body.complete() {
++            if total.is_some_and(|t| started.elapsed() > t) {
++                log(&host, "answer", "too slow");
++                return Err(Failure::Network);
++            }
++            match tls.read(&mut chunk) {
++                Ok(0) => break,
++                Ok(n) => body.feed(&chunk[..n], &mut sink)?,
++                // (a server closing without TLS's close_notify: what came is checked below)
++                Err(e) if e.kind() == std::io::ErrorKind::UnexpectedEof => break,
++                Err(e) => {
++                    log(&host, "answer", &e.to_string());
++                    return Err(Failure::Network);
++                }
++            }
++        }
++        if !body.complete() && (body.chunked || body.length.is_some()) {
++            log(&host, "answer", "cut short");
++            return Err(Failure::Network);
++        }
++        if body.empty && sink(&[]) != Next::Go {
++            return Err(Failure::Stopped);
++        }
++        return Ok(status);
++    }
++    log("-", "redirect", "too many");
++    Err(Failure::Network)
++}
++
++fn text(pointer: *const c_char) -> String {
++    if pointer.is_null() {
++        return String::new();
++    }
++    unsafe { std::ffi::CStr::from_ptr(pointer) }.to_string_lossy().into_owned()
++}
++
++/// GET `url` into `buffer` (`capacity` bytes) and its length into `length`. Returns the HTTP
++/// status (the body is kept whatever it is), -1 when the network failed, -3 when the body is
++/// longer than `capacity`. `seconds`: how long it may take in all.
++///
++/// # Safety
++/// `url` and `accept` are NUL-terminated; `buffer` holds `capacity` bytes; `length` is writable.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_http_get(
++    url: *const c_char,
++    accept: *const c_char,
++    seconds: u32,
++    buffer: *mut u8,
++    capacity: usize,
++    length: *mut usize,
++) -> i32 {
++    if buffer.is_null() || length.is_null() {
++        return -1;
++    }
++    unsafe { *length = 0 };
++    let mut filled = 0usize;
++    let result = fetch(&text(url), &text(accept), Some(Duration::from_secs(u64::from(seconds.max(1)))), &mut |_, _, piece| {
++        if filled + piece.len() > capacity {
++            return Next::TooLarge;
++        }
++        unsafe { std::ptr::copy_nonoverlapping(piece.as_ptr(), buffer.add(filled), piece.len()) };
++        filled += piece.len();
++        Next::Go
++    });
++    unsafe { *length = filled };
++    match result {
++        Ok(status) => i32::from(status),
++        Err(Failure::TooLarge) => -3,
++        Err(_) => -1,
++    }
++}
++
++/// Called as a download comes: bytes so far, the whole length (0 when unknown), the caller's own
++/// pointer. Returns 0 to stop.
++pub type Progress = Option<unsafe extern "C" fn(done: u64, total: u64, user: *mut c_void) -> i32>;
++
++/// GET `url` into the file `path` (created or truncated, only when the answer is 200; written in
++/// full and synced), no more than `limit` bytes. Returns the HTTP status, -1 when the network or
++/// the file failed, -2 when `progress` stopped it, -3 when it is longer than `limit`. A file of
++/// a failed or stopped download is removed.
++///
++/// # Safety
++/// `url` and `path` are NUL-terminated; `user` is whatever `progress` expects.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_http_download(
++    url: *const c_char,
++    path: *const c_char,
++    limit: u64,
++    progress: Progress,
++    user: *mut c_void,
++) -> i32 {
++    let path = text(path);
++    let mut file: Option<std::fs::File> = None;
++    let mut written: u64 = 0;
++    let mut file_failed = false;
++    let mut last_report = Instant::now() - Duration::from_secs(1);
++    let result = fetch(&text(url), "application/octet-stream", None, &mut |status, length, piece| {
++        if status != 200 {
++            return Next::Go; // (the body of an error is not kept)
++        }
++        if file.is_none() {
++            match std::fs::File::create(&path) {
++                Ok(f) => file = Some(f),
++                Err(e) => {
++                    log("-", "file", &e.to_string());
++                    file_failed = true;
++                    return Next::Stop;
++                }
++            }
++        }
++        if limit != 0 && written + piece.len() as u64 > limit {
++            return Next::TooLarge;
++        }
++        if let Some(f) = file.as_mut() {
++            if let Err(e) = f.write_all(piece) {
++                log("-", "file", &e.to_string());
++                file_failed = true;
++                return Next::Stop;
++            }
++        }
++        written += piece.len() as u64;
++        if let Some(report) = progress {
++            if last_report.elapsed() >= Duration::from_millis(100) {
++                last_report = Instant::now();
++                if unsafe { report(written, length.unwrap_or(0), user) } == 0 {
++                    return Next::Stop;
++                }
++            }
++        }
++        Next::Go
++    });
++    let mut synced = true;
++    if let Some(f) = file.as_ref() {
++        synced = f.sync_all().is_ok();
++    }
++    drop(file);
++    let code = match result {
++        Ok(200) if synced && !file_failed => {
++            if let Some(report) = progress {
++                unsafe { report(written, written, user) };
++            }
++            200
++        }
++        Ok(200) => -1,
++        Ok(status) => i32::from(status),
++        Err(Failure::Stopped) if !file_failed => -2,
++        Err(Failure::TooLarge) => -3,
++        Err(_) => -1,
++    };
++    if code != 200 {
++        let _ = std::fs::remove_file(&path);
++    }
++    code
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++
++    #[test]
++    fn urls() {
++        assert_eq!(split_url("https://a.example/x?y=1"), Some(("a.example".into(), 443, "/x?y=1".into())));
++        assert_eq!(split_url("https://a.example:8443"), Some(("a.example".into(), 8443, "/".into())));
++        assert_eq!(split_url("http://a.example/"), None);
++        assert_eq!(split_url("https://u@a.example/"), None);
++        assert_eq!(split_url("https://a.example/a b"), None);
++        assert_eq!(resolve("h", 443, "/p"), Some("https://h/p".into()));
++        assert_eq!(resolve("h", 443, "http://x/"), None);
++        assert_eq!(resolve("h", 443, "//x/"), None);
++    }
++
++    #[test]
++    fn chunks() {
++        let mut got = Vec::new();
++        let mut c = Chunks::default();
++        let body = b"4\r\nWiki\r\n5;x=1\r\npedia\r\n0\r\n\r\n";
++        for piece in body.chunks(3) {
++            c.feed(piece, &mut |p| {
++                got.extend_from_slice(p);
++                Next::Go
++            })
++            .unwrap();
++        }
++        assert!(c.done);
++        assert_eq!(got, b"Wikipedia");
++    }
++}
+diff --git a/src/psgopher_zip.rs b/src/psgopher_zip.rs
+new file mode 100644
+index 0000000..1cdd5a6
+--- /dev/null
++++ b/src/psgopher_zip.rs
+@@ -0,0 +1,219 @@
++//! PSGopher (PS5): a ZIP archive for the updater (ps5/host/update.cpp), through the `zip` crate
++//! Gopher64 already links. Added by PSGopher's ps5.patch.
++//!
++//! The updater lists every entry before it unpacks any (names, sizes, kinds, encryption, methods),
++//! then reads the program's own files one at a time in blocks. Nothing here touches the disk but
++//! the archive itself: the C++ side decides where a file goes.
++//!
++//! This file uses only `std` and `zip`, so the updater's host test builds it alone
++//! (ps5/tests/update_zip).
++
++use std::ffi::{c_char, c_int, CStr};
++use std::fs::File;
++use zip::read::ZipFile;
++use zip::{CompressionMethod, ZipArchive};
++
++/// An open archive.
++pub struct PsgopherZip {
++    archive: ZipArchive<File>,
++    reading: bool,
++}
++
++/// One entry being read. Borrows its archive's reader for as long as it is open (the C++ side
++/// closes it before the archive, and has one open at a time: `psgopher_zip_read_open` refuses a
++/// second).
++pub struct PsgopherZipReader {
++    // (dropped before `zip` is used again)
++    file: Option<ZipFile<'static, File>>,
++    zip: *mut PsgopherZip,
++}
++
++/// What `psgopher_zip_entry` tells about an entry (ps5/host/update_zip.h repeats it).
++#[repr(C)]
++#[derive(Default)]
++pub struct PsgopherZipEntry {
++    /// The entry's size once unpacked.
++    pub size: u64,
++    /// The Unix mode in the entry's external attributes, when the archive says it was made on Unix
++    /// (flag 1); else 0.
++    pub unix_mode: u32,
++    /// 1: `unix_mode` is the archive's; 2: encrypted; 4: packed in a way this cannot read
++    /// (anything but stored and deflated).
++    pub flags: u32,
++}
++
++const FLAG_UNIX_MODE: u32 = 1;
++const FLAG_ENCRYPTED: u32 = 2;
++const FLAG_UNREADABLE_METHOD: u32 = 4;
++
++fn put_text(text: &str, buffer: *mut c_char, size: usize) {
++    if buffer.is_null() || size == 0 {
++        return;
++    }
++    let bytes = text.as_bytes();
++    let n = bytes.len().min(size - 1);
++    // SAFETY: the caller's buffer holds `size` bytes.
++    unsafe {
++        std::ptr::copy_nonoverlapping(bytes.as_ptr(), buffer.cast::<u8>(), n);
++        *buffer.add(n) = 0;
++    }
++}
++
++/// Opens a ZIP. Null when it cannot be read; `error` (`error_size` bytes) then says why.
++///
++/// # Safety
++/// `path` is a NUL-terminated string; `error` has room for `error_size` bytes (or is null).
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_open(path: *const c_char, error: *mut c_char, error_size: usize) -> *mut PsgopherZip {
++    if path.is_null() {
++        put_text("no path", error, error_size);
++        return std::ptr::null_mut();
++    }
++    // SAFETY: NUL-terminated by the caller.
++    let path = unsafe { CStr::from_ptr(path) }.to_string_lossy().into_owned();
++    let file = match File::open(&path) {
++        Ok(file) => file,
++        Err(e) => {
++            put_text(&e.to_string(), error, error_size);
++            return std::ptr::null_mut();
++        }
++    };
++    match ZipArchive::new(file) {
++        Ok(archive) => Box::into_raw(Box::new(PsgopherZip { archive, reading: false })),
++        Err(e) => {
++            put_text(&e.to_string(), error, error_size);
++            std::ptr::null_mut()
++        }
++    }
++}
++
++/// The number of entries.
++///
++/// # Safety
++/// `zip` is from `psgopher_zip_open` and not closed.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_count(zip: *const PsgopherZip) -> i64 {
++    if zip.is_null() {
++        return -1;
++    }
++    unsafe { (*zip).archive.len() as i64 }
++}
++
++/// An entry's name (raw bytes, not NUL-ended; its length is returned, and `name` holds at most
++/// `name_size` of it) and facts. Negative: no such entry.
++///
++/// # Safety
++/// `zip` is open; `name` has room for `name_size` bytes; `entry` is writable.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_entry(
++    zip: *const PsgopherZip,
++    index: u64,
++    name: *mut u8,
++    name_size: usize,
++    entry: *mut PsgopherZipEntry,
++) -> i64 {
++    if zip.is_null() || entry.is_null() {
++        return -1;
++    }
++    let zip = unsafe { &*zip };
++    let Ok(data) = zip.archive.by_index_data(index as usize) else {
++        return -1;
++    };
++    let raw = data.name_raw();
++    if !name.is_null() {
++        let n = raw.len().min(name_size);
++        unsafe { std::ptr::copy_nonoverlapping(raw.as_ptr(), name, n) };
++    }
++    let mut facts = PsgopherZipEntry { size: data.size(), ..Default::default() };
++    if data.system() == zip::System::Unix {
++        facts.flags |= FLAG_UNIX_MODE;
++        facts.unix_mode = data.external_attributes() >> 16;
++    }
++    if data.encrypted() {
++        facts.flags |= FLAG_ENCRYPTED;
++    }
++    if !matches!(data.compression(), CompressionMethod::Stored | CompressionMethod::Deflated) {
++        facts.flags |= FLAG_UNREADABLE_METHOD;
++    }
++    unsafe { *entry = facts };
++    raw.len() as i64
++}
++
++/// Starts reading an entry's contents (unpacked, its CRC checked at the end). Null: it cannot be
++/// read, or another entry of this archive is being read.
++///
++/// # Safety
++/// `zip` is open and outlives the reader.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_read_open(zip: *mut PsgopherZip, index: u64) -> *mut PsgopherZipReader {
++    if zip.is_null() {
++        return std::ptr::null_mut();
++    }
++    let z = unsafe { &mut *zip };
++    if z.reading {
++        return std::ptr::null_mut();
++    }
++    let Ok(file) = z.archive.by_index(index as usize) else {
++        return std::ptr::null_mut();
++    };
++    // SAFETY: the file borrows the archive, which sits in a Box that is not moved or freed while
++    // `reading` is set (`psgopher_zip_close` refuses while it is).
++    let file: ZipFile<'static, File> = unsafe { std::mem::transmute(file) };
++    z.reading = true;
++    Box::into_raw(Box::new(PsgopherZipReader { file: Some(file), zip }))
++}
++
++/// Up to `size` bytes of the entry: how many (0 at its end), or -1 when it is damaged.
++///
++/// # Safety
++/// `reader` is open; `buffer` holds `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_read(reader: *mut PsgopherZipReader, buffer: *mut u8, size: usize) -> i64 {
++    use std::io::Read;
++    if reader.is_null() || buffer.is_null() {
++        return -1;
++    }
++    let reader = unsafe { &mut *reader };
++    let Some(file) = reader.file.as_mut() else {
++        return -1;
++    };
++    let out = unsafe { std::slice::from_raw_parts_mut(buffer, size) };
++    loop {
++        match file.read(out) {
++            Ok(n) => return n as i64,
++            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
++            Err(_) => return -1,
++        }
++    }
++}
++
++/// Ends the reading of an entry.
++///
++/// # Safety
++/// `reader` is from `psgopher_zip_read_open`, closed once.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_read_close(reader: *mut PsgopherZipReader) -> c_int {
++    if reader.is_null() {
++        return -1;
++    }
++    let mut reader = unsafe { Box::from_raw(reader) };
++    reader.file = None;
++    unsafe { (*reader.zip).reading = false };
++    0
++}
++
++/// Closes the archive (not while an entry of it is being read: nothing happens then, -1).
++///
++/// # Safety
++/// `zip` is from `psgopher_zip_open`, closed once.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_zip_close(zip: *mut PsgopherZip) -> c_int {
++    if zip.is_null() {
++        return -1;
++    }
++    if unsafe { (*zip).reading } {
++        return -1;
++    }
++    drop(unsafe { Box::from_raw(zip) });
++    0
++}
+diff --git a/src/retroachievements.rs b/src/retroachievements.rs
+index 5186b28..4ad325b 100644
+--- a/src/retroachievements.rs
++++ b/src/retroachievements.rs
+@@ -217,6 +217,8 @@ pub fn set_rdram(rdram: *const u8, rdram_size: usize) {
+ }
+ 
+ pub fn do_frame() {
++    #[cfg(psgopher)]
++    let _where = crate::psgopher::where_in(crate::psgopher::place::ACHIEVEMENTS);
+     unsafe { ra_do_frame() };
+ }
+ 
+diff --git a/src/savestates.rs b/src/savestates.rs
+index e061f62..f62bff5 100644
+--- a/src/savestates.rs
++++ b/src/savestates.rs
+@@ -122,6 +122,8 @@ impl SavestateData {
+ }
+ 
+ pub fn process_savestates(device: &mut device::Device) {
++    #[cfg(psgopher)]
++    let _where = crate::psgopher::where_in(crate::psgopher::place::SAVE_STATE);
+     let save_rewind = if device.netplay.is_none()
+         && device.ui.config.emulation.rewind
+         && device.vi.elapsed_time - device.ui.savestate.last_rewind_saved > 1.0
+@@ -180,6 +182,9 @@ pub fn create_savestate(device: &mut device::Device, rewind: bool, rewind_frame:
+     }
+ 
+     let save_path = device.ui.storage.paths.savestate_file_path.clone();
++    // PSGopher (PS5): the picture of this moment next to the probe, read once now, while the game waits
++    #[cfg(psgopher)]
++    ui::video::probe_picture(&save_path);
+     let save_state_slot = device.ui.storage.save_state_slot;
+ 
+     tokio::spawn(async move {
 diff --git a/src/ui.rs b/src/ui.rs
 index d23f148..e51f562 100644
 --- a/src/ui.rs
@@ -2389,7 +3354,7 @@ index d23f148..e51f562 100644
          let exe_path = std::env::current_exe().unwrap();
          let portable_dir = exe_path.parent();
 diff --git a/src/ui/audio.rs b/src/ui/audio.rs
-index 6e73c6d..c52448b 100644
+index 6e73c6d..ac29a2a 100644
 --- a/src/ui/audio.rs
 +++ b/src/ui/audio.rs
 @@ -6,6 +6,23 @@ const BYTES_PER_FRAME: usize = 4; // Stereo, signed 16-bit samples.
@@ -2437,7 +3402,16 @@ index 6e73c6d..c52448b 100644
      device.ui.audio.frequency_ratio = 1.0;
      let game_audio_spec = sdl3_sys::audio::SDL_AudioSpec {
          format: sdl3_sys::audio::SDL_AUDIO_S16LE,
-@@ -159,7 +181,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
+@@ -142,6 +164,8 @@ pub fn play_audio(device: &mut device::Device, dram_addr: usize, length: u64) {
+         i += 2;
+     }
+ 
++    #[cfg(psgopher)]
++    let _where = crate::psgopher::where_in(crate::psgopher::place::AUDIO);
+     queue_audio(
+         audio,
+         device.ai.freq,
+@@ -159,7 +183,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
  
      let incoming = std::mem::size_of_val(audio.primary_buffer.as_slice());
      let target_bytes =
@@ -2446,7 +3420,7 @@ index 6e73c6d..c52448b 100644
      // The incoming block contributes to the recovery reserve. Only pad its
      // shortfall, so a full block can restart playback without added silence.
      let padding = target_bytes.saturating_sub(incoming);
-@@ -182,7 +204,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
+@@ -182,7 +206,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
              let starved = available == 0;
              // Test the existing backlog: a large arriving DMA block alone is
              // not evidence that playback has fallen behind.
@@ -2455,7 +3429,7 @@ index 6e73c6d..c52448b 100644
              if overrun {
                  // Prefer current game audio over playing an increasingly stale
                  // backlog (particularly after fast-forward or a host stall).
-@@ -204,7 +226,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
+@@ -204,7 +228,7 @@ fn queue_audio(audio: &mut ui::Audio, frequency: u64, frame_time: f64, speed_lim
                  frequency_ratio(
                      audio.frequency_ratio,
                      if overrun {
@@ -2527,7 +3501,7 @@ index 34c6d92..2311b8c 100644
      } else {
          let mut pak_change_pressed = false;
 diff --git a/src/ui/storage.rs b/src/ui/storage.rs
-index 0fe2469..9625778 100644
+index 0fe2469..a1d9dfc 100644
 --- a/src/ui/storage.rs
 +++ b/src/ui/storage.rs
 @@ -98,7 +98,7 @@ impl Saves {
@@ -2549,3 +3523,48 @@ index 0fe2469..9625778 100644
  }
  
  pub fn load_saves(ui: &mut ui::Ui, netplay: &mut Option<netplay::Netplay>, cic_seed: u8) {
+@@ -476,6 +479,8 @@ pub fn write_saves(device: &mut device::Device) {
+ }
+ 
+ pub fn save_event(device: &mut device::Device) {
++    #[cfg(psgopher)]
++    let _where = crate::psgopher::where_in(crate::psgopher::place::SAVE_DATA);
+     write_saves(device);
+ }
+ 
+diff --git a/src/ui/video.rs b/src/ui/video.rs
+index 2d58833..ca4c2bf 100644
+--- a/src/ui/video.rs
++++ b/src/ui/video.rs
+@@ -194,6 +194,22 @@ pub fn save_state(rdp_state: *mut u8) {
+     unsafe { rdp_save_state(rdp_state) }
+ }
+ 
++/// PSGopher (PS5): the picture of this moment next to a probe (`<state file>.png`, the N64's own
++/// resolution, written by the host: docs/dev/architecture.md, "Probe pictures"). Without a picture
++/// to take, the picture an older probe left in that file is removed: it would show another moment.
++#[cfg(psgopher)]
++pub fn probe_picture(state_file: &std::path::Path) {
++    let mut png = state_file.as_os_str().to_owned();
++    png.push(".png");
++    let png = std::path::PathBuf::from(png);
++    let taken = std::ffi::CString::new(png.to_string_lossy().into_owned())
++        .map(|path| unsafe { rdp_probe_picture(path.as_ptr()) } == 0)
++        .unwrap_or(false);
++    if !taken {
++        let _ = std::fs::remove_file(&png);
++    }
++}
++
+ pub fn idle() {
+     unsafe { rdp_idle() }
+ }
+@@ -209,6 +225,8 @@ pub fn load_state(device: &mut device::Device, rdp_state: *const u8, rdp_state_l
+ }
+ 
+ pub fn pause_loop(ui: &mut ui::Ui, frame_time: f64) {
++    #[cfg(psgopher)]
++    let _where = crate::psgopher::where_in(crate::psgopher::place::PAUSED);
+     let mut paused = true;
+     let mut frame_advance = false;
+     while paused && !frame_advance {

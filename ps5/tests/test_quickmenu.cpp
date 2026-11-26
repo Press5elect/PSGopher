@@ -66,6 +66,8 @@ extern "C" double now_seconds(void)
 {
    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
 }
+extern "C" int psgopher_where(int) { return 0; } /* (the freeze watchdog's mark: bench.c) */
+extern "C" void psgopher_where_restore(int) {}
 extern "C" void psgopher_live_read(struct psgopher_live *out)
 {
    *out = {};

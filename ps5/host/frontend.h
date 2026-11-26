@@ -32,6 +32,7 @@ extern "C" {
 #include "imgui.h"
 #include "library.h"
 #include "title_settings.h"
+#include "update.h"
 
 namespace psgopher {
 
@@ -73,6 +74,11 @@ struct FrontendHost {
 	std::function<void(const Game &, int)> benchmark;  // a benchmark from a probe (1x 2x 4x 8x)
 	std::function<void()> shares;                      // the share manager
 	std::function<void()> close;                       // close PSGopher
+	/* the updater (update.h): its status, polled each frame, and its steps; install() true means the
+	 * files are in place and the title must close (the front end then takes close's way) */
+	std::function<update::Status()> update_status;
+	std::function<void()> update_check, update_download, update_cancel, update_skip, update_rollback;
+	std::function<bool()> update_install;
 	std::function<void(const std::string &)> tell;     // a notice
 	std::function<bool()> elevated;                    // out of the sandbox at this start
 	std::function<bool()> elevation_off;               // elevation-off.txt is there
@@ -86,6 +92,9 @@ struct FrontendHost {
 	/* the cartridge's cover (libretro's box art): its texture and width / height; invalid while
 	 * there is none (asked for when asked here) */
 	std::function<std::pair<ImTextureID, float>(const Game &)> cover;
+	/* a probe's picture (the save state file's path + ".png"): its texture and width / height;
+	 * invalid while there is none */
+	std::function<std::pair<ImTextureID, float>(const std::string &)> probe_picture;
 	/* its description ("title\ntext": Wikipedia's summary), "" while there is none */
 	std::function<std::string(const Game &)> about;
 	/* Gopher64's text settings (psgopher_setting_text): the Transfer Pak's files, each port's profile
@@ -139,6 +148,13 @@ private:
 	std::string picker_folder_, picker_key_;
 	bool picker_rom_ = true;
 	void filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
+	bool close_open_ = false; // "Close PSGopher?" is up
+	/* "Install vX.Y.Z?" / "Roll back to ...?" is up (1 install, 2 roll back); the roll back's answer is waited for */
+	int update_ask_ = 0;
+	std::string update_ask_text_;
+	bool rollback_wanted_ = false;
+	char letter_ = 0;         // the letter just jumped to, and when (the pad's clock)
+	float letter_at_ = -10;
 	int probes_open_ = -1; // the probe picker: its cursor, -1 closed
 	struct Cheat {
 		std::string name, note;
@@ -162,6 +178,8 @@ private:
 	void refresh();
 	void order();
 	board::Look lookFor(const Game &g) const; // its look, with its cover when there is one
+	/* a probe's picture at 4:3 (the N64's pixels are not square), or its fingerprint when it has none */
+	void probeThumb(ImDrawList *dl, const std::string &stateFile, const board::Look &look, float x, float y, float w, float h);
 	const Game *selected() const;
 	void home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
 	void rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);

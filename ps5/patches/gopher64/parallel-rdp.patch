@@ -1,23 +1,26 @@
 diff --git a/parallel-rdp/rdp_device.cpp b/parallel-rdp/rdp_device.cpp
-index 2e874f1..ceab6ef 100644
+index 2e874f1..05b31c5 100644
 --- a/parallel-rdp/rdp_device.cpp
 +++ b/parallel-rdp/rdp_device.cpp
-@@ -22,6 +22,14 @@
+@@ -22,6 +22,17 @@
  
  #include "rdp_device.hpp"
  #include "rdp_common.hpp"
 +#ifdef PSGOPHER
 +#include <x86intrin.h>
 +extern "C" void psgopher_bench_submit(uint64_t tsc_ticks);
++extern "C" int psgopher_where(int place);
++extern "C" void psgopher_where_restore(int previous);
++// (the numbers are ps5/host/bench.h's: 4 a GPU fence wait, 5 a Vulkan submit, 6 an RDRAM sync wait)
 +#define PSGOPHER_TIMED_SUBMIT(...) \
-+	do { const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); } while (0)
++	do { const int psgopher_place = psgopher_where(5); const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); psgopher_where_restore(psgopher_place); } while (0)
 +#else
 +#define PSGOPHER_TIMED_SUBMIT(...) __VA_ARGS__
 +#endif
  #include <chrono>
  
  #ifdef __SSE2__
-@@ -170,7 +178,7 @@ void CommandProcessor::begin_frame_context()
+@@ -170,7 +181,7 @@ void CommandProcessor::begin_frame_context()
  {
  	flush();
  	drain_command_ring();
@@ -26,16 +29,39 @@ index 2e874f1..ceab6ef 100644
  }
  
  void CommandProcessor::init_renderer()
-@@ -249,7 +257,7 @@ void CommandProcessor::clear_buffer(Vulkan::Buffer &buffer, uint32_t value)
+@@ -249,8 +260,14 @@ void CommandProcessor::clear_buffer(Vulkan::Buffer &buffer, uint32_t value)
  		auto cmd = device.request_command_buffer();
  		cmd->fill_buffer(buffer, value);
  		Fence fence;
 -		device.submit(cmd, &fence);
 +		PSGOPHER_TIMED_SUBMIT(device.submit(cmd, &fence));
++#ifdef PSGOPHER
++		const int psgopher_place = psgopher_where(4);
++#endif
  		fence->wait();
++#ifdef PSGOPHER
++		psgopher_where_restore(psgopher_place);
++#endif
  	}
  	else
-@@ -1179,7 +1187,7 @@ void CommandProcessor::scanout_async_buffer(VIScanoutBuffer &buffer, const Scano
+ 	{
+@@ -1094,9 +1111,15 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
+ 	Vulkan::QueryPoolHandle start_ts, end_ts;
+ 	if (measure_stall_time)
+ 		start_ts = device.write_calibrated_timestamp();
++#ifdef PSGOPHER
++	const int psgopher_place = psgopher_where(6);
++#endif
+ 	timeline_worker.wait([this, index]() -> bool {
+ 		return thread_timeline_value >= index;
+ 	});
++#ifdef PSGOPHER
++	psgopher_where_restore(psgopher_place);
++#endif
+ 	if (measure_stall_time)
+ 	{
+ 		end_ts = device.write_calibrated_timestamp();
+@@ -1179,7 +1202,7 @@ void CommandProcessor::scanout_async_buffer(VIScanoutBuffer &buffer, const Scano
  	             VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
  
  	buffer.fence.reset();
@@ -44,11 +70,25 @@ index 2e874f1..ceab6ef 100644
  }
  
  void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width, unsigned &height,
+@@ -1200,7 +1223,13 @@ void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width,
+ 	height = scanout.height;
+ 	colors.resize(width * height);
+ 
++#ifdef PSGOPHER
++	const int psgopher_place = psgopher_where(4);
++#endif
+ 	scanout.fence->wait();
++#ifdef PSGOPHER
++	psgopher_where_restore(psgopher_place);
++#endif
+ 	memcpy(colors.data(), device.map_host_buffer(*scanout.buffer, Vulkan::MEMORY_ACCESS_READ_BIT),
+ 	       width * height * sizeof(uint32_t));
+ 	device.unmap_host_buffer(*scanout.buffer, Vulkan::MEMORY_ACCESS_READ_BIT);
 diff --git a/parallel-rdp/rdp_renderer.cpp b/parallel-rdp/rdp_renderer.cpp
-index b6d755f..f6f8bd1 100644
+index b6d755f..42d8b33 100644
 --- a/parallel-rdp/rdp_renderer.cpp
 +++ b/parallel-rdp/rdp_renderer.cpp
-@@ -36,6 +36,27 @@
+@@ -36,6 +36,30 @@
  #include "shaders/slangmosh.hpp"
  #endif
  
@@ -67,8 +107,11 @@ index b6d755f..f6f8bd1 100644
 +extern "C" void psgopher_bench_shader_compiled(uint64_t tsc_ticks);
 +extern "C" void psgopher_bench_fence(uint64_t tsc_ticks);
 +extern "C" void psgopher_bench_submit(uint64_t tsc_ticks);
++extern "C" int psgopher_where(int place);
++extern "C" void psgopher_where_restore(int previous);
++// (the numbers are ps5/host/bench.h's: 4 a GPU fence wait, 5 a Vulkan submit, 6 an RDRAM sync wait)
 +#define PSGOPHER_TIMED_SUBMIT(...) \
-+	do { const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); } while (0)
++	do { const int psgopher_place = psgopher_where(5); const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); psgopher_where_restore(psgopher_place); } while (0)
 +#else
 +#define PSGOPHER_TIMED_SUBMIT(...) __VA_ARGS__
 +#endif
@@ -76,7 +119,7 @@ index b6d755f..f6f8bd1 100644
  namespace RDP
  {
  Renderer::Renderer(CommandProcessor &processor_)
-@@ -71,6 +92,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
+@@ -71,6 +95,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
  			Granite::Global::create_thread_context(), { device }));
  #else
  	pipeline_worker.reset(new WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>({ device }));
@@ -91,7 +134,7 @@ index b6d755f..f6f8bd1 100644
  #endif
  
  #ifdef PARALLEL_RDP_SHADER_DIR
-@@ -542,6 +571,23 @@ void Renderer::RenderBuffersUpdater::init(Vulkan::Device &device)
+@@ -542,6 +574,23 @@ void Renderer::RenderBuffersUpdater::init(Vulkan::Device &device)
  	cpu.init(device, Vulkan::BufferDomain::Host, &gpu);
  }
  
@@ -115,7 +158,7 @@ index b6d755f..f6f8bd1 100644
  bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  {
  	unsigned factor = options.upscaling_factor;
-@@ -555,6 +601,8 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
+@@ -555,6 +604,8 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  	caps.super_sample_readback = options.super_sampled_readback;
  	caps.super_sample_readback_dither = options.super_sampled_readback_dither;
  
@@ -124,7 +167,7 @@ index b6d755f..f6f8bd1 100644
  	if (factor == 1)
  	{
  		upscaling_multisampled_hidden_rdram.reset();
-@@ -572,7 +620,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
+@@ -572,7 +623,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  	upscaling_reference_rdram = device->create_buffer(info);
  	device->set_name(*upscaling_reference_rdram, "reference-rdram");
  
@@ -133,7 +176,7 @@ index b6d755f..f6f8bd1 100644
  	// If we're super-sampling we'll need to carry forward a u8 writemask per unscaled pixel.
  	// The resolve pass will conditionally write a resolved pixel to avoid potential race conditions.
  	// We allocate 2 bits per pixel (color / depth write).
-@@ -584,7 +632,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
+@@ -584,7 +635,7 @@ bool Renderer::init_internal_upscaling_factor(const RendererOptions &options)
  	upscaling_multisampled_rdram = device->create_buffer(info);
  	device->set_name(*upscaling_multisampled_rdram, "multisampled-rdram");
  
@@ -142,7 +185,7 @@ index b6d755f..f6f8bd1 100644
  	upscaling_multisampled_hidden_rdram = device->create_buffer(info);
  	device->set_name(*upscaling_multisampled_hidden_rdram, "multisampled-hidden-rdram");
  
-@@ -1788,7 +1836,7 @@ void Renderer::submit_span_setup_jobs(Vulkan::CommandBuffer &cmd, bool upscale)
+@@ -1788,7 +1839,7 @@ void Renderer::submit_span_setup_jobs(Vulkan::CommandBuffer &cmd, bool upscale)
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -151,7 +194,7 @@ index b6d755f..f6f8bd1 100644
  	}
  	cmd.end_region();
  }
-@@ -1906,11 +1954,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+@@ -1906,11 +1957,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
  			if (pending_async_pipelines.count(compile.hash) == 0)
  			{
  				pending_async_pipelines.insert(compile.hash);
@@ -179,7 +222,7 @@ index b6d755f..f6f8bd1 100644
  
  		cmd.dispatch_indirect(*indirect_dispatch_buffer, 4 * sizeof(uint32_t) * i);
  	}
-@@ -1918,7 +1982,7 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+@@ -1918,7 +1985,7 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -188,7 +231,7 @@ index b6d755f..f6f8bd1 100644
  	}
  	cmd.end_region();
  }
-@@ -2021,7 +2085,7 @@ void Renderer::submit_tile_binning_combined(Vulkan::CommandBuffer &cmd, bool ups
+@@ -2021,7 +2088,7 @@ void Renderer::submit_tile_binning_combined(Vulkan::CommandBuffer &cmd, bool ups
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -197,7 +240,7 @@ index b6d755f..f6f8bd1 100644
  	}
  
  	cmd.enable_subgroup_size_control(false);
-@@ -2079,7 +2143,7 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
+@@ -2079,7 +2146,7 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
  	cmd.set_specialization_constant(1, pixel_size_log2);
  	cmd.set_specialization_constant(2, int(addr == depth_addr));
  	cmd.set_specialization_constant(3, ImplementationConstants::DefaultWorkgroupSize);
@@ -206,7 +249,7 @@ index b6d755f..f6f8bd1 100644
  	if (stage == ResolveStage::SSAAResolve)
  	{
  		cmd.set_specialization_constant(5, uint32_t(caps.super_sample_readback_dither));
-@@ -2118,13 +2182,20 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
+@@ -2118,13 +2185,20 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
  	cmd.push_constants(&push, 0, sizeof(push));
  
  	Vulkan::QueryPoolHandle start_ts, end_ts;
@@ -230,7 +273,7 @@ index b6d755f..f6f8bd1 100644
  	}
  }
  
-@@ -2144,7 +2215,7 @@ void Renderer::submit_clear_super_sample_write_mask(Vulkan::CommandBuffer &cmd,
+@@ -2144,7 +2218,7 @@ void Renderer::submit_clear_super_sample_write_mask(Vulkan::CommandBuffer &cmd,
  	cmd.set_program(shader_bank->clear_super_sampled_write_mask);
  #endif
  
@@ -239,7 +282,7 @@ index b6d755f..f6f8bd1 100644
  	                       2 * Limits::MaxWidth * Limits::MaxHeight / 8);
  
  	cmd.set_specialization_constant_mask(1);
-@@ -2191,7 +2262,8 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
+@@ -2191,7 +2265,8 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
  	cmd.set_specialization_constant(5, Limits::MaxPrimitives);
  	cmd.set_specialization_constant(6, upscaled ? caps.max_width : Limits::MaxWidth);
  	cmd.set_specialization_constant(7, uint32_t(force_write_mask || (!is_host_coherent && !upscaled)) |
@@ -249,7 +292,7 @@ index b6d755f..f6f8bd1 100644
  
  	if (upscaled)
  		cmd.set_storage_buffer(0, 0, *upscaling_multisampled_rdram);
-@@ -2308,7 +2380,7 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
+@@ -2308,7 +2383,7 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
  	if (caps.timestamp >= 2)
  	{
  		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
@@ -258,7 +301,7 @@ index b6d755f..f6f8bd1 100644
  	}
  
  	cmd.end_region();
-@@ -2510,7 +2582,7 @@ void Renderer::submit_to_queue()
+@@ -2510,7 +2585,7 @@ void Renderer::submit_to_queue()
  		if (pending_host_visible_render_passes)
  		{
  			Vulkan::Fence fence;
@@ -267,7 +310,7 @@ index b6d755f..f6f8bd1 100644
  			enqueue_fence_wait(fence);
  		}
  		return;
-@@ -2530,7 +2602,7 @@ void Renderer::submit_to_queue()
+@@ -2530,7 +2605,7 @@ void Renderer::submit_to_queue()
  
  	if (is_host_coherent)
  	{
@@ -276,7 +319,7 @@ index b6d755f..f6f8bd1 100644
  		if (pending_host_visible_render_passes)
  			enqueue_fence_wait(fence);
  	}
-@@ -2540,7 +2612,7 @@ void Renderer::submit_to_queue()
+@@ -2540,7 +2615,7 @@ void Renderer::submit_to_queue()
  		if (pending_host_visible_render_passes)
  			resolve_coherency_gpu_to_host(op, *stream.cmd);
  
@@ -285,7 +328,7 @@ index b6d755f..f6f8bd1 100644
  
  		if (pending_host_visible_render_passes)
  		{
-@@ -2784,7 +2856,7 @@ void Renderer::resolve_coherency_external(unsigned offset, unsigned length)
+@@ -2784,7 +2859,7 @@ void Renderer::resolve_coherency_external(unsigned offset, unsigned length)
  	mark_pages_for_gpu_read(offset, length);
  	ensure_command_buffer();
  	resolve_coherency_host_to_gpu(*stream.cmd);
@@ -294,13 +337,15 @@ index b6d755f..f6f8bd1 100644
  	stream.cmd.reset();
  }
  
-@@ -3053,7 +3125,13 @@ void Renderer::flush_queues()
+@@ -3053,7 +3128,15 @@ void Renderer::flush_queues()
  		Vulkan::QueryPoolHandle start_ts, end_ts;
  		if (caps.timestamp)
  			start_ts = device->write_calibrated_timestamp();
 +#ifdef PSGOPHER
 +		const uint64_t psgopher_fence_begin = __rdtsc();
++		const int psgopher_place = psgopher_where(4);
 +		sync.fence->wait();
++		psgopher_where_restore(psgopher_place);
 +		psgopher_bench_fence(__rdtsc() - psgopher_fence_begin);
 +#else
  		sync.fence->wait();
@@ -308,7 +353,7 @@ index b6d755f..f6f8bd1 100644
  		if (caps.timestamp)
  		{
  			end_ts = device->write_calibrated_timestamp();
-@@ -3677,8 +3755,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
+@@ -3677,8 +3760,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
  
  void Renderer::PipelineExecutor::perform_work(const Vulkan::DeferredPipelineCompile &compile) const
  {
@@ -92966,25 +93011,28 @@ index a0a5804..609a081 100644
          write_mask = 0u;
  
 diff --git a/parallel-rdp/video_interface.cpp b/parallel-rdp/video_interface.cpp
-index f9b0946..5495ce7 100644
+index f9b0946..6a64d13 100644
 --- a/parallel-rdp/video_interface.cpp
 +++ b/parallel-rdp/video_interface.cpp
-@@ -26,6 +26,14 @@
+@@ -26,6 +26,17 @@
  #include "luts.hpp"
  #include "bitops.hpp"
  #include <cmath>
 +#ifdef PSGOPHER
 +#include <x86intrin.h>
 +extern "C" void psgopher_bench_submit(uint64_t tsc_ticks);
++extern "C" int psgopher_where(int place);
++extern "C" void psgopher_where_restore(int previous);
++// (the numbers are ps5/host/bench.h's: 4 a GPU fence wait, 5 a Vulkan submit, 6 an RDRAM sync wait)
 +#define PSGOPHER_TIMED_SUBMIT(...) \
-+	do { const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); } while (0)
++	do { const int psgopher_place = psgopher_where(5); const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); psgopher_where_restore(psgopher_place); } while (0)
 +#else
 +#define PSGOPHER_TIMED_SUBMIT(...) __VA_ARGS__
 +#endif
  
  #ifndef PARALLEL_RDP_SHADER_DIR
  #include "shaders/slangmosh.hpp"
-@@ -484,7 +492,8 @@ Vulkan::ImageHandle VideoInterface::vram_fetch_stage(const Registers &regs, unsi
+@@ -484,7 +495,8 @@ Vulkan::ImageHandle VideoInterface::vram_fetch_stage(const Registers &regs, unsi
  	async_cmd->set_specialization_constant_mask(7);
  	async_cmd->set_specialization_constant(0, uint32_t(rdram_size));
  	async_cmd->set_specialization_constant(1, regs.status & (VI_CONTROL_TYPE_MASK | VI_CONTROL_META_AA_BIT));
@@ -92994,7 +93042,7 @@ index f9b0946..5495ce7 100644
  
  	async_cmd->push_constants(&push, 0, sizeof(push));
  	async_cmd->dispatch((extract_width + 15) / 16,
-@@ -502,7 +511,7 @@ Vulkan::ImageHandle VideoInterface::vram_fetch_stage(const Registers &regs, unsi
+@@ -502,7 +514,7 @@ Vulkan::ImageHandle VideoInterface::vram_fetch_stage(const Registers &regs, unsi
  	}
  
  	Vulkan::Semaphore sem;
@@ -93003,7 +93051,42 @@ index f9b0946..5495ce7 100644
  	device->add_wait_semaphore(Vulkan::CommandBuffer::Type::Generic, std::move(sem),
  	                           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, true);
  
-@@ -1283,7 +1292,7 @@ Vulkan::ImageHandle VideoInterface::scanout(VkImageLayout target_layout, const S
+@@ -1214,6 +1226,34 @@ void VideoInterface::end_vi_register_per_scanline()
+ 
+ Vulkan::ImageHandle VideoInterface::scanout(VkImageLayout target_layout, const ScanoutOptions &options, unsigned scaling_factor_)
+ {
++	// PSGopher: a snapshot (ScanoutOptions::snapshot) leaves the history as it found it.
++	struct SnapshotGuard
++	{
++		SnapshotGuard(VideoInterface &vi_, bool on_)
++		    : vi(vi_), on(on_), blank(vi_.previous_frame_blank), count(vi_.frame_count),
++		      valid(vi_.last_valid_frame_count), image(vi_.prev_scanout_image),
++		      layout(vi_.prev_image_layout), external(vi_.prev_image_is_external)
++		{
++		}
++		~SnapshotGuard()
++		{
++			if (!on)
++				return;
++			vi.previous_frame_blank = blank;
++			vi.frame_count = count;
++			vi.last_valid_frame_count = valid;
++			vi.prev_scanout_image = image;
++			vi.prev_image_layout = layout;
++			vi.prev_image_is_external = external;
++		}
++		VideoInterface &vi;
++		bool on, blank;
++		uint32_t count, valid;
++		Vulkan::ImageHandle image;
++		VkImageLayout layout;
++		bool external;
++	} snapshot_guard(*this, options.snapshot);
++
+ 	unsigned downscale_steps = std::min(8u, options.downscale_steps);
+ 	int scaling_factor = int(scaling_factor_);
+ 	Vulkan::ImageHandle scanout;
+@@ -1283,7 +1323,7 @@ Vulkan::ImageHandle VideoInterface::scanout(VkImageLayout target_layout, const S
  				                   layout_to_stage(prev_image_layout), 0,
  				                   layout_to_stage(target_layout), layout_to_access(target_layout));
  				prev_image_layout = target_layout;
@@ -93012,7 +93095,7 @@ index f9b0946..5495ce7 100644
  			}
  		}
  		else
-@@ -1419,7 +1428,7 @@ Vulkan::ImageHandle VideoInterface::scanout(VkImageLayout target_layout, const S
+@@ -1419,7 +1459,7 @@ Vulkan::ImageHandle VideoInterface::scanout(VkImageLayout target_layout, const S
  		prev_scanout_image.reset();
  	}
  
@@ -93021,3 +93104,19 @@ index f9b0946..5495ce7 100644
  	scanout = std::move(scale_image);
  	frame_count++;
  	return scanout;
+diff --git a/parallel-rdp/video_interface.hpp b/parallel-rdp/video_interface.hpp
+index 98a75e0..9e8de98 100644
+--- a/parallel-rdp/video_interface.hpp
++++ b/parallel-rdp/video_interface.hpp
+@@ -63,6 +63,11 @@ struct ScanoutOptions
+ 	// Weave deinterlacing should *not* be used, except to run test suite!
+ 	bool upscale_deinterlacing = true;
+ 
++	// PSGopher: a one-off read of the picture (a probe's picture). The video interface's history (the
++	// previous frame, its layout, the frame counters) is left as it was, so the next frame is drawn
++	// exactly as if this call had not been made.
++	bool snapshot = false;
++
+ 	struct
+ 	{
+ 		bool aa = true;

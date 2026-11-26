@@ -22,11 +22,44 @@ ${CC:-gcc} -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -I"
     "$root/ps5/host/bench.c" "$root/ps5/tests/test_bench.c" -o "$out/test_bench" -lpthread
 "$out/test_bench"
 
+# the freeze watchdog (bench.c): a fake emulation thread blocked in a named place
+${CC:-gcc} -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -I"$root/ps5/host" -I"$root/ps5/sdl3" \
+    "$root/ps5/host/bench.c" "$root/ps5/tests/test_stall.c" -o "$out/test_stall" -lpthread
+"$out/test_stall"
+# the sandbox helper's connection asked again while the payload loader comes up (from Crux2)
+${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$root/ps5/elevation" \
+    "$root/ps5/elevation/elevation.cpp" "$root/ps5/tests/elevation/elevation_retry_test.cpp" -o "$out/elevation_retry"
+"$out/elevation_retry"
+
 # the game list's search, the title's settings file and the shares file (ps5vfs stood in for)
 ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -DPSGOPHER_SHARES_HOST_TEST \
     -I"$root/ps5/host" -I"$root/ps5/vfs" "$root/ps5/tests/test_library.cpp" "$root/ps5/host/library.cpp" \
-    "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" -o "$out/test_library" -lpthread
+    "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" "$root/ps5/host/write_broker.cpp" \
+    "$root/ps5/broker/server.cpp" -o "$out/test_library" -lpthread
 "$out/test_library" "$out/library"
+
+# a probe's picture (probe_picture.h): the PNG, its atomic write and replacement
+${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -I"$root/ps5/host" \
+    -I"$root/ps5/third_party/stb" "$root/ps5/tests/test_probe_picture.cpp" -o "$out/test_probe_picture"
+"$out/test_probe_picture" "$out/probe-picture"
+
+# the updater (ps5/host/update.cpp): its ZIP reading is the very code the title links
+# (vendor/gopher64/src/psgopher_zip.rs, built as ps5/tests/update_zip); GitHub is played by the test
+if command -v cargo >/dev/null && [[ -f $root/vendor/gopher64/src/psgopher_zip.rs ]]; then
+    (cd "$root/ps5/tests/update_zip" && CARGO_TARGET_DIR="$root/build/update-zip" cargo build -q --release)
+    ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined \
+        -fno-sanitize-recover=undefined -fno-omit-frame-pointer -pthread -DPSGOPHER_UPDATE_TEST -I"$root/ps5/host" \
+        "$root/ps5/tests/test_update.cpp" "$root/ps5/host/update.cpp" "$root/build/update-zip/release/libupdate_zip.a" \
+        -ldl -lm -o "$out/test_update"
+    rm -rf "$out/update"
+    ASAN_OPTIONS=detect_leaks=1 "$out/test_update" "$out/update" 2> "$out/test_update.log" || { cat "$out/test_update.log"; exit 1; }
+else
+    echo "test_update: skipped (needs cargo and vendor/gopher64: ps5/tools/fetch-gopher64.sh)"
+fi
+
+# the write broker (ps5/broker: the payload's request handler) and its client, over sockets, with the
+# sanitizers (the copy of a share's ROM through it is in test_library above)
+bash "$root/ps5/tests/broker/run-broker-tests.sh" "$out/broker"
 
 # the game list itself, drawn offscreen through the PC's Vulkan (lavapipe when it is there) with a
 # scripted pad; pictures in build/host-tests/menu-pictures (PNG with python3-pil)
@@ -49,9 +82,12 @@ if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/font_
         "$root/ps5/tests/test_menu.cpp" "$root/ps5/host/menu.cpp" "$root/ps5/host/library.cpp" \
         "$root/ps5/host/frontend.cpp" "$root/ps5/host/board.cpp" "$root/ps5/host/image.cpp" "$root/ps5/host/web.cpp" \
         "$root/ps5/host/title_settings.cpp" "$root/ps5/host/shares.cpp" "$root/ps5/host/sandbox.cpp" \
+        "$root/ps5/host/write_broker.cpp" \
         "$out/volk.o" "$out"/imgui_*.o -o "$out/test_menu" -lpthread -ldl
     [[ -f $lavapipe ]] && export VK_ICD_FILENAMES=$lavapipe
     "$out/test_menu" "$out/menu-work" "$out/menu-pictures"
+    # the words of BENCH's rows (the test dumped them): Gopher64's labels exact, the banned words out
+    python3 "$root/ps5/tools/settings-words.py" check "$out/menu-work/settings-words.jsonl"
     # the in-game quick menu, over a stand-in frame by a small software rasterizer
     ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers \
         -fsanitize=address,undefined -DIMGUI_DISABLE_OBSOLETE_FUNCTIONS -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$imgui" \

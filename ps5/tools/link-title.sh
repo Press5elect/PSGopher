@@ -132,6 +132,8 @@ cp "$param" "$app/sce_sys/param.json"
 cp "$root/ps5/sce_sys/icon0.png" "$app/sce_sys/icon0.png"
 # the sandbox exit's helper, sent to the payload loader from /app0 (ps5/host/sandbox.cpp)
 cp "$root/build/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
+# the write broker, sent to the payload loader for the copy of a share's ROM (ps5/host/write_broker.cpp)
+cp "$root/build/write-broker.elf" "$app/write-broker.elf"
 # the front end's pictures (ps5/art: the Live Board's mainboard, made by make-board-art.mjs, and the logo)
 mkdir -p "$app/art"
 cp "$root/ps5/art/board.png" "$root/ps5/art/logo.png" "$app/art/"

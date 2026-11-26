@@ -21,21 +21,21 @@ play time and your probes (save states). It finds every N64 ROM (`.z64`, `.n64`,
 storage, and on network shares.
 
 - **HOME**: the board and the cartridge strip (recently played first). ◄ ► cartridge, ✕ power on,
-  □ power on from a probe, △ cheats. Each cartridge shows its box art (libretro's thumbnails) and
+  □ power on from a probe, △ cheats. ○ asks to close PSGopher (✕ closes, ○ stays). Each cartridge shows its box art (libretro's thumbnails) and
   its region's flag, the panel three lines of its Wikipedia summary, fetched once over the network
   and kept in `/data/psgopher/cache/covers`.
-- **RACK**: every cartridge on shelves, A to Z. D-pad, L2/R2 by letter, □ sort (A-Z, recently
+- **RACK**: every cartridge on shelves, A to Z. D-pad, L2/R2 by letter (hold to keep going; the letter is shown large), ○ back to HOME, □ sort (A-Z, recently
   played, most played, size), OPTIONS show (all, played, never played, has probes, internal, USB,
   network), ✕ power on, △ seat it on the home strip.
-- **BENCH**: every setting, in sections (L2/R2): Video (resolution, supersampling, vsync, shader
-  compiles, the graphics driver's thread), Screen & sound (CRT look, widescreen, integer scaling,
-  the sound buffer: 33 to 133 ms, 67 by default), TV output (59.94 Hz, 119.88 Hz or variable refresh;
-  HDR10 and its brightness), Emulation (CPU clock, Expansion Pak, rewind, USB link), Controllers
-  (each port: plugged in, which DualSense, its input profile, its Transfer Pak with the Game Boy
+- **BENCH**: every setting, in sections (L2/R2): Video (resolution, SSAA downscaling, VSync, shader
+  compiles, the graphics driver's thread), Screen & Sound (CRT shader, widescreen, integer scaling,
+  the audio buffer: 33 to 133 ms, 67 by default), TV Output (59.94 Hz, 119.88 Hz or variable refresh;
+  HDR10 and its brightness), Emulation (overclock, Expansion Pak, rewind, UNFLoader), Controllers
+  (each port: enabled, which DualSense, its input profile, its Transfer Pak with the Game Boy
   ROM and save), Profiles (every N64 button's DualSense control: ✕ then press it; the deadzone),
-  Hotkeys, This console (network shares, the sandbox, searching again, closing) and PC only (what
+  Hotkeys, Console (network shares, the sandbox, searching again, fast writes, updates, exiting) and PC Only (what
   Gopher64 has on a PC alone, and why). ▲ ▼ setting, ◄ ► change, ✕ choose; the line below says what
-  the setting does.
+  the setting does. Gopher64's settings keep its labels.
 
 L1/R1 change the view. **In a game**, tap the touch pad for the quick menu: resume, take a probe
 (save state), load one, turn the stats overlay on or off (speed, frame times, audio), reset, or
@@ -52,12 +52,19 @@ moments on (BENCH, Video), a slow stretch in a game is measured into the boot lo
 and states are in
 `/data/psgopher/data/`.
 
-**Network shares**: BENCH, This console, Network shares adds and edits SMB and NFS shares (an
+**Updates**: BENCH, Console, Check for Updates asks GitHub for the newest release (also once when the
+title starts; Check for Updates at Start turns that off). An offer shows the release notes under the
+rows: Download Update (checked against its SHA-256), Install Update (the title closes; the files it
+replaces are backed up), Skip This Version, and Roll Back to the version kept from before the last
+update. BENCH, Console, Fast Writes (Helper) has the write helper copy games from a share to the
+console's storage, which keeps it fast after the first gigabyte.
+
+**Network shares**: BENCH, Console, Network Shares adds and edits SMB and NFS shares (an
 on-screen keyboard; "Find SMB servers" looks for them on your network). They are mounted at each start and
 searched for games; a ROM on a share is copied to the console before it plays.
 
 **USB drives** are outside a title's sandbox: as OGBox and Crux2 do, PSGopher leaves it at the start
-through the payload loader on port 9021 (elfldr, which kstuff setups run). BENCH, This console
+through the payload loader on port 9021 (elfldr, which kstuff setups run). BENCH, Console
 turns that off.
 
 **Settings** are kept as you change them: Gopher64's own in its `config.json`, PSGopher's in

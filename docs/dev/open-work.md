@@ -17,11 +17,17 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | What | Since | How it will show |
 | --- | --- | --- |
+| The copy of a share's ROM into the play cache through the write broker (`write_helper`, on by default; OGBox's helper ran on the owner's console in OGBox, PSGopher's use has not yet) | this change | the boot log: `storage: copies through the helper (...)` (or `storage: not through the helper: <why>`) and `library: ... copied from the share (N KiB, by the helper)`; the loader on 9021 free at the first copy (the elevation helper uses it at the start); the file's owner and mode after the broker made it (the title unlinks it at the next copy); a bigger ROM's copy time with the setting on and off (`write_helper = off` in `psgopher.ini`) |
 | The cover fixes (pool size, upload checks, RACK, after a game) | `93a4309` (no crash in one session) | covers in HOME after RACK and after a game; no SIGABRT; `about:` lines |
 | The two-controller tap | `93a4309` | hold the touch pad with a second controller connected: no quick menu |
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
 | Shader compiles on 4 threads; the driver's own thread (at once is removed: it froze at scene changes) | `2ab7c1d` (ran: no change at 8x) | the `video:` line's shading share and speed at 8x with each |
 | Per pixel's picture (speed measured: 100% at 8x), with supersampling and after a save state; Original's picture with its shaders made again | `8bc81c2` | the picture at 8x; BENCH → Video → Upscaled memory |
+| The freeze watchdog (`stall:` lines) at a game's scene changes; whether the emulation thread's CPU time is readable from another thread | this commit | `stall:` / `stall over:` lines in the boot log |
+| The write helper for copied games (`write-broker.elf` on port 9021 at the first copy) | this commit | `storage: copies through the helper` and `copied from the share (N KiB, by the helper)` |
+| The updater (no release exists yet: a developer build reports itself as one) | this commit | BENCH > Console > Check for Updates; `update:` lines |
+| Probe pictures (the scanout read back at a save) | this commit | `probes: picture WxH written in N ms`; the picker's thumbnails |
+| The sandbox helper asked again for four seconds | this commit | `N connection attempt(s) to the payload loader` on a cold start |
 | The board's Benchmark (△ on a probe) | `64422ca` | the board's notice; `benchmark window` lines with `state`, `upscale` |
 | The core's profiling build (`PSGOPHER_PGO=generate`) | `2423b54` | `pgo:` lines after each game; `.profraw` files in `/data/psgopher/pgo` |
 | The configurable hotkeys and their new actions, the quick menu tap switch | `892ab0a` (the `hotkeys:` line has run) | each action in a game with the activator held; `hotkeys:` line at a game's start |

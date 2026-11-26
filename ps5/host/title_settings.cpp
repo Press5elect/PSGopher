@@ -20,15 +20,15 @@ namespace psgopher {
 const char kTitleSettingsFile[] = "/data/psgopher/config/psgopher.ini";
 
 const HotkeyAction kHotkeyActions[15] = {
-	{ "save", "Save state" },         { "load", "Load state" },         { "exit", "Leave the game" },
-	{ "ff", "Fast forward" },         { "rewind", "Rewind" },           { "pak", "Change pak" },
-	{ "reset", "Reset" },             { "pause", "Pause" },             { "advance", "Frame advance" },
-	{ "voldown", "Volume down" },     { "volup", "Volume up" },         { "fps", "Gopher64's frame rate" },
-	{ "crop", "Crop the letterbox" }, { "slotnext", "Next save slot" }, { "slotprev", "Previous save slot" },
+	{ "save", "Save State" },         { "load", "Load State" },         { "exit", "Leave Game" },
+	{ "ff", "Fast Forward" },         { "rewind", "Rewind" },           { "pak", "Change Pak" },
+	{ "reset", "Reset" },             { "pause", "Pause" },             { "advance", "Frame Advance" },
+	{ "voldown", "Volume Down" },     { "volup", "Volume Up" },         { "fps", "Show Frame Rate" },
+	{ "crop", "Crop Letterbox" },     { "slotnext", "Next Save Slot" }, { "slotprev", "Previous Save Slot" },
 };
 
 const char *const kN64Inputs[19] = { "D Right", "D Left", "D Down", "D Up", "Start", "Z", "B", "A", "C Right", "C Left",
-	                                 "C Down", "C Up", "R", "L", "Stick Right", "Stick Left", "Stick Down", "Stick Up",
+	                                 "C Down", "C Up", "R", "L", "Control Stick Right", "Control Stick Left", "Control Stick Down", "Control Stick Up",
 	                                 "Hotkey Activator" };
 
 void TitleSettings::load()
@@ -76,6 +76,10 @@ void TitleSettings::load()
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
 			quickmenuTap = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "update_check"))
+			updateCheck = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "write_helper"))
+			writeHelper = strcmp(value, "off") != 0;
 		else if (!strncmp(key, "hotkey_", 7))
 			for (size_t i = 0; i < hotkey.size(); i++)
 				if (!strcmp(key + 7, kHotkeyActions[i].key)) {
@@ -85,10 +89,13 @@ void TitleSettings::load()
 				}
 	}
 	fclose(f);
+	setenv("PSGOPHER_WRITE_HELPER", writeHelper ? "1" : "0", 1); /* (read by the share copy: write_broker.cpp) */
 }
 
 bool TitleSettings::save() const
 {
+	/* the share copy reads it when a game is started from the list, which is after the list's edit saves */
+	setenv("PSGOPHER_WRITE_HELPER", writeHelper ? "1" : "0", 1);
 	char text[4096];
 	snprintf(text, sizeof(text),
 		"# PSGopher's own settings (Gopher64's are in config.json). The game list's Settings write\n"
@@ -137,9 +144,18 @@ bool TitleSettings::save() const
 		"# 4 Start, 5 Z, 6 B, 7 A, 8 C Right, 9 C Left, 10 C Down, 11 C Up, 12 R, 13 L), -1 none\n"
 		"hotkeys = %s\n"
 		"# quickmenu_tap: a touch pad tap opens the quick menu (on whenever nothing else leaves a game)\n"
-		"quickmenu_tap = %s\n",
+		"quickmenu_tap = %s\n"
+		"\n"
+		"# write_helper: on has the write broker (write-broker.elf, a payload of its own) write a ROM copied from\n"
+		"# a share into the play cache: the console holds back the title's own writes after about 1.3 GiB; the\n"
+		"# broker's it doesn't. Off, or when it fails: the title writes the copy itself\n"
+		"write_helper = %s\n"
+		"\n"
+		"# update_check: on asks GitHub whether a newer release is out each time the title starts (nothing is\n"
+		"# downloaded without asking: BENCH, Console, Check for Updates)\n"
+		"update_check = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)

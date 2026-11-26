@@ -64,6 +64,46 @@ void psgopher_live_read(struct psgopher_live *out);
 /* the last frames' times (ms between VIs), oldest first, at most max; their number */
 int psgopher_live_history(float *out, int max);
 
+/* PSGopher: where the emulation thread is, for the freeze watchdog (bench.c). The emulation thread
+ * marks the places it can block in; the watchdog thread reads the mark. One relaxed load and two
+ * stores a region (and one TSC read); only the emulation thread calls these. Keep the numbers in
+ * step with the copies in the core (vendor/gopher64: psgopher.rs, parallel-rdp). */
+enum psgopher_place {
+   PSGOPHER_WHERE_CPU,        /* the VR4300 and anything not marked (the default) */
+   PSGOPHER_WHERE_RSP,
+   PSGOPHER_WHERE_RDP_COMMANDS,
+   PSGOPHER_WHERE_RDP_FRAME,
+   PSGOPHER_WHERE_GPU_FENCE,  /* waiting for a fence */
+   PSGOPHER_WHERE_VK_SUBMIT,  /* a Vulkan submit or next_frame_context */
+   PSGOPHER_WHERE_RDRAM_SYNC, /* wait_for_timeline: the RDRAM sync, and the RDP's idle */
+   PSGOPHER_WHERE_PRESENT,    /* end_frame + begin_frame: the FIFO/vsync wait, the acquire */
+   PSGOPHER_WHERE_LIMITER,    /* the speed limiter's sleep */
+   PSGOPHER_WHERE_AUDIO,      /* the audio queue: the stream's lock and data */
+   PSGOPHER_WHERE_PI_DMA,     /* a cartridge DMA */
+   PSGOPHER_WHERE_SAVE_DATA,  /* save files (EEPROM, SRAM, flash, mempak) */
+   PSGOPHER_WHERE_SAVE_STATE, /* save states, load states, rewind */
+   PSGOPHER_WHERE_PAUSED,     /* the game is held (pause, the quick menu): no stall */
+   PSGOPHER_WHERE_MAIN_CALL,  /* (reserved: Gopher64 waits for no main-thread call) */
+   PSGOPHER_WHERE_INPUT,      /* reading the controllers */
+   PSGOPHER_WHERE_ACHIEVEMENTS,
+   PSGOPHER_WHERE_COUNT
+};
+/* enters `place`; returns the place it was in, for psgopher_where_restore */
+int psgopher_where(int place);
+void psgopher_where_restore(int previous);
+/* the name the log uses */
+const char *psgopher_where_name(int place);
+
+/* the freeze watchdog (a thread of its own, started with each game, stopped when it ends): logs a
+ * stall when no VI has completed for 250 ms, and when VIs resume, where the time went. Logging
+ * only; on unless PSGOPHER_SLOW_CAPTURE is 0. The VI counter is bumped by psgopher_bench_present. */
+void psgopher_stall_start(void);
+void psgopher_stall_stop(void);
+/* tuning for the host test: the threshold and the sample period, in ms */
+void psgopher_stall_configure(int threshold_ms, int period_ms);
+/* a VI completed on the emulation thread (psgopher_bench_present does it; the test calls it) */
+void psgopher_stall_vi(void);
+
 /* PSGopher: the video line's counts start again (before each game) */
 void psgopher_video_reset(void);
 

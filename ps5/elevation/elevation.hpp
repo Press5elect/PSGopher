@@ -24,4 +24,8 @@ using StepFn = void (*)(void *ctx, const char *line);
 [[nodiscard]] Status request(Capability capability,
                              const char *helper_path = "/app0/sandbox-elevator.elf", StepFn step = nullptr,
                              void *ctx = nullptr) noexcept;
+// How many connections to the payload loader the last request() made (0: none was made). A loader
+// that is not listening yet is asked again for a few seconds (elevation.cpp, from Crux2), so more
+// than one means it came late, or, at the limit, never answered.
+[[nodiscard]] int attempts() noexcept;
 } // namespace elevation

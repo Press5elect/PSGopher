@@ -1,0 +1,17 @@
+# PSGopher - the updater's ZIP reading (vendor/gopher64/src/psgopher_zip.rs, which only needs `std`
+# and `zip`) as a static library for the host test, so ps5/host/update.cpp is tested against the
+# very code the title links. Not part of the title's build.
+# SPDX-License-Identifier: GPL-3.0-or-later
+[package]
+name = "update_zip"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[lib]
+crate-type = ["staticlib"]
+
+[dependencies]
+zip = { version = "9.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+
+[workspace]

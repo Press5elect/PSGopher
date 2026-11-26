@@ -20,7 +20,11 @@ struct Image {
  * decoded once a run of the title, not each time the list comes back). */
 const Image &loadImage(const std::string &path);
 
-/* The picture at path, decoded each time (the covers: decoded on their thread, not kept here) */
+/* the most pixels a side of a picture decodeImage reads (covers, probe pictures) */
+constexpr int kMaxPictureSide = 2048;
+
+/* The picture at path, decoded each time (the covers: decoded on their thread, not kept here); an
+ * empty one when it is missing, not a PNG, or larger than kMaxPictureSide a side */
 Image decodeImage(const std::string &path);
 
 } // namespace psgopher

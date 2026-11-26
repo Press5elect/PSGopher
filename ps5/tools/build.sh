@@ -35,14 +35,16 @@ mkdir -p "$work/obj"
 cc() { PS5_PAYLOAD_SDK="$sdk" sh "$vulkan/tooling/prospero-clang18" "$@"; }
 # the build's identity, first in the boot log: this repository's commit (+dirty) and Gopher64's pin
 identity="PSGopher $(git -C "$root" describe --always --dirty --abbrev=12), Gopher64 $(sed -n 's/^revision=//p' "$root/ps5/tools/fetch-gopher64.sh" | cut -c1-12), RADV Crux2 $(git -C "${CRUX2_DIR:-$root/../Crux2}" rev-parse --short=12 HEAD 2>/dev/null) on PS5 Mesa $(sed -n 's/^Crux2: PS5 Mesa \([0-9a-f]*\).*/\1/p' "$vulkan/.deps/native/radv-crux2/PROVENANCE.txt" | cut -c1-11), built $(date -u +%Y-%m-%dT%H:%MZ)"
-common=(-DPSGOPHER_BUILD="\"$identity\"" -O2 -g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter
+# (a release is built with PSGOPHER_VERSION=vX.Y.Z; a build without one is a developer build, which the updater never offers an update)
+common=(-DPSGOPHER_BUILD="\"$identity\"" -DPSGOPHER_VERSION="\"${PSGOPHER_VERSION:-}\"" -O2 -g1 -ffunction-sections -fdata-sections -fno-omit-frame-pointer -Wall -Wextra -Wno-unused-parameter
     -I"$root/ps5/host" -I"$root/ps5/sdl3" -I"$root/build/sdl3-include" -I"$root/ps5/third_party/stb"
     -I"$vulkan/.deps/native/radv-crux2/include" -I"$sdk/target/include")
 # the game list's libraries (libsmb2, libnfs, Dear ImGui: ps5/tools/build-deps.sh) and the sandbox
-# exit's helper (ps5/tools/build-elevator.sh), and the list's font as a header
+# exit's helper (ps5/tools/build-elevator.sh) and the write broker (ps5/tools/build-broker.sh), and the list's font as a header
 ports=$("$root/ps5/tools/build-deps.sh")
 imgui="$root/.deps/src/imgui"
 "$root/ps5/tools/build-elevator.sh" > /dev/null
+"$root/ps5/tools/build-broker.sh" > /dev/null # (the write broker, ps5/host/write_broker.cpp)
 mkdir -p "$work/gen"
 # the Live Board's faces as headers (SIL Open Font License 1.1; build-deps.sh fetches them): Bricolage
 # Grotesque ExtraBold for its titles, JetBrains Mono for everything else
@@ -86,6 +88,7 @@ compile -std=c++20 psgopher_sdl3.o "$root/ps5/sdl3/psgopher_sdl3.cpp" -Wno-unuse
 compile -std=c++20 sandbox.o "$root/ps5/host/sandbox.cpp" -Wno-missing-field-initializers
 compile -std=c++20 title_settings.o "$root/ps5/host/title_settings.cpp"
 compile -std=c++20 library.o "$root/ps5/host/library.cpp" "${list[@]}"
+compile -std=c++20 write_broker.o "$root/ps5/host/write_broker.cpp"
 compile -std=c++20 shares.o "$root/ps5/host/shares.cpp" "${list[@]}"
 compile -std=c++20 menu.o "$root/ps5/host/menu.cpp" "${list[@]}" -Wno-missing-field-initializers
 compile -std=c++20 quickmenu.o "$root/ps5/host/quickmenu.cpp" "${list[@]}" -Wno-missing-field-initializers
@@ -93,6 +96,8 @@ compile -std=c++20 board.o "$root/ps5/host/board.cpp" "${list[@]}"
 compile -std=c++20 frontend.o "$root/ps5/host/frontend.cpp" "${list[@]}" -Wno-missing-field-initializers
 compile -std=c++20 image.o "$root/ps5/host/image.cpp" -w
 compile -std=c++20 web.o "$root/ps5/host/web.cpp" "${list[@]}"
+compile -std=c++20 update.o "$root/ps5/host/update.cpp"
+compile -std=c++20 update_net.o "$root/ps5/host/update_net.cpp"
 for vfs in ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp; do
     compile -std=c++20 "$vfs.o" "$root/ps5/vfs/$vfs.cpp" "${list[@]}" -Wno-missing-field-initializers -Wno-sign-compare
 done
@@ -106,7 +111,7 @@ echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
 objects=()
-for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings library shares menu quickmenu board frontend image web \
+for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings library shares write_broker menu quickmenu board frontend image web update update_net \
     ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp imgui_imgui imgui_imgui_draw imgui_imgui_tables imgui_imgui_widgets \
     imgui_imgui_impl_vulkan; do
     objects+=("$work/obj/$object.o")

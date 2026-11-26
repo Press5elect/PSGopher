@@ -16,7 +16,9 @@ term of GPL-3.0 section 7(b) that the author attribution be preserved:
   "OGBox by Press5elect"    the network shares and the files they read (ps5/host/shares.*, from
                             OGBox's ps5/src/ogbox_shares.*), the sandbox exit (ps5/host/sandbox.*,
                             from OGBox's ps5/src/platform/ps5_sandbox.*; ps5/elevation, OGBox's,
-                            from Crux2), ps5/tools/build-elevator.sh, and the changes marked "OGBox"
+                            from Crux2), ps5/tools/build-elevator.sh, the write broker (ps5/broker,
+                            ps5/host/write_broker.*, ps5/tools/build-broker.sh, ps5/tests/broker),
+                            and the changes marked "OGBox"
                             in the files below;
   "Crux2 by Press5elect"    the virtual file layer (ps5/vfs, Crux2's ps5vfs by way of OGBox) and
                             the libc gaps (ps5/host/libc_gaps.c, Crux2's and OGBox's ps5_libc.c):

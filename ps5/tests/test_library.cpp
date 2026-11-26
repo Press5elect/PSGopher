@@ -9,6 +9,8 @@
 #include "library.h"
 #include "shares.h"
 #include "title_settings.h"
+#include "write_broker.h"
+#include "../broker/server.hpp"
 
 #include <cerrno>
 #include <chrono>
@@ -21,6 +23,7 @@
 #include <vector>
 
 #include <dirent.h>
+#include <sys/socket.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #include <utime.h>
@@ -199,6 +202,128 @@ static const psgopher::Game *find(const std::vector<psgopher::Game> &games, cons
 	return nullptr;
 }
 
+/* ---------------------------------------------------------------- the copy through the write broker */
+
+/* A broker (the payload's own request handler, ps5/broker/server.cpp) on one end of a socketpair in a
+ * thread; `dieAfter` makes it carry out that many requests and drop the connection, the last one
+ * unanswered (a broker that dies part-way). Its "/data" is `data`, by a symlink under `base`. */
+struct FakeBroker {
+	std::vector<std::thread> threads;
+	int launches = 0;
+	unsigned dieAfter = 0;
+	bool refuse = false;     /* the loader is not there */
+	bool deadOnArrival = false; /* started, but it closes the connection at once */
+	std::string base;
+	int connect(std::string &why)
+	{
+		launches++;
+		if (refuse) {
+			why = "no payload loader at 127.0.0.1:9021 (errno 111: Connection refused)";
+			return -1;
+		}
+		int fds[2];
+		if (socketpair(AF_UNIX, SOCK_STREAM, 0, fds) != 0)
+			return -1;
+		if (deadOnArrival) {
+			close(fds[1]);
+		} else {
+			threads.emplace_back([this, server = fds[1]]() {
+				::broker::ServerOptions o;
+				o.root = base.c_str();
+				o.die_after = dieAfter;
+				o.message_ms = 5000;
+				::broker::serve(server, server, o);
+				close(server);
+			});
+		}
+		why = "write-broker.elf sent to a fake loader";
+		return fds[0];
+	}
+	void end()
+	{
+		psgopher::helperReset(); /* the connection closed: the broker ends */
+		for (auto &t : threads)
+			t.join();
+		threads.clear();
+	}
+};
+
+static void copyThroughHelper(const std::string &data)
+{
+	FakeBroker fake;
+	fake.base = data + "-broker";
+	folders(fake.base);
+	char absolute[4096];
+	CHECK(realpath(data.c_str(), absolute) != nullptr); /* (a relative link would be read from base) */
+	CHECK(symlink(absolute, (fake.base + "/data").c_str()) == 0);
+	psgopher::helperUseConnector([&fake](std::string &why) { return fake.connect(why); });
+	std::string error;
+	const std::string want(70000, 'd');
+	const std::string target = data + "/psgopher/cache/play/Delta.z64";
+	auto copy = [&]() {
+		const std::string got = psgopher::localCopy("/smb/nas/n64/Delta.z64", &error);
+		CHECK(got == target);
+		CHECK(slurp(target) == want); /* byte for byte, whatever the broker did */
+	};
+
+	/* the broker is there: it writes the copy, once launched for the run */
+	psgopher::helperReset();
+	setenv("PSGOPHER_WRITE_HELPER", "1", 1);
+	copy();
+	CHECK(fake.launches == 1);
+	copy();
+	CHECK(fake.launches == 1);
+	fake.end();
+
+	/* the setting off: the broker is not asked for */
+	psgopher::helperReset();
+	setenv("PSGOPHER_WRITE_HELPER", "0", 1);
+	copy();
+	CHECK(fake.launches == 1);
+	setenv("PSGOPHER_WRITE_HELPER", "1", 1);
+
+	/* the broker dies part-way (the 2nd request is its open, the 3rd the write, the 4th the sync,
+	 * the 5th the close: carried out, not answered): the title writes the copy, whole */
+	for (unsigned die : { 1u, 2u, 3u, 4u, 5u }) {
+		psgopher::helperReset();
+		fake.dieAfter = die;
+		const int before = fake.launches;
+		copy();
+		CHECK(fake.launches >= before + 1);
+		fake.end();
+	}
+	fake.dieAfter = 0;
+
+	/* the broker never starts, or closes the connection at once: the title writes the copy */
+	psgopher::helperReset();
+	fake.refuse = true;
+	copy();
+	fake.refuse = false;
+	fake.deadOnArrival = true;
+	psgopher::helperReset();
+	copy();
+	fake.deadOnArrival = false;
+	fake.end();
+
+	/* a file the broker left behind that the title may not write over is replaced */
+	psgopher::helperReset();
+	fake.dieAfter = 4;
+	write(target, std::string(10, 'x'));
+	chmod(target.c_str(), 0444);
+	copy();
+	fake.dieAfter = 0;
+	fake.end();
+
+	/* a copy outside /data (the console's USB) is not for the broker */
+	psgopher::helperReset();
+	std::string why;
+	CHECK(!psgopher::helperWriteFile("/data", "/mnt/usb0/x.z64", (const unsigned char *)"abc", 3, &why) && !why.empty());
+	CHECK(!psgopher::helperWriteFile("/data", "/data/../etc/x", (const unsigned char *)"abc", 3, &why));
+
+	psgopher::helperUseConnector(nullptr);
+	psgopher::helperReset();
+}
+
 int main(int argc, char **argv)
 {
 	const std::string base = argc > 1 ? argv[1] : "/tmp/psgopher-host-tests";
@@ -352,6 +477,7 @@ int main(int argc, char **argv)
 	CHECK(access(copied.c_str(), F_OK) != 0); /* one at a time */
 	CHECK(psgopher::localCopy("/smb/nas/n64/missing.z64", &error).empty() && !error.empty());
 	CHECK(g_open_files == 0);
+	copyThroughHelper(data);
 
 	/* the title's settings: defaults written when missing, read back, out-of-range values held in */
 	psgopher::TitleSettings t;
@@ -378,6 +504,15 @@ int main(int argc, char **argv)
 	psgopher::TitleSettings v;
 	v.file = t.file;
 	v.load();
+	CHECK(t.writeHelper && u.writeHelper && v.writeHelper); /* on by default, and after the file's other lines */
+	t.writeHelper = false;
+	CHECK(t.save());
+	psgopher::TitleSettings w;
+	w.file = t.file;
+	w.load();
+	CHECK(!w.writeHelper && !psgopher::helperEnabled() && access(t.file.c_str(), F_OK) == 0 && slurp(t.file).find("write_helper = off") != std::string::npos);
+	t.writeHelper = true;
+	CHECK(t.save() && psgopher::helperEnabled());
 	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1");
 
 	/* the shares file (OGBox's format), written and read back with the accounts encoded */

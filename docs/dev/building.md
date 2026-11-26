@@ -72,8 +72,9 @@ ps5/tools/build.sh
 | the core | `ps5/tools/build-core.sh` | `build/core/x86_64-sie-ps5/psgopher/libgopher64.a` (the `psgopher` profile: release with fat LTO and one codegen unit) |
 | libsmb2, libnfs, Dear ImGui, the fonts (Bricolage Grotesque, JetBrains Mono) at their pins | `ps5/tools/build-deps.sh` | `.deps/src`, `.deps/ports` |
 | the sandbox exit's helper | `ps5/tools/build-elevator.sh` | `build/sandbox-elevator.elf` |
+| the write broker (a payload for the share ROM copy) | `ps5/tools/build-broker.sh` | `build/write-broker.elf` |
 | the PS5 code | `build.sh` | `build/ps5/obj/*.o`, the fonts as headers `build/ps5/gen/font_*.h` |
-| link, sign, lay out | `ps5/tools/link-title.sh` | `dist/PPSA99280/` (`eboot.bin`, `sce_sys/`, `sce_module/libc.prx`, `sandbox-elevator.elf`, `art/`, `licenses/`, `NOTICE.txt`), `build/ps5/imports.txt` |
+| link, sign, lay out | `ps5/tools/link-title.sh` | `dist/PPSA99280/` (`eboot.bin`, `sce_sys/`, `sce_module/libc.prx`, `sandbox-elevator.elf`, `write-broker.elf`, `art/`, `licenses/`, `NOTICE.txt`), `build/ps5/imports.txt` |
 
 `ps5/tools/build.sh --compile` stops before the link.
 

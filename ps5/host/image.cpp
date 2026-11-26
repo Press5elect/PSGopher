@@ -21,6 +21,11 @@ Image decodeImage(const std::string &path)
 {
 	Image img;
 	int channels = 0;
+	/* the size is read from the header first: a file claiming more than 2048 pixels a side is not
+	 * decoded (FE-030: a decompression bomb would take the memory) */
+	int w = 0, h = 0;
+	if (!stbi_info(path.c_str(), &w, &h, &channels) || w <= 0 || h <= 0 || w > kMaxPictureSide || h > kMaxPictureSide)
+		return img;
 	if (stbi_uc *pixels = stbi_load(path.c_str(), &img.width, &img.height, &channels, 4)) {
 		img.rgba.assign(pixels, pixels + (size_t)img.width * img.height * 4);
 		stbi_image_free(pixels);

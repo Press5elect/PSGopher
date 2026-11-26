@@ -157,7 +157,16 @@ libsmb2, NFS through libnfs, mounted at `/smb/<name>`) with OGBox's share list
 (`ps5/host/shares.cpp`): `/data/psgopher/config/network.cfg`, written by the front end as shares are
 added, changed or removed, mounted at the start. Gopher64 reads its ROM with `std::fs`, which knows
 nothing of ps5vfs: a share's ROM is copied to `/data/psgopher/cache/play` (one at a time; a ROM is
-at most 64 MiB) and that path is played. Saves are named by the ROM's hash, so they are the same
+at most 64 MiB) and that path is played. The console holds a title's own writes back after about
+1.3 GiB per process (OGBox measured 192 MiB/s, then 12-32 MiB/s; a payload of its own kept 200 MiB/s
+past 4 GiB), so with `write_helper` on (default) and a destination under `/data/` the copy is written
+by OGBox's write broker (`ps5/broker`, `write-broker.elf`, sent to the payload loader on port 9021
+like the elevation helper, launched once a run at the first copy; `ps5/host/write_broker.cpp`): the
+bytes go to it in 16 MiB messages, then SYNC, and the file's size is read back. When it is off, not
+there or fails at any step, the title writes the copy itself, as before. OGBox's fast writes ran on
+the owner's console in OGBox; PSGopher's use of them has not yet run on one. The broker's COPY
+(it reads a source it can open itself) is in the payload but unused: a share's bytes only the title's
+ps5vfs can read. Saves are named by the ROM's hash, so they are the same
 wherever the ROM is. On the console: the helper and the file layer run in OGBox and Crux2 [console];
 with PSGopher's title ID [unknown] until the first run.
 
@@ -191,6 +200,35 @@ of the cartridge (D16's facts), not guesses. In a game the quick menu (`quickmen
 design's LIVE panel, drawn over the frame through parallel-rdp's device. Cheats are Gopher64's own database
 (`psgopher_cheats_of`/`psgopher_cheat_set` in `psgopher.rs`, keyed by the header's CRCs); the region's
 flag is drawn from the header's country code; covers and descriptions are D18.
+
+**D19. Probes and their pictures.** A probe is a save state, one per slot 1-9:
+`data/states/<name>-<hash>.state<slot>` (`ui/storage.rs` makes the path; `psgopher::set_game` tells
+the quick menu its stem; `probesOf` in `library.cpp` and the quick menu list them by it).
+`savestates::create_savestate` (the emulation thread, at a frame boundary, after `rdp_idle`) takes
+the state; the file is written by a Tokio task. When a probe is taken the core also writes **its
+picture**, one file beside it, read once at that moment (the game is waiting anyway):
+
+- Path: the probe's path plus `.png` (`psgopher::probePicturePath` in `ps5/host/probe_picture.h`),
+  e.g. `data/states/<name>-<hash>.state3.png`. Nothing else in `data/states` ends in `.png`; the
+  probe's own name still ends in its slot's digit.
+- Content: a PNG, 8-bit RGB, no alpha. The pixels are what the VI outputs at the N64's own
+  resolution: parallel-rdp's scanout with the upscaling averaged away again (`downscale_steps` = the
+  upscale's steps), no letterbox crop, no overlay, no board. Typically 640x480 (640x240 for a
+  non-interlaced 320x240 game): the pixels are not square, show it at 4:3. Not scaled to anything.
+- Written atomically: `<png>.tmp` then `rename`, so a reader sees the old picture or the new one.
+  Overwriting a probe replaces its picture; if the picture cannot be read (blank screen, no video
+  yet) the probe is saved all the same and the old picture is removed (it would show another
+  moment). Nothing in the title deletes probes; a tool that does removes
+  `removeProbePicture(state)` with it.
+- A probe may have no picture (taken before this existed, or a blank screen): the reader checks the
+  file and draws its fallback. The PNG uses stored deflate blocks (no library; 0.9 MB at 640x480).
+- Cost: one scanout and readback of the native image (about 0.3 MB, at the scale's downscale) plus the
+  PNG's encoding (about 5 ms on a PC) and write, once per save; the core logs
+  `probes: picture <w>x<h> written in <ms> ms`, or `probes: picture not taken: <why>`.
+- The seam: `rdp_probe_picture` (`parallel-rdp/interface.cpp`) reads with
+  `ScanoutOptions::snapshot`, which leaves the VI's history (previous frame, layout, counters) as it
+  was, then calls the host's `psgopher_probe_picture_write` (`quickmenu.cpp`); both in
+  `parallel-rdp.patch` and `ps5.patch`.
 
 **D18. Covers and descriptions from the network.** A cartridge's label is its box art from the
 libretro-thumbnails N64 set (No-Intro names, from GitHub: thumbnails.libretro.com answered 404 for

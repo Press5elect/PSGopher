@@ -1,0 +1,258 @@
+{
+ "video.upscale": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:81",
+  "choices": "exact",
+  "default_field": "upscale",
+  "choices_source": "src/ui/gui/settings_page.slint:87"
+ },
+ "video.ssaa": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:96",
+  "choices": "written",
+  "default_field": "ssaa"
+ },
+ "video.integer_scaling": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:104",
+  "choices": "written",
+  "default_field": "integer_scaling"
+ },
+ "video.fullscreen": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:112",
+  "choices": "written",
+  "default_field": "fullscreen"
+ },
+ "video.widescreen": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:120",
+  "choices": "written",
+  "default_field": "widescreen"
+ },
+ "video.vsync": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:128",
+  "choices": "written",
+  "default_field": "vsync"
+ },
+ "video.crt": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:136",
+  "choices": "written",
+  "default_field": "crt"
+ },
+ "emulation.overclock": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:148",
+  "choices": "written",
+  "default_field": "overclock"
+ },
+ "emulation.disable_expansion_pak": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:156",
+  "choices": "written",
+  "default_field": "disable_expansion_pak"
+ },
+ "emulation.rewind": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:164",
+  "choices": "written",
+  "default_field": "rewind"
+ },
+ "emulation.usb": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:172",
+  "choices": "written",
+  "default_field": "usb"
+ },
+ "input.emulate_vru": {
+  "label": "exact",
+  "label_source": "src/ui/gui/settings_page.slint:180",
+  "choices": "written",
+  "default_field": "emulate_vru"
+ },
+ "input.controller_enabled.*": {
+  "label": "composed",
+  "label_source": "src/ui/gui/controller_page.slint:87",
+  "choices": "written",
+  "default_field": "controller_enabled"
+ },
+ "input.transfer_pak.*": {
+  "label": "composed",
+  "label_source": "src/ui/gui/controller_page.slint:100",
+  "choices": "written",
+  "default_field": "transfer_pak"
+ },
+ "input.controller_assignment.*": {
+  "label": "composed",
+  "label_source": "src/ui/gui/controller_page.slint:207",
+  "choices": "written"
+ },
+ "input.input_profile_binding.*": {
+  "label": "composed",
+  "label_source": "src/ui/gui/controller_page.slint:114",
+  "choices": "data"
+ },
+ "input.gb_rom_path.*": {
+  "label": "written",
+  "choices": "written"
+ },
+ "input.gb_ram_path.*": {
+  "label": "written",
+  "choices": "written"
+ },
+ "profile.input.*": {
+  "label": "exact",
+  "label_source": "src/ui/input_profile.rs:521-539",
+  "choices": "written",
+  "note": "the N64's inputs, as Gopher64's wizard names them"
+ },
+ "profile.deadzone": {
+  "label": "exact",
+  "label_source": "src/ui/gui/input_profile.slint:39",
+  "choices": "written"
+ },
+ "profile.dinput": {
+  "label": "exact",
+  "label_source": "src/ui/gui/input_profile.slint:60",
+  "choices": "written"
+ },
+ "hotkey.activator": {
+  "label": "composed",
+  "label_source": "src/ui/input_profile.rs:539",
+  "choices": "written"
+ },
+ "profile.selected": {
+  "label": "written",
+  "choices": "data"
+ },
+ "profile.create": {
+  "label": "written",
+  "choices": "written"
+ },
+ "profile.delete": {
+  "label": "written",
+  "choices": "written"
+ },
+ "hotkey.*": {
+  "label": "written",
+  "choices": "data"
+ },
+ "hotkeys": {
+  "label": "written",
+  "choices": "written"
+ },
+ "quickmenu_tap": {
+  "label": "written",
+  "choices": "written"
+ },
+ "shader_compile": {
+  "label": "written",
+  "choices": "written"
+ },
+ "driver_thread": {
+  "label": "written",
+  "choices": "written"
+ },
+ "wave32": {
+  "label": "written",
+  "choices": "written"
+ },
+ "small_types": {
+  "label": "written",
+  "choices": "written"
+ },
+ "rdp_layout": {
+  "label": "written",
+  "choices": "written"
+ },
+ "slow_capture": {
+  "label": "written",
+  "choices": "written"
+ },
+ "gpu_timing": {
+  "label": "written",
+  "choices": "written"
+ },
+ "audio_buffer": {
+  "label": "written",
+  "choices": "written"
+ },
+ "display": {
+  "label": "written",
+  "choices": "written"
+ },
+ "hdr": {
+  "label": "written",
+  "choices": "written"
+ },
+ "hdr_white": {
+  "label": "written",
+  "choices": "written"
+ },
+ "hdr_peak": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.shares": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.sandbox": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.search": {
+  "label": "written",
+  "choices": "written"
+ },
+ "write_helper": {
+  "label": "written",
+  "choices": "written"
+ },
+ "update_check": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.update": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.update_download": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.update_cancel": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.update_install": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.update_skip": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.update_rollback": {
+  "label": "written",
+  "choices": "written"
+ },
+ "console.exit": {
+  "label": "written",
+  "choices": "written"
+ },
+ "pc.keyboard": {
+  "label": "written",
+  "choices": "written"
+ },
+ "pc.library": {
+  "label": "written",
+  "choices": "written"
+ },
+ "pc.network": {
+  "label": "written",
+  "choices": "written"
+ }
+}

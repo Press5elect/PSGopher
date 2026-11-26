@@ -33,6 +33,9 @@ struct TitleSettings {
 	 * actions are kHotkeyActions' (psgopher.rs's HOTKEY_ACTIONS, in its order) */
 	bool hotkeys{ true };
 	std::array<int, 15> hotkey{ { 13, 12, 4, 5, 9, 6, -1, -1, -1, -1, -1, -1, -1, -1, -1 } };
+	bool writeHelper{ true };    // a ROM copied from a share is written by the write broker (a payload of its own:
+	                             // the console holds the title's own writes back after ~1.3 GiB; OGBox's decision: on)
+	bool updateCheck{ true };    // the title asks GitHub for a newer release at its start (OGBox's default: on)
 	bool quickmenuTap{ true };   // a touch pad tap opens the quick menu (kept on when nothing else leaves a game)
 	/* a game can be left: by the quick menu's tap or the hotkey's Leave game */
 	bool canLeaveGame() const { return quickmenuTap || (hotkeys && hotkey[2] >= 0); }

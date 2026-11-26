@@ -11,6 +11,22 @@ console: the cheats, variable refresh, HDR10.
 
 ### Front end
 
+- Added: updates from inside the title (BENCH > Console > Check for Updates): the newest release's notes, its download checked against its SHA-256, installed with a backup of the files it replaces and put back after an interrupted install (from OGBox). The check also runs once at the title's start, as OGBox's does (BENCH > Console > Check for Updates at Start, on by default; nothing is downloaded without asking). The offer shows the notes of every newer release under the rows, with Download Update (a progress bar with size and speed, Cancel Download), Install Update (asked first: the title closes when it is done), Skip This Version, and Roll Back to the version kept from before the last update. Untested on a console.
+- Added: copied games are written to the console's storage by a helper (write-broker.elf, from OGBox), which keeps its speed past the first gigabyte; the title writes them itself if the helper can't (BENCH > Console > Fast Writes (Helper), on by default).
+- Changed: BENCH's words follow Gopher64's and the sibling titles' rules: Gopher64's own labels
+  wherever it has the setting (Resolution, SSAA downscaling, VSync, Apply CRT shader, Overclock N64
+  CPU (may cause bugs), Disable Expansion Pak, Enable Rewind, Emulate UNFLoader, Emulate VRU, the
+  N64's inputs, Deadzone Percentage, Use DirectInput), written descriptions in one style, Title Case,
+  the standard choice marked "(Default)"; `ps5/tools/settings-words.py check` keeps them so
+  (`docs/dev/settings-words.md`).
+- Added: each probe keeps a picture of the moment it was taken, shown in the probe picker.
+- Fixed: Circle (back on the console) now does what a PS5 user expects: in the library it goes back to
+  HOME, and on HOME it asks "Close PSGopher?" (Cross closes the title the clean way, Circle stays).
+  The pickers, BENCH and the dialogs already went back one level with Circle; no new buttons. The
+  hints say so (Circle: Home / Close).
+- Added: the library's letter navigation as in Crux2: L2 / R2 go to the previous / next letter (hold to
+  keep going), also across '#' (titles that start with a digit), R2 at the last letter goes to its
+  last cartridge, and the letter is shown large for a moment after a jump.
 - Added: the front end is the Live Board (`ps5/art/live-board.html`, the design chosen): HOME, the
   live mainboard with the chosen cartridge sliding into its slot and its signals running, the panel
   (Gopher64's facts of the cartridge, play time, probes drawn from the save states' own bytes), the
@@ -95,6 +111,17 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### From the siblings (2026-11-26)
+
+- Added: a freeze is named in the boot log. When a game goes 250 ms without a frame, `stall:` says
+  where the emulation thread is (RSP, the RDP's commands or frame, a GPU wait, a submit, an RDRAM
+  sync, the present, the audio queue, cartridge reads, save data, save states...), and `stall over:`
+  how long it lasted and where its time went, in 20 ms samples (BENCH > Video > Slow Moments).
+- Fixed: the sandbox helper is asked again, every quarter of a second for four seconds, when the
+  payload loader does not answer at once (a cold start from the console's home screen), instead of
+  leaving the title in its sandbox without USB drives (from Crux2). The helper's root reference
+  counts were already kept right (from OGBox, as Crux2).
+
 ### From the console log of 2026-11-26 (`5f8bd8e`)
 
 - Changed: 8x supersampled runs at 96-100% in an NTSC game; what is left is the interpreters (the
@@ -104,8 +131,8 @@ console: the cheats, variable refresh, HDR10.
   seconds at each change (about 3.5 s in one 10 s line, the emulation thread off the CPU). Earlier
   it had measured no gain. Parallel-rdp draws with its general shader until the state's own is
   compiled in the background, so the game never waits.
-- Changed: Gopher64's pin moved to `1cb0ff2518e0` (its per-game ROM patches in a file of their own) and
-  Dear ImGui's to 1.93.1.
+- Changed: Gopher64's pin moved to `c9b959e5eb9e` (its per-game ROM patches in a file of their own,
+  their codes updated) and Dear ImGui's to 1.93.1.
 
 ### 8x: the memory layout experiment, the waits measured, the lockstep harness (2026-11-26)
 

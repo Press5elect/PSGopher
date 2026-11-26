@@ -450,11 +450,66 @@ board::Look Frontend::lookFor(const Game &g) const
 	return look;
 }
 
+void Frontend::probeThumb(ImDrawList *dl, const std::string &stateFile, const board::Look &look, float x, float y, float w, float h)
+{
+	if (host_.probe_picture && !stateFile.empty()) {
+		const auto pic = host_.probe_picture(stateFile);
+		if (pic.first != ImTextureID_Invalid) {
+			Ink ink{ dl, u_ };
+			ink.rect(x, y, w, h, IM_COL32(0, 0, 0, 255), 5);
+			dl->AddImageRounded(ImTextureRef(pic.first), S(x, y), S(x + w, y + h), ImVec2(0, 0), ImVec2(1, 1), IM_COL32_WHITE, L(5));
+			ink.frame(x, y, w, h, kLine, 5, 1);
+			return;
+		}
+	}
+	fingerprint(Ink{ dl, u_ }, stateFile, look, x, y, w, h); /* (a plain stand-in: this probe has no picture) */
+}
+
 /* ---------------------------------------------------------------- the frame */
 
-void Frontend::frame(ImDrawList *dl, const PadInput &pad, float w, float h, float dt, ImTextureRef boardTex, ImTextureRef logo,
+void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, float dt, ImTextureRef boardTex, ImTextureRef logo,
                      const FrontendFonts &f)
 {
+	/* "Close PSGopher?" has the pad while it is up: Cross closes (the title's clean exit), Circle stays */
+	PadInput quiet;
+	quiet.now = pad_in.now;
+	const PadInput &pad = close_open_ || update_ask_ ? quiet : pad_in;
+	/* "Install vX.Y.Z?" and "Roll back to ...?" (BENCH, Console) are asked the same way: Cross does it,
+	 * Circle stays. An install that is in place closes the title the clean way, as the exit row does;
+	 * a roll back runs on the updater's thread and closes it when it is done */
+	if (update_ask_) {
+		if (pad_in.pressed & PAD_CIRCLE)
+			update_ask_ = 0;
+		else if (pad_in.pressed & PAD_CROSS) {
+			const int ask = update_ask_;
+			update_ask_ = 0;
+			if (ask == 1) {
+				if (host_.update_install && host_.update_install() && host_.close)
+					host_.close();
+			} else if (host_.update_rollback) {
+				rollback_wanted_ = true;
+				host_.update_rollback();
+			}
+		}
+	}
+	if (rollback_wanted_ && host_.update_status) {
+		const update::Status st = host_.update_status();
+		if (st.state == update::State::Installed && st.rollback) {
+			rollback_wanted_ = false;
+			if (host_.close)
+				host_.close();
+		} else if (st.state == update::State::Failed || st.state == update::State::Idle)
+			rollback_wanted_ = false;
+	}
+	if (close_open_) {
+		if (pad_in.pressed & PAD_CIRCLE)
+			close_open_ = false;
+		else if (pad_in.pressed & PAD_CROSS) {
+			close_open_ = false;
+			if (host_.close)
+				host_.close();
+		}
+	}
 	refresh();
 	u_ = h / board::kStageH;
 	const float stage_w = w / u_; // (16:9: 1920)
@@ -504,6 +559,49 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad, float w, float h, floa
 	default: home(dl, pad, f); break;
 	}
 	header(dl, logo, f, w);
+	if (close_open_) {
+		const float pw = 760, ph = 260, px = (1920 - pw) / 2, py = (1080 - ph) / 2;
+		ink.rect(0, 0, 1920, 1080, IM_COL32(1, 5, 7, 170));
+		ink.glow(px, py, pw, ph, IM_COL32(79, 240, 224, 64), 24, 20);
+		ink.rect(px, py, pw, ph, IM_COL32(7, 17, 21, 245), 20);
+		ink.frame(px, py, pw, ph, kLine, 20, 2);
+		ink.text(f.mono, 13, px + 40, py + 36, kDim, "PSGOPHER", .2f);
+		ink.text(f.display, 44, px + 40, py + 64, kText, "Close PSGopher?", -.02f);
+		ink.text(f.mono, 17, px + 40, py + 128, kDim, "The title ends and the console returns to its home screen.");
+		float bx = px + 40;
+		int which = 0;
+		for (const char *label : { "\xE2\x9C\x95  CLOSE", "\xE2\x97\x8B  STAY" }) {
+			const bool on = which++ == 0; /* (the first is the one that acts) */
+			const float bw = ink.width(f.mono_bold, 18, label, .08f) + 48;
+			ink.rect(bx, py + 176, bw, 50, on ? kText : IM_COL32(16, 34, 38, 255), 25);
+			if (!on)
+				ink.frame(bx, py + 176, bw, 50, kLine, 25, 1);
+			ink.text(f.mono_bold, 18, bx + 24, py + 191, on ? kInk : kText, label, .08f);
+			bx += bw + 14;
+		}
+	}
+	if (update_ask_) {
+		const float pw = 760, ph = 292, px = (1920 - pw) / 2, py = (1080 - ph) / 2;
+		ink.rect(0, 0, 1920, 1080, IM_COL32(1, 5, 7, 170));
+		ink.glow(px, py, pw, ph, IM_COL32(255, 182, 72, 64), 24, 20);
+		ink.rect(px, py, pw, ph, IM_COL32(7, 17, 21, 245), 20);
+		ink.frame(px, py, pw, ph, kAmber, 20, 2);
+		ink.text(f.mono, 13, px + 40, py + 36, kDim, update_ask_ == 1 ? "INSTALL" : "ROLL BACK", .2f);
+		ink.text(f.display, 44, px + 40, py + 64, kText, update_ask_text_, -.02f);
+		ink.text(f.mono, 17, px + 40, py + 128, kDim, "The title closes when it is done.");
+		ink.text(f.mono, 17, px + 40, py + 154, kDim, "Games, saves and settings stay.");
+		float bx = px + 40;
+		int which = 0;
+		for (const char *label : { update_ask_ == 1 ? "\xE2\x9C\x95  INSTALL" : "\xE2\x9C\x95  ROLL BACK", "\xE2\x97\x8B  CANCEL" }) {
+			const bool on = which++ == 0;
+			const float bw = ink.width(f.mono_bold, 18, label, .08f) + 48;
+			ink.rect(bx, py + 208, bw, 50, on ? kText : IM_COL32(16, 34, 38, 255), 25);
+			if (!on)
+				ink.frame(bx, py + 208, bw, 50, kLine, 25, 1);
+			ink.text(f.mono_bold, 18, bx + 24, py + 223, on ? kInk : kText, label, .08f);
+			bx += bw + 14;
+		}
+	}
 	if (host_.notice) {
 		const std::string n = host_.notice();
 		if (!n.empty()) {
@@ -669,7 +767,7 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 		if (DIR *d = opendir(states.c_str())) {
 			while (dirent *e = readdir(d)) {
 				const std::string name = e->d_name;
-				if (name.rfind(stem, 0) != 0 || name.find(".state") == std::string::npos)
+				if (name.rfind(stem, 0) != 0 || name.find(".state") == std::string::npos || name.back() == 'g')
 					continue;
 				for (size_t i = 0; i < probes_.size(); i++)
 					if (name.back() == (char)('0' + probes_[i].slot))
@@ -685,10 +783,10 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 	for (size_t i = 0; i < probes_.size() && i < 3; i++) {
 		char path[512];
 		const std::string &file = probe_files_[i];
-		fingerprint(ink, file, look, x + pad_x, cy, 112, 42);
+		probeThumb(dl, file, look, x + pad_x, cy, 56, 42);
 		snprintf(path, sizeof(path), "Probe %d", probes_[i].slot);
-		ink.text(f.mono_bold, 15, x + pad_x + 126, cy + 2, withAlpha(kText, alpha), path);
-		ink.text(f.mono, 15, x + pad_x + 126, cy + 22, withAlpha(kDim, alpha), agoText(probes_[i].time, true));
+		ink.text(f.mono_bold, 15, x + pad_x + 70, cy + 2, withAlpha(kText, alpha), path);
+		ink.text(f.mono, 15, x + pad_x + 70, cy + 22, withAlpha(kDim, alpha), agoText(probes_[i].time, true));
 		cy += 42 + 8;
 	}
 	cy += 10;
@@ -797,6 +895,8 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		if (pad.repeat(PAD_LEFT))
 			strip_sel_ = std::max(0, strip_sel_ - 1);
 	}
+	if (pad.pressed & PAD_CIRCLE)
+		close_open_ = true;
 	g = selected();
 	if (g && (pad.pressed & PAD_CROSS) && host_.play && !(host_.busy && host_.busy()))
 		host_.play(*g, -1);
@@ -861,7 +961,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		const float nw = ink.width(f.mono, 16, name);
 		ink.text(f.mono, 16, cx - nw / 2, top + sh + 10, on ? kText : kDim, name);
 	}
-	ink.text(f.mono, 14, 64, 1046, kDim, "L1 \xC2\xB7 R1  VIEWS      \xE2\x97\x84 \xE2\x96\xBA  CARTRIDGE      \xE2\x9C\x95  POWER ON      \xE2\x96\xA1  PROBES      \xE2\x96\xB3  CHEATS", .08f);
+	ink.text(f.mono, 14, 64, 1046, kDim, "L1 \xC2\xB7 R1  VIEWS      \xE2\x97\x84 \xE2\x96\xBA  CARTRIDGE      \xE2\x9C\x95  POWER ON      \xE2\x96\xA1  PROBES      \xE2\x96\xB3  CHEATS      \xE2\x97\x8B  CLOSE", .08f);
 }
 
 /* the probes of the chosen game, to start it from one */
@@ -903,8 +1003,9 @@ void Frontend::probePicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 		ink.rect(x + 30, cy, w - 60, 54, on ? kText : IM_COL32(16, 34, 38, 255), 10);
 		char t[32];
 		snprintf(t, sizeof(t), "Probe %d", probes_[i].slot);
-		ink.text(f.mono_bold, 18, x + 48, cy + 16, on ? kInk : kText, t);
+		ink.text(f.mono_bold, 18, x + 118, cy + 16, on ? kInk : kText, t);
 		const std::string when = agoText(probes_[i].time, true);
+		probeThumb(dl, i < (int)probe_files_.size() ? probe_files_[i] : std::string(), look, x + 30, cy, 72, 54);
 		ink.text(f.mono, 15, x + w - 48 - ink.width(f.mono, 15, when), cy + 18, on ? kInk : kDim, when);
 		cy += 62;
 	}
@@ -1049,7 +1150,9 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 			while (dirent *e = readdir(d)) {
 				const std::string name = e->d_name;
 				const size_t dash = name.rfind('-');
-				if (dash != std::string::npos && name.find(".state") != std::string::npos)
+				/* (a probe is "<name>-<hash>.state<digit>": its "<state>.png" picture is not one) */
+				const size_t dot = name.rfind(".state");
+				if (dash != std::string::npos && dot != std::string::npos && dot + 7 == name.size() && std::isdigit((unsigned char)name.back()))
 					with_probes.insert(name.substr(0, dash));
 			}
 			closedir(d);
@@ -1097,31 +1200,50 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 			if (best >= 0)
 				rack_sel_ = best;
 		}
-		/* L2/R2: the next letter (A-Z order) */
-		if ((pad.pressed & (PAD_L2_DIGITAL | PAD_R2_DIGITAL)) && sort_ == 0) {
-			const int d = (pad.pressed & PAD_R2_DIGITAL) ? 1 : -1;
-			const char now = letterOf(games_[rack_[rack_sel_]]);
-			int k = rack_sel_;
+		/* L2/R2 (held: repeating) in A-Z order: R2 to the first cartridge of the next letter (at the
+		 * last letter, its last), L2 to the first of this letter and, from there, of the one before;
+		 * only the cartridges the filter shows count; the letter is shown large for a moment */
+		if (sort_ == 0 && (pad.repeat(PAD_R2_DIGITAL) || pad.repeat(PAD_L2_DIGITAL))) {
+			const int d = pad.repeat(PAD_R2_DIGITAL) ? 1 : -1;
+			auto letter = [&](int k) { return letterOf(games_[rack_[k]]); };
+			const char now = letter(rack_sel_);
+			int to = rack_sel_;
 			if (d > 0) {
-				while (k < n && letterOf(games_[rack_[k]]) == now)
-					k++;
-				while (k < n && !visible(k))
-					k++;
-				if (k < n)
-					rack_sel_ = k;
+				for (int k = rack_sel_ + 1; k < n; k++)
+					if (visible(k) && letter(k) != now) {
+						to = k;
+						break;
+					}
+				if (to == rack_sel_)
+					for (int k = n - 1; k > rack_sel_; k--)
+						if (visible(k)) {
+							to = k;
+							break;
+						}
 			} else {
-				while (k > 0 && letterOf(games_[rack_[k - 1]]) == now)
-					k--;
-				k--;
-				if (k >= 0) {
-					const char prev = letterOf(games_[rack_[k]]);
-					while (k > 0 && letterOf(games_[rack_[k - 1]]) == prev)
-						k--;
-					while (k < n && !visible(k))
-						k++;
-					rack_sel_ = std::min(k, n - 1);
+				int first = rack_sel_; /* the first shown cartridge of this letter */
+				for (int k = rack_sel_ - 1; k >= 0 && letter(k) == now; k--)
+					if (visible(k))
+						first = k;
+				to = first;
+				if (first == rack_sel_) {
+					int prev = -1;
+					for (int k = rack_sel_ - 1; k >= 0; k--)
+						if (visible(k) && letter(k) != now) {
+							prev = k;
+							break;
+						}
+					if (prev >= 0) {
+						to = prev;
+						for (int k = prev - 1; k >= 0 && letter(k) == letter(prev); k--)
+							if (visible(k))
+								to = k;
+					}
 				}
 			}
+			rack_sel_ = to;
+			letter_ = letter(to);
+			letter_at_ = pad.now;
 		}
 	}
 	if (pad.pressed & PAD_SQUARE) {
@@ -1134,6 +1256,8 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	}
 	if (pad.pressed & PAD_OPTIONS)
 		show_ = (show_ + 1) % 7;
+	if (pad.pressed & PAD_CIRCLE)
+		setView(board::View::Home);
 	const Game *g = n ? &games_[rack_[rack_sel_]] : nullptr;
 	if (g && (pad.pressed & PAD_CROSS) && host_.play && !(host_.busy && host_.busy()))
 		host_.play(*g, -1);
@@ -1275,11 +1399,22 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	snprintf(count, sizeof(count), "%d cartridges", shown);
 	ink.text(f.mono, 15, 1300 - ink.width(f.mono, 15, count), by + 9, kDim, count);
 	ink.text(f.mono, 14, 64, 1046, kDim,
-	         "\xE2\x97\x84 \xE2\x96\xBA \xE2\x96\xB2 \xE2\x96\xBC  CARTRIDGE      L2 \xC2\xB7 R2  LETTER      \xE2\x9C\x95  POWER ON      \xE2\x96\xB3  SEAT IT",
+	         "\xE2\x97\x84 \xE2\x96\xBA \xE2\x96\xB2 \xE2\x96\xBC  CARTRIDGE      L2 \xC2\xB7 R2  LETTER      \xE2\x9C\x95  POWER ON      \xE2\x96\xB3  SEAT IT      \xE2\x97\x8B  HOME",
 	         .08f);
 
 	if (g)
 		panel(dl, f, *g, true, 1920 - 64 - 470, 150, 1);
+
+	/* the letter just jumped to, large, for a moment */
+	if (const float since = pad.now - letter_at_; since >= 0 && since < 0.9f && letter_ != 0) {
+		const float a = since < 0.6f ? 1.0f : 1.0f - (since - 0.6f) / 0.3f, size = 190, lx = 1920 - 64 - size - 470 - 24, ly = 190;
+		ink.glow(lx, ly, size, size, withAlpha(kText, .35f * a), 28, 14);
+		ink.rect(lx, ly, size, size, withAlpha(IM_COL32(7, 17, 21, 255), .94f * a), 28);
+		ink.frame(lx, ly, size, size, withAlpha(kText, a), 28, 3);
+		const char s[2] = { letter_, 0 };
+		const float sw = ink.width(f.mono_heavy, 120, s);
+		ink.text(f.mono_heavy, 120, lx + (size - sw) / 2, ly + 22, withAlpha(kText, a), s);
+	}
 }
 
 /* ---------------------------------------------------------------- BENCH */
@@ -1293,7 +1428,9 @@ struct Option {
 };
 struct Row {
 	enum Kind { Choice, Stepper, Action, File, Bind, Info } kind = Choice;
-	std::string label, help;
+	std::string key, label, help;               // key: Gopher64's config key, the ini's, or this row's name (settings-words.py)
+	bool has_def = false;                       // def: the value the row has by default (its choice is marked)
+	int64_t def = 0;
 	std::vector<Option> options;                 // Choice
 	std::function<int64_t()> get;                // Choice, Stepper
 	std::function<void(int64_t)> set;
@@ -1302,32 +1439,53 @@ struct Row {
 	std::function<std::string()> value;          // Action, File, Bind, Info: what is shown
 	std::function<void()> run;                   // Action, File (the picker), Bind (press a button)
 	std::function<void()> clear;                 // File, Bind: left clears
+	std::function<bool()> shown;                 // empty: always; a row that is not shown is left out of the panel (its words are still dumped)
 };
 struct Section {
 	std::string name, part, text;
 	std::vector<Row> rows;
 };
 
+/* the standard choice carries "(Default)", except on a plain Off/On switch */
+void markDefault(Row &r)
+{
+	if (!r.has_def || r.options.empty())
+		return;
+	if (r.options.size() == 2 && r.options[0].label == "Off" && r.options[1].label == "On")
+		return;
+	for (Option &o : r.options)
+		if (o.value == r.def && o.label.find("(Default)") == std::string::npos)
+			o.label += " (Default)";
+}
+
+std::string jsonText(const std::string &s)
+{
+	std::string out = "\"";
+	for (const char c : s)
+		out += c == '"' || c == '\\' ? std::string("\\") + c : std::string(1, c);
+	return out + "\"";
+}
+
 /* a DualSense control by SDL's gamepad numbering, as Gopher64's profiles keep it */
 std::string bindingLabel(const Binding &b)
 {
-	static const char *const buttons[21] = { "Cross", "Circle", "Square", "Triangle", "Touch pad", "PS", "Options", "L3", "R3", "L1", "R1",
-		                                     "D-pad up", "D-pad down", "D-pad left", "D-pad right", "Mute", "", "", "", "", "Touch pad" };
+	static const char *const buttons[21] = { "Cross", "Circle", "Square", "Triangle", "Touch Pad", "PS", "Options", "L3", "R3", "L1", "R1",
+		                                     "D-Pad Up", "D-Pad Down", "D-Pad Left", "D-Pad Right", "Mute", "", "", "", "", "Touch Pad" };
 	switch (b.kind) {
 	case 1:
 		return b.id >= 0 && b.id < 21 && buttons[b.id][0] ? buttons[b.id] : "Button " + std::to_string(b.id);
 	case 2:
 		switch (b.id) {
-		case 0: return b.axis < 0 ? "Left stick \xE2\x86\x90" : "Left stick \xE2\x86\x92";
-		case 1: return b.axis < 0 ? "Left stick \xE2\x86\x91" : "Left stick \xE2\x86\x93";
-		case 2: return b.axis < 0 ? "Right stick \xE2\x86\x90" : "Right stick \xE2\x86\x92";
-		case 3: return b.axis < 0 ? "Right stick \xE2\x86\x91" : "Right stick \xE2\x86\x93";
+		case 0: return b.axis < 0 ? "Left Stick \xE2\x86\x90" : "Left Stick \xE2\x86\x92";
+		case 1: return b.axis < 0 ? "Left Stick \xE2\x86\x91" : "Left Stick \xE2\x86\x93";
+		case 2: return b.axis < 0 ? "Right Stick \xE2\x86\x90" : "Right Stick \xE2\x86\x92";
+		case 3: return b.axis < 0 ? "Right Stick \xE2\x86\x91" : "Right Stick \xE2\x86\x93";
 		case 4: return "L2";
 		case 5: return "R2";
 		default: return "Axis " + std::to_string(b.id);
 		}
-	case 3: return "a joystick's input (DirectInput)";
-	default: return "\xE2\x80\x94 none";
+	case 3: return "Joystick Input (DirectInput)";
+	default: return "\xE2\x80\x94 None";
 	}
 }
 
@@ -1368,6 +1526,99 @@ bool padAtRest(const PadInput &pad)
 	       std::fabs(pad.right_y) < .3f && pad.l2 < .3f && pad.r2 < .3f;
 }
 
+/* ---- the updater's words on BENCH (update.h) ---- */
+
+std::string fmtBytes(uint64_t bytes)
+{
+	char t[32];
+	if (bytes >= 1024ull * 1024)
+		snprintf(t, sizeof(t), "%.1f MB", (double)bytes / (1024.0 * 1024.0));
+	else
+		snprintf(t, sizeof(t), "%.0f KB", (double)bytes / 1024.0);
+	return t;
+}
+
+/* the release's tag as shown ("v1.2.0") */
+std::string releaseTag(const update::Status &st)
+{
+	if (!st.tag.empty())
+		return st.tag;
+	return st.version.empty() ? std::string("the release") : "v" + st.version;
+}
+
+/* the Check for Updates row's value: the result in a few words */
+std::string updateValue(const update::Status &st)
+{
+	switch (st.state) {
+	case update::State::Checking: return "Checking";
+	case update::State::UpToDate: return st.developer_build ? "Developer Build" : "Up to Date";
+	case update::State::Available: return releaseTag(st) + (st.skipped ? " Skipped" : " Available");
+	case update::State::NoRelease: return "No Release Yet";
+	case update::State::Downloading:
+		return st.total ? "Downloading " + std::to_string((int)(100.0 * (double)st.done / (double)st.total)) + "%" : std::string("Downloading");
+	case update::State::Verifying: return st.rollback ? "Checking" : "Verifying";
+	case update::State::Ready: return "Ready to Install";
+	case update::State::Installed: return "Installed";
+	case update::State::Failed: return "Failed";
+	default: return "Check";
+	}
+}
+
+/* what the check may be asked again in: not while something is going on or waits */
+bool updateIdle(const update::Status &st)
+{
+	switch (st.state) {
+	case update::State::Checking:
+	case update::State::Downloading:
+	case update::State::Verifying:
+	case update::State::Ready:
+	case update::State::Installed: return false;
+	default: return true;
+	}
+}
+
+/* the notes of every newer release, newest first: a heading and the plain text of each */
+std::string updateNotesText(const update::Status &st)
+{
+	std::string out;
+	for (const update::ReleaseNotes &r : st.newer) {
+		if (!out.empty())
+			out += "\n";
+		out += r.tag + (r.name.empty() || r.name == r.tag ? "" : "  " + r.name) + (r.date.empty() ? "" : "  (" + r.date + ")") + "\n" + r.text + "\n";
+	}
+	return out.empty() ? st.notes : out;
+}
+
+/* text with its own line breaks, wrapped; blank lines kept once; cut with an ellipsis after max_lines */
+std::vector<std::string> wrapParagraphs(const Ink &ink, ImFont *font, float size, const std::string &text, float width, int max_lines)
+{
+	std::vector<std::string> lines;
+	size_t at = 0;
+	while (at <= text.size()) {
+		size_t end = text.find('\n', at);
+		if (end == std::string::npos)
+			end = text.size();
+		std::string para = text.substr(at, end - at);
+		while (!para.empty() && (para.back() == '\r' || para.back() == ' '))
+			para.pop_back();
+		if (para.empty()) {
+			if (!lines.empty() && !lines.back().empty())
+				lines.push_back("");
+		} else {
+			for (const std::string &l : wrap(ink, font, size, para, width, 1000))
+				lines.push_back(l);
+		}
+		at = end + 1;
+	}
+	while (!lines.empty() && lines.back().empty())
+		lines.pop_back();
+	if ((int)lines.size() > max_lines && max_lines > 0) {
+		lines.resize(max_lines);
+		lines.back() += "\xE2\x80\xA6";
+	}
+	return lines;
+}
+
 std::string baseName(const std::string &path)
 {
 	const size_t slash = path.rfind('/');
@@ -1376,21 +1627,42 @@ std::string baseName(const std::string &path)
 
 } // namespace
 
+/* the host tests' dump of every BENCH row's words, one JSON line each (ps5/tools/settings-words.py reads it) */
+FILE *g_settings_words_dump = nullptr;
+
+static void dumpWords(FILE *out, const std::vector<Section> &sections)
+{
+	for (const Section &s : sections) {
+		fprintf(out, "{\"section\":%s,\"text\":%s}\n", jsonText(s.name).c_str(), jsonText(s.text).c_str());
+		for (const Row &r : s.rows) {
+			static const char *const kinds[] = { "choice", "stepper", "action", "file", "bind", "info" };
+			fprintf(out, "{\"section\":%s,\"key\":%s,\"kind\":\"%s\",\"label\":%s,\"help\":%s,\"value\":%s,\"default\":%s,\"choices\":[",
+			        jsonText(s.name).c_str(), jsonText(r.key).c_str(), kinds[r.kind], jsonText(r.label).c_str(), jsonText(r.help).c_str(),
+			        jsonText(r.value ? r.value() : "").c_str(), r.has_def ? std::to_string(r.def).c_str() : "null");
+			for (size_t o = 0; o < r.options.size(); o++)
+				fprintf(out, "%s[%s,%lld]", o ? "," : "", jsonText(r.options[o].label).c_str(), (long long)r.options[o].value);
+			fprintf(out, "]}\n");
+		}
+	}
+}
+
 void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 {
 	Ink ink{ dl, u_ };
 	TitleSettings *ts = host_.title;
-	auto choose = [this](const char *key, const std::string &label, const std::string &help, std::vector<Option> options) {
+	auto choose = [this](const char *key, const std::string &label, const std::string &help, std::vector<Option> options, int64_t def) {
 		Row r;
-		r.label = label, r.help = help, r.options = std::move(options);
+		r.key = key, r.label = label, r.help = help, r.options = std::move(options), r.has_def = true, r.def = def;
+		markDefault(r);
 		r.get = [this, key] { return host_.get ? host_.get(key) : 0; };
 		r.set = [this, key](int64_t v) { if (host_.set) host_.set(key, v); };
 		return r;
 	};
-	auto title_row = [ts](const std::string &label, const std::string &help, std::vector<Option> options,
-	                      std::function<int64_t(TitleSettings &)> get, std::function<void(TitleSettings &, int64_t)> set) {
+	auto title_row = [ts](const std::string &key, const std::string &label, const std::string &help, std::vector<Option> options,
+	                      std::function<int64_t(TitleSettings &)> get, std::function<void(TitleSettings &, int64_t)> set, int64_t def) {
 		Row r;
-		r.label = label, r.help = help, r.options = std::move(options);
+		r.key = key, r.label = label, r.help = help, r.options = std::move(options), r.has_def = true, r.def = def;
+		markDefault(r);
 		r.get = [ts, get] { return ts ? get(*ts) : 0; };
 		r.set = [ts, set](int64_t v) {
 			if (ts) {
@@ -1400,23 +1672,23 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		};
 		return r;
 	};
-	auto info = [](const std::string &label, const std::string &value, const std::string &help) {
+	auto info = [](const std::string &key, const std::string &label, const std::string &value, const std::string &help) {
 		Row r;
-		r.kind = Row::Info, r.label = label, r.help = help;
+		r.kind = Row::Info, r.key = key, r.label = label, r.help = help;
 		r.value = [value] { return value; };
 		return r;
 	};
-	auto action = [](const std::string &label, std::function<std::string()> value, const std::string &help, std::function<void()> run) {
+	auto action = [](const std::string &key, const std::string &label, std::function<std::string()> value, const std::string &help, std::function<void()> run) {
 		Row r;
-		r.kind = Row::Action, r.label = label, r.help = help, r.value = std::move(value), r.run = std::move(run);
+		r.kind = Row::Action, r.key = key, r.label = label, r.help = help, r.value = std::move(value), r.run = std::move(run);
 		return r;
 	};
 	const std::vector<std::string> profiles = host_.profiles ? host_.profiles() : std::vector<std::string>{ "default" };
 	if (bench_profile_.empty() || std::find(profiles.begin(), profiles.end(), bench_profile_) == profiles.end())
 		bench_profile_ = profiles.empty() ? "default" : profiles.front();
-	auto bind_row = [this, &pad](const std::string &profile, int input, const std::string &label, const std::string &help) {
+	auto bind_row = [this, &pad](const std::string &key, const std::string &profile, int input, const std::string &label, const std::string &help) {
 		Row r;
-		r.kind = Row::Bind, r.label = label, r.help = help;
+		r.kind = Row::Bind, r.key = key, r.label = label, r.help = help;
 		r.value = [this, profile, input] {
 			if (capture_input_ == input && capture_profile_ == profile)
 				return std::string("press a button or move a stick\xE2\x80\xA6");
@@ -1433,89 +1705,93 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	std::vector<Section> sections;
 	/* Video */
 	{
-		Section s{ "Video", "rdp", "How finely the picture is drawn and how parallel-rdp makes its shaders (from the next game).", {} };
-		s.rows.push_back(choose("video.upscale", "Resolution", "How much finer than the original the picture is drawn: 2\xC3\x97, 4\xC3\x97 or 8\xC3\x97 the N64's pixels.",
-		                        { { "1\xC3\x97 original", 1 }, { "2\xC3\x97", 2 }, { "4\xC3\x97", 4 }, { "8\xC3\x97", 8 } }));
-		s.rows.push_back(choose("video.ssaa", "Supersampling", "Draws finely and shows the result at the original size: smoother edges, the original's sharpness.",
-		                        { { "Off", 0 }, { "On", 1 } }));
-		s.rows.push_back(choose("video.vsync", "Vsync", "Each frame waits for the screen's refresh (Gopher64's vsync).", { { "Off", 0 }, { "On", 1 } }));
-		s.rows.push_back(title_row("Shader compiles", "Until a state's own shader is made, parallel-rdp draws with a general, slower one, so the game never waits for a compile: one background thread (Gopher64's) or four.",
-		                           { { "1 thread", 1 }, { "4 threads", 4 } },
+		Section s{ "Video", "rdp", "Controls how the picture is drawn: its resolution, smoothing and how shaders are compiled.", {} };
+		s.rows.push_back(choose("video.upscale", "Resolution", "Determines the internal resolution as a multiple of the original N64 resolution. Higher values give a sharper picture but reduce performance.",
+		                        { { "1x", 1 }, { "2x", 2 }, { "4x", 4 }, { "8x", 8 } }, 1));
+		s.rows.push_back(choose("video.ssaa", "SSAA downscaling", "When enabled, draws the picture at a higher resolution and scales it down to the original size. Smooths edges while keeping the original sharpness. Reduces performance.",
+		                        { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(choose("video.vsync", "VSync", "When enabled, each frame waits for the display's refresh, which prevents tearing. When disabled, frames are shown as soon as they are ready.",
+		                        { { "Off", 0 }, { "On", 1 } }, 1));
+		s.rows.push_back(title_row("shader_compile", "Shader Compiles", "Determines how many background threads compile graphics shaders. Until a shader is ready, a general and slower one is used, so the game never waits for a compile. More threads can reduce stutter.",
+		                           { { "1 Thread", 1 }, { "4 Threads", 4 } },
 		                           [](TitleSettings &t) -> int64_t { return atoi(t.shaderCompile.c_str()); },
-		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 4 ? "4" : "1"; }));
-		s.rows.push_back(title_row("Graphics driver", "The driver records and submits on a thread of its own (Crux2's switch).", { { "Same thread", 0 }, { "Own thread", 1 } },
-		                           [](TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }));
-		s.rows.push_back(title_row("Compute waves", "How wide the GPU runs parallel-rdp's shaders: 64 (RADV's default) or 32, which suits its per-pixel loops on RDNA. GPU timing shows which is faster.",
-		                           { { "64 wide", 0 }, { "32 wide", 1 } }, [](TitleSettings &t) -> int64_t { return t.wave32; },
-		                           [](TitleSettings &t, int64_t v) { t.wave32 = v != 0; }));
-		s.rows.push_back(title_row("8/16-bit maths", "parallel-rdp's 8 and 16-bit arithmetic, which it turns off on RADV (measured on PCs). GPU timing shows which is faster here.",
+		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 4 ? "4" : "1"; }, 1));
+		s.rows.push_back(title_row("driver_thread", "Graphics Driver", "Selects whether the graphics driver records and submits its work on a separate thread. Can improve performance in some games.",
+		                           { { "Same Thread", 0 }, { "Separate Thread", 1 } },
+		                           [](TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }, 0));
+		s.rows.push_back(title_row("wave32", "Compute Waves", "Selects how many shader threads the GPU runs together: 64 is the driver's default, 32 can improve performance in some games. GPU Timing shows which is faster.",
+		                           { { "64 Wide", 0 }, { "32 Wide", 1 } }, [](TitleSettings &t) -> int64_t { return t.wave32; },
+		                           [](TitleSettings &t, int64_t v) { t.wave32 = v != 0; }, 0));
+		s.rows.push_back(title_row("small_types", "8/16-Bit Math", "Allows shaders to use 8-bit and 16-bit arithmetic where the GPU has it. Can improve performance in some games. GPU Timing shows whether it does.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.smallTypes; },
-		                           [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; }));
-		s.rows.push_back(title_row("Upscaled memory", "How the upscaled copy of the N64's memory is laid out. Per pixel keeps each pixel's samples together: at 8\xC3\x97 it made depth blending about 15 times faster on this console. Original is parallel-rdp's own (a copy per sample, 8 MiB apart), kept in case a game draws wrongly with Per pixel.",
-		                           { { "Per pixel", 2 }, { "Original", 0 } }, [](TitleSettings &t) -> int64_t { return t.rdpLayout; },
-		                           [](TitleSettings &t, int64_t v) { t.rdpLayout = v == 0 ? 0 : 2; }));
-		s.rows.push_back(title_row("Slow moments", "When a game falls below 95% for 3 seconds, the next 10 seconds are measured into the boot log (where the time goes), up to three times a game.",
-		                           { { "Off", 0 }, { "Measured", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
-		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }));
-		s.rows.push_back(title_row("GPU timing", "Writes the GPU's time in each of parallel-rdp's stages to the boot log every 10 s (gpu: lines), to find what a slow game costs.",
+		                           [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; }, 0));
+		s.rows.push_back(title_row("rdp_layout", "Upscaled Memory", "Selects how the upscaled copy of the N64's memory is arranged. Per Pixel keeps each pixel's samples together and improves performance at high resolutions. Original may fix drawing errors in some games.",
+		                           { { "Per Pixel", 2 }, { "Original", 0 } }, [](TitleSettings &t) -> int64_t { return t.rdpLayout; },
+		                           [](TitleSettings &t, int64_t v) { t.rdpLayout = v == 0 ? 0 : 2; }, 2));
+		s.rows.push_back(title_row("slow_capture", "Slow Moments", "When enabled, a game that runs below 95% speed for 3 seconds has the next 10 seconds recorded in the log, up to three times per game. Used to find what slows a game down.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
+		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }, 1));
+		s.rows.push_back(title_row("gpu_timing", "GPU Timing", "When enabled, writes the time the GPU spends in each drawing stage to the log every 10 seconds. Used to find what makes a slow game slow.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.gpuTiming; },
-		                           [](TitleSettings &t, int64_t v) { t.gpuTiming = v != 0; }));
+		                           [](TitleSettings &t, int64_t v) { t.gpuTiming = v != 0; }, 0));
 		sections.push_back(std::move(s));
 	}
 	/* Screen and sound */
 	{
-		Section s{ "Screen & sound", "adac", "What is plugged into the AV multi out, how the picture fills the screen, how much sound is kept ready.", {} };
-		s.rows.push_back(choose("video.crt", "Tube TV look", "Scanlines and the glow of a CRT.", { { "Off", 0 }, { "On", 1 } }));
-		s.rows.push_back(choose("video.widescreen", "Widescreen", "Stretches the picture to 16:9.", { { "4:3", 0 }, { "16:9 stretch", 1 } }));
-		s.rows.push_back(choose("video.integer_scaling", "Integer scaling", "The picture grows in whole steps only: every pixel the same size.", { { "Off", 0 }, { "On", 1 } }));
-		s.rows.push_back(title_row("Sound buffer", "How much sound is kept queued: more, fewer gaps when the game is slow, and more delay.",
+		Section s{ "Screen & Sound", "adac", "Controls how the picture fills the screen and how much sound is kept queued.", {} };
+		s.rows.push_back(choose("video.crt", "Apply CRT shader", "When enabled, adds scanlines and the glow of a CRT television to the picture.", { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(choose("video.widescreen", "Widescreen (stretch)", "When enabled, stretches the picture to 16:9. When disabled, the picture keeps its original 4:3 shape.", { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(choose("video.integer_scaling", "Integer Scaling", "When enabled, scales the picture by whole numbers only, so every pixel is the same size. May leave borders around the picture.", { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(title_row("audio_buffer", "Audio Buffer", "Determines how much audio is kept queued. A larger buffer prevents gaps when a game runs slowly, but adds delay.",
 		                           { { "33 ms", 2 }, { "67 ms", 4 }, { "100 ms", 6 }, { "133 ms", 8 } },
-		                           [](TitleSettings &t) -> int64_t { return t.audioBuffer; }, [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)v; }));
+		                           [](TitleSettings &t) -> int64_t { return t.audioBuffer; }, [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)v; }, 4));
 		sections.push_back(std::move(s));
 	}
 	/* TV output */
 	{
-		Section s{ "TV output", "vdac", "The console's output: refresh from the next start, HDR10 from the next game. Untested on a console yet.", {} };
-		s.rows.push_back(title_row("Refresh", "59.94 Hz is the N64's; 119.88 Hz and variable refresh need a TV that has them.",
+		Section s{ "TV Output", "vdac", "Selects the display's refresh rate and HDR10 output.", {} };
+		s.rows.push_back(title_row("display", "Refresh Rate", "Selects the display's refresh rate. 59.94 Hz is the rate of the N64; 119.88 Hz and VRR need a TV that supports them.",
 		                           { { "59.94 Hz", 0 }, { "119.88 Hz", 1 }, { "VRR", 2 } },
 		                           [](TitleSettings &t) -> int64_t { return t.display == "120" ? 1 : t.display == "vrr" ? 2 : 0; },
-		                           [](TitleSettings &t, int64_t v) { t.display = v == 1 ? "120" : v == 2 ? "vrr" : "60"; }));
-		s.rows.push_back(title_row("HDR10", "HDR10 when the console's own output is HDR.", { { "SDR", 0 }, { "HDR10", 1 } },
-		                           [](TitleSettings &t) -> int64_t { return t.hdr; }, [](TitleSettings &t, int64_t v) { t.hdr = v != 0; }));
-		Row white = title_row("HDR white", "The brightness white is shown at (203 nits is HDR's reference).", {}, [](TitleSettings &t) -> int64_t { return t.hdrWhite; },
-		                      [](TitleSettings &t, int64_t v) { t.hdrWhite = (int)v; });
+		                           [](TitleSettings &t, int64_t v) { t.display = v == 1 ? "120" : v == 2 ? "vrr" : "60"; }, 0));
+		s.rows.push_back(title_row("hdr", "HDR10", "Uses HDR10 output when the console's output is set to HDR.", { { "SDR", 0 }, { "HDR10", 1 } },
+		                           [](TitleSettings &t) -> int64_t { return t.hdr; }, [](TitleSettings &t, int64_t v) { t.hdr = v != 0; }, 0));
+		Row white = title_row("hdr_white", "HDR White Level", "Sets the brightness of white in HDR. 203 nits is the reference level of HDR.", {}, [](TitleSettings &t) -> int64_t { return t.hdrWhite; },
+		                      [](TitleSettings &t, int64_t v) { t.hdrWhite = (int)v; }, 203);
 		white.kind = Row::Stepper, white.lo = 80, white.hi = 400, white.step = 10, white.unit = " nits";
 		s.rows.push_back(white);
-		Row peak = title_row("HDR highlights", "The brightness the brightest parts are raised to (0 off).", {}, [](TitleSettings &t) -> int64_t { return t.hdrPeak; },
-		                     [](TitleSettings &t, int64_t v) { t.hdrPeak = (int)v; });
+		Row peak = title_row("hdr_peak", "HDR Peak Brightness", "Sets the brightness that the brightest parts of the picture are raised to. 0 turns the raising off.", {}, [](TitleSettings &t) -> int64_t { return t.hdrPeak; },
+		                     [](TitleSettings &t, int64_t v) { t.hdrPeak = (int)v; }, 1000);
 		peak.kind = Row::Stepper, peak.lo = 0, peak.hi = 4000, peak.step = 100, peak.unit = " nits";
 		s.rows.push_back(peak);
 		sections.push_back(std::move(s));
 	}
 	/* Emulation */
 	{
-		Section s{ "Emulation", "xtal", "The N64 itself: its clock, its memory, and what the cartridge slot holds.", {} };
-		s.rows.push_back(choose("emulation.overclock", "CPU clock", "Overclocks the emulated CPU: fewer slowdowns in heavy games, more work for the console; a few games need the stock clock.",
-		                        { { "93.75 MHz stock", 0 }, { "125 MHz", 1 } }));
-		s.rows.push_back(choose("emulation.disable_expansion_pak", "Memory", "The 4 MB Expansion Pak. Some games need it, a few misbehave with it.",
-		                        { { "Expansion Pak", 0 }, { "Jumper Pak", 1 } }));
-		s.rows.push_back(choose("emulation.rewind", "Rewind", "Keeps a snapshot every second to go back to (the hotkey's Rewind).", { { "Off", 0 }, { "On", 1 } }));
-		s.rows.push_back(choose("emulation.usb", "USB link", "The development cartridge's USB link (homebrew). Off on the console: it needs network sockets.", { { "Off", 0 }, { "On", 1 } }));
+		Section s{ "Emulation", "xtal", "Controls the emulated N64: its clock, its memory and what the cartridge slot holds.", {} };
+		s.rows.push_back(choose("emulation.overclock", "Overclock N64 CPU (may cause bugs)", "When enabled, runs the emulated CPU at 125 MHz instead of 93.75 MHz. Can reduce slowdowns in heavy games, but may cause issues in some games.",
+		                        { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(choose("emulation.disable_expansion_pak", "Disable Expansion Pak", "When enabled, the N64 has its standard 4 MB of memory instead of the 8 MB it has with the Expansion Pak. Some games need the Expansion Pak, and a few misbehave with it.",
+		                        { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(choose("emulation.rewind", "Enable Rewind", "When enabled, keeps a snapshot every second so the Rewind hotkey can go back in time. Uses additional memory.", { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(choose("emulation.usb", "Emulate UNFLoader", "When enabled, emulates the USB link of development cartridges that homebrew uses. Not supported on PS5.", { { "Off", 0 }, { "On", 1 } }, 0));
 		sections.push_back(std::move(s));
 	}
 	/* Controllers */
 	{
-		Section s{ "Controllers", "port1", "Each port: whether a controller is plugged in, which DualSense plays it, its input profile, its Transfer Pak.", {} };
+		Section s{ "Controllers", "port1", "Selects, for each port, whether a controller is plugged in, which DualSense plays it, its input profile and its Transfer Pak.", {} };
 		for (int i = 0; i < 4; i++) {
 			const std::string n = std::to_string(i + 1), idx = std::to_string(i);
 			static std::string enabled_keys[4], assign_keys[4], profile_keys[4], tpak_keys[4], rom_keys[4], ram_keys[4];
 			enabled_keys[i] = "input.controller_enabled." + idx, assign_keys[i] = "input.controller_assignment." + idx;
 			profile_keys[i] = "input.input_profile_binding." + idx, tpak_keys[i] = "input.transfer_pak." + idx;
 			rom_keys[i] = "input.gb_rom_path." + idx, ram_keys[i] = "input.gb_ram_path." + idx;
-			s.rows.push_back(choose(enabled_keys[i].c_str(), "Port " + n, "Whether port " + n + " has a controller.", { { "Empty", 0 }, { "Plugged in", 1 } }));
+			s.rows.push_back(choose(enabled_keys[i].c_str(), "Port " + n + " \xC2\xB7 Enabled", "Determines whether a controller is plugged into port " + n + ".", { { "Off", 0 }, { "On", 1 } }, i == 0 ? 1 : 0));
 			Row who;
-			who.label = "Port " + n + " \xC2\xB7 controller", who.help = "Which DualSense plays port " + n + " (player numbers as the console signs them in).";
+			who.key = assign_keys[i], who.has_def = true, who.def = 0;
+			who.label = "Port " + n + " \xC2\xB7 Controller Assignment", who.help = "Selects which DualSense plays port " + n + ". The players are numbered in the order the console signs them in.";
 			who.options = { { "None", 0 }, { "DualSense 1", 1 }, { "DualSense 2", 2 }, { "DualSense 3", 3 }, { "DualSense 4", 4 } };
+			markDefault(who);
 			who.get = [this, i] {
 				const std::string v = host_.text ? host_.text(assign_keys[i].c_str()) : "";
 				return v.rfind("ps5:pad", 0) == 0 ? (int64_t)atoi(v.c_str() + 7) : (int64_t)0;
@@ -1523,7 +1799,8 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			who.set = [this, i](int64_t v) { if (host_.set_text) host_.set_text(assign_keys[i].c_str(), v ? "ps5:pad" + std::to_string(v) : ""); };
 			s.rows.push_back(who);
 			Row prof;
-			prof.label = "Port " + n + " \xC2\xB7 profile", prof.help = "Its input profile: which DualSense control is which N64 button (edited under Profiles).";
+			prof.key = profile_keys[i];
+			prof.label = "Port " + n + " \xC2\xB7 Profile", prof.help = "Selects the input profile of port " + n + ", which assigns the DualSense controls to the N64 buttons. Profiles are edited in the Profiles section.";
 			for (size_t p = 0; p < profiles.size(); p++)
 				prof.options.push_back({ profiles[p], (int64_t)p });
 			prof.get = [this, i, profiles] {
@@ -1536,18 +1813,19 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 					host_.set_text(profile_keys[i].c_str(), profiles[v]);
 			};
 			s.rows.push_back(prof);
-			s.rows.push_back(choose(tpak_keys[i].c_str(), "Port " + n + " \xC2\xB7 Transfer Pak", "A Transfer Pak with a Game Boy cartridge: its ROM and save below.",
-			                        { { "Off", 0 }, { "On", 1 } }));
+			s.rows.push_back(choose(tpak_keys[i].c_str(), "Port " + n + " \xC2\xB7 Transfer Pak", "When enabled, plugs a Transfer Pak into port " + n + ". Its Game Boy ROM and save are selected below.",
+			                        { { "Off", 0 }, { "On", 1 } }, 0));
 			for (int which = 0; which < 2; which++) {
 				Row file;
 				file.kind = Row::File;
 				const char *key = which == 0 ? rom_keys[i].c_str() : ram_keys[i].c_str();
-				file.label = "Port " + n + (which == 0 ? " \xC2\xB7 Game Boy ROM" : " \xC2\xB7 Game Boy save");
-				file.help = which == 0 ? "The Game Boy cartridge in the Transfer Pak (.gb, .gbc) from the console or a USB drive. \xE2\x97\x84 clears."
-				                       : "Its save (.sav), or one made beside the ROM. \xE2\x97\x84 clears.";
+				file.key = key;
+				file.label = "Port " + n + (which == 0 ? " \xC2\xB7 Game Boy ROM" : " \xC2\xB7 Game Boy Save");
+				file.help = which == 0 ? "Selects the Game Boy cartridge in the Transfer Pak of port " + n + ", from the console or a USB drive. Press \xE2\x97\x84 to clear it."
+				                       : "Selects the save of the Game Boy cartridge in port " + n + ". When none is selected, one is created beside the ROM. Press \xE2\x97\x84 to clear it.";
 				file.value = [this, key] {
 					const std::string v = host_.text ? host_.text(key) : "";
-					return v.empty() ? std::string("\xE2\x80\x94 none") : baseName(v);
+					return v.empty() ? std::string("\xE2\x80\x94 None") : baseName(v);
 				};
 				file.run = [this, key, which] {
 					picker_key_ = key, picker_rom_ = which == 0, picker_sel_ = 0;
@@ -1558,14 +1836,15 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 				s.rows.push_back(file);
 			}
 		}
-		s.rows.push_back(choose("input.emulate_vru", "Voice Recognition Unit", "The VRU in port 4 (its games' voice commands).", { { "Off", 0 }, { "In port 4", 1 } }));
+		s.rows.push_back(choose("input.emulate_vru", "Emulate VRU", "When enabled, plugs a Voice Recognition Unit into port 4, for games that use voice commands.", { { "Off", 0 }, { "On", 1 } }, 0));
 		sections.push_back(std::move(s));
 	}
 	/* Profiles */
 	{
-		Section s{ "Profiles", "pif", "Input profiles: each N64 button's DualSense control. \xE2\x9C\x95 then press the control; \xE2\x97\x84 clears.", {} };
+		Section s{ "Profiles", "pif", "Assigns a DualSense control to each N64 button. Press \xE2\x9C\x95 on a button, then the control; \xE2\x97\x84 clears it.", {} };
 		Row which;
-		which.label = "Profile", which.help = "The profile edited below. Ports choose theirs under Controllers.";
+		which.key = "profile.selected";
+		which.label = "Profile", which.help = "Selects the input profile edited below. Each port selects its profile in the Controllers section.";
 		for (size_t p = 0; p < profiles.size(); p++)
 			which.options.push_back({ profiles[p], (int64_t)p });
 		which.get = [this, profiles] {
@@ -1574,7 +1853,7 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		};
 		which.set = [this, profiles](int64_t v) { if (v >= 0 && v < (int64_t)profiles.size()) bench_profile_ = profiles[v]; };
 		s.rows.push_back(which);
-		s.rows.push_back(action("New profile", [] { return std::string("Gopher64's default bindings"); }, "Makes a profile with Gopher64's default bindings, to change here.",
+		s.rows.push_back(action("profile.create", "Create Input Profile", [] { return std::string("Default Bindings"); }, "Creates a profile with the default bindings of Gopher64, to change here.",
 		                        [this, profiles] {
 			                        for (int k = 1; k < 100; k++) {
 				                        const std::string name = "Profile " + std::to_string(k);
@@ -1585,24 +1864,25 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 				                        }
 			                        }
 		                        }));
-		s.rows.push_back(action("Delete this profile", [this] { return bench_profile_ == "default" ? std::string("default stays") : bench_profile_; },
-		                        "Takes this profile away; ports that had it get \"default\".", [this] {
+		s.rows.push_back(action("profile.delete", "Delete Input Profile", [this] { return bench_profile_ == "default" ? std::string("Default Profile") : bench_profile_; },
+		                        "Deletes the selected profile. Ports that used it switch to the default profile, which cannot be deleted.", [this] {
 			                        if (bench_profile_ != "default" && host_.profile_delete && host_.profile_delete(bench_profile_))
 				                        bench_profile_ = "default";
 		                        }));
 		for (int input = 0; input < 19; input++)
-			s.rows.push_back(bind_row(bench_profile_, input, kN64Inputs[input],
-			                          input == 18 ? "Held with another button, it makes that button a hotkey (see Hotkeys)."
-			                                      : std::string("The N64's ") + kN64Inputs[input] + ": \xE2\x9C\x95 then press the DualSense control for it."));
+			s.rows.push_back(bind_row("profile.input." + std::to_string(input), bench_profile_, input, kN64Inputs[input],
+			                          input == 18 ? "Sets the control that is held together with another button to make that button a hotkey. See the Hotkeys section."
+			                                      : std::string("Sets the DualSense control for ") + kN64Inputs[input] + ". Press \xE2\x9C\x95, then the control."));
 		Row dead;
-		dead.kind = Row::Stepper, dead.label = "Deadzone", dead.help = "How far a stick moves before the N64 sees it.";
+		dead.kind = Row::Stepper, dead.key = "profile.deadzone", dead.label = "Deadzone Percentage", dead.help = "Sets how far a stick moves before the N64 registers it.";
 		dead.lo = 0, dead.hi = 50, dead.step = 1, dead.unit = " %";
 		dead.get = [this] { return host_.profile_number ? host_.profile_number(bench_profile_, 0, 0, false) : 0; };
 		dead.set = [this](int64_t v) { if (host_.profile_number) host_.profile_number(bench_profile_, 0, v, true); };
 		s.rows.push_back(dead);
 		Row raw;
-		raw.label = "Read the pad as", raw.help = "Gopher64's DirectInput mode reads a raw joystick; its bindings are then a joystick's, which only a PC's dialog makes.";
-		raw.options = { { "Gamepad", 0 }, { "Joystick (DirectInput)", 1 } };
+		raw.key = "profile.dinput", raw.has_def = true, raw.def = 0;
+		raw.label = "Use DirectInput", raw.help = "When enabled, reads a raw joystick instead of a gamepad. The bindings are then those of a joystick, which can only be made on a PC.";
+		raw.options = { { "Off", 0 }, { "On", 1 } };
 		raw.get = [this] { return host_.profile_number ? host_.profile_number(bench_profile_, 1, 0, false) : 0; };
 		raw.set = [this](int64_t v) { if (host_.profile_number) host_.profile_number(bench_profile_, 1, v, true); };
 		s.rows.push_back(raw);
@@ -1610,23 +1890,42 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	}
 	/* Hotkeys */
 	{
-		Section s{ "Hotkeys", "cpu", "Gopher64's hotkeys: the Hotkey Activator held, then a button. Each can be another N64 button or off.", {} };
-		s.rows.push_back(title_row("Hotkeys", "All of them on or off.", { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.hotkeys; },
-		                           [](TitleSettings &t, int64_t v) { t.hotkeys = v != 0; }));
-		Row tap = title_row("Quick menu tap", "A touch pad tap opens the quick menu. Kept on while nothing else can leave a game (Hotkeys off or Leave the game off).",
+		static const char *const hotkey_help[15] = {
+			"Selects the button that saves a state to the current slot.",
+			"Selects the button that loads the state in the current slot.",
+			"Selects the button that leaves the game and returns to the library.",
+			"Selects the button that fast forwards the game.",
+			"Selects the button that rewinds the game. Requires Enable Rewind.",
+			"Selects the button that changes the pak plugged into the controller.",
+			"Selects the button that resets the game.",
+			"Selects the button that pauses the game.",
+			"Selects the button that advances a paused game by one frame.",
+			"Selects the button that lowers the volume.",
+			"Selects the button that raises the volume.",
+			"Selects the button that shows the frame rate.",
+			"Selects the button that crops the letterbox around the picture.",
+			"Selects the button that switches to the next save slot.",
+			"Selects the button that switches to the previous save slot.",
+		};
+		Section s{ "Hotkeys", "cpu", "Selects the button for each hotkey action, used by holding the Hotkey Activator and pressing it. Each action can use any N64 button or be turned off.", {} };
+		s.rows.push_back(title_row("hotkeys", "Enable Hotkeys", "When enabled, hotkeys work while the Hotkey Activator is held. When disabled, none of them work.", { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.hotkeys; },
+		                           [](TitleSettings &t, int64_t v) { t.hotkeys = v != 0; }, 1));
+		Row tap = title_row("quickmenu_tap", "Quick Menu Tap", "When enabled, tapping the touch pad opens the quick menu. It stays enabled while there is no other way to leave a game.",
 		                    { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.quickmenuTap; },
-		                    [](TitleSettings &t, int64_t v) { t.quickmenuTap = v != 0; });
+		                    [](TitleSettings &t, int64_t v) { t.quickmenuTap = v != 0; }, 1);
 		s.rows.push_back(tap);
-		s.rows.push_back(bind_row(port1_profile, 18, "Activator (port 1)", "The control held for a hotkey, in port 1's profile (\"" + port1_profile + "\"): the touch pad by default."));
+		s.rows.push_back(bind_row("hotkey.activator", port1_profile, 18, "Hotkey Activator (Port 1)", "Sets the control held to use a hotkey, in the profile of port 1 (\"" + port1_profile + "\"). The default is the touch pad."));
 		for (size_t a = 0; a < 15; a++) {
 			Row r;
+			r.key = std::string("hotkey.") + kHotkeyActions[a].key, r.has_def = true, r.def = TitleSettings{}.hotkey[a];
 			r.label = kHotkeyActions[a].label;
-			r.help = a < 6 ? "One of Gopher64's own hotkeys." : "On a PC this is a key; here it can be a hotkey.";
+			r.help = hotkey_help[a];
 			r.options.push_back({ "Off", -1 });
 			for (int input = 0; input < 14; input++) {
 				const Binding b = host_.binding ? host_.binding(port1_profile, input) : Binding{};
 				r.options.push_back({ std::string(kN64Inputs[input]) + (b.kind ? " \xC2\xB7 " + bindingLabel(b) : ""), input });
 			}
+			markDefault(r);
 			r.get = [ts, a]() -> int64_t { return ts ? ts->hotkey[a] : -1; };
 			r.set = [ts, a](int64_t v) {
 				if (ts) {
@@ -1638,32 +1937,86 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		}
 		sections.push_back(std::move(s));
 	}
-	/* This console */
+	/* Console */
 	{
-		Section s{ "This console", "slot", "PSGopher on this console: network shares, the sandbox, the library.", {} };
+		Section s{ "Console", "slot", "Controls network shares, access outside the sandbox, the game library, copying and updates.", {} };
 		char shares[48];
 		snprintf(shares, sizeof(shares), "%d", host_.share_count ? host_.share_count() : 0);
 		const std::string shares_text = shares;
-		s.rows.push_back(action("Network shares", [shares_text] { return shares_text; }, "Add, change or take away SMB and NFS shares.", [this] { if (host_.shares) host_.shares(); }));
+		s.rows.push_back(action("console.shares", "Network Shares", [shares_text] { return shares_text; }, "Allows adding, changing and removing SMB and NFS shares.", [this] { if (host_.shares) host_.shares(); }));
 		const bool off = host_.elevation_off && host_.elevation_off();
-		const std::string elevation = off ? "off from the next start" : host_.elevated && host_.elevated() ? "on: USB, all of /data" : "on (not left: see the log)";
-		s.rows.push_back(action("Leave the sandbox", [elevation] { return elevation; }, "Outside the sandbox PSGopher reaches USB drives and all of /data.",
+		const std::string elevation = off ? "Off" : host_.elevated && host_.elevated() ? "On" : "Unavailable";
+		s.rows.push_back(action("console.sandbox", "Leave the Sandbox", [elevation] { return elevation; }, "When enabled, leaves the sandbox to reach USB drives and all of /data.",
 		                        [this, off] { if (host_.set_elevation_off) host_.set_elevation_off(!off); }));
-		s.rows.push_back(action("Search for cartridges", [] { return std::string(library().scanning() ? "searching" : "again"); }, "Searches every place again.",
+		s.rows.push_back(action("console.search", "Search for Cartridges", [] { return std::string(library().scanning() ? "Searching" : "Search"); }, "Searches every location for cartridges again.",
 		                        [] { library().rescan(); }));
-		s.rows.push_back(action("Close PSGopher", [] { return std::string("to the home screen"); }, "Closes the title.", [this] { if (host_.close) host_.close(); }));
+		/* Fast Writes: the write broker (write_broker.h) */
+		s.rows.push_back(title_row("write_helper", "Fast Writes (Helper)",
+		                           "Uses a helper to write copied games to the console's storage, which keeps writing fast after the first gigabyte. When disabled, the title writes them itself.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.writeHelper; },
+		                           [](TitleSettings &t, int64_t v) { t.writeHelper = v != 0; }, 1));
+		/* the updater: a check asked for by the user (and at the title's start unless that is off), its offer
+		 * with the notes below the rows, and what follows from it (update.h) */
+		s.rows.push_back(title_row("update_check", "Check for Updates at Start", "When enabled, checks for a newer release each time the title starts. Nothing is downloaded without asking.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.updateCheck; },
+		                           [](TitleSettings &t, int64_t v) { t.updateCheck = v != 0; }, 1));
+		const update::Status us = host_.update_status ? host_.update_status() : update::Status{};
+		const bool us_idle = updateIdle(us);
+		const bool us_offered = us.state == update::State::Available;
+		const bool us_busy = us.state == update::State::Downloading || us.state == update::State::Verifying;
+		const std::string us_tag = releaseTag(us);
+		s.rows.push_back(action("console.update", "Check for Updates", [us] { return updateValue(us); },
+		                        "Checks whether a newer release is available and shows what it adds. Nothing is downloaded without asking.",
+		                        [this, us_idle] { if (us_idle && host_.update_check) host_.update_check(); }));
+		{
+			Row r = action("console.update_download", "Download Update", [] { return std::string("Download"); },
+			               "Downloads the release and checks it against its SHA-256 digest before anything is replaced.",
+			               [this] { if (host_.update_download) host_.update_download(); });
+			r.shown = [us_offered] { return us_offered; };
+			s.rows.push_back(r);
+			r = action("console.update_cancel", "Cancel Download", [] { return std::string("Cancel"); },
+			           "Stops the download. Nothing in the title's folder is changed.", [this] { if (host_.update_cancel) host_.update_cancel(); });
+			r.shown = [us_busy, us] { return us_busy && !us.rollback; };
+			s.rows.push_back(r);
+			r = action("console.update_install", "Install Update", [] { return std::string("Install"); },
+			           "Replaces the title's program files with the downloaded release, keeping a backup of them, and closes the title. Games, saves and settings stay.",
+			           [this, us_tag, us] { if (us.state == update::State::Ready) update_ask_ = 1, update_ask_text_ = "Install " + us_tag + "?"; });
+			r.shown = [us] { return us.state == update::State::Ready; };
+			s.rows.push_back(r);
+			const bool skipped = us.skipped;
+			r = action("console.update_skip", "Skip This Version", [skipped] { return std::string(skipped ? "Skipped" : "Skip"); },
+			           "Skips the release on offer. A later release is offered again, and Check for Updates still shows this one.",
+			           [this, us_offered, skipped] { if (us_offered && !skipped && host_.update_skip) host_.update_skip(); });
+			r.shown = [us_offered] { return us_offered; };
+			s.rows.push_back(r);
+			const std::string previous = us.previous_label.empty() ? us.previous : us.previous_label;
+			r = action("console.update_rollback", "Roll Back", [previous] { return previous; },
+			           "Puts back the files that the last update replaced, after checking them, and closes the title. Games, saves and settings stay.",
+			           [this, previous, us_idle] { if (us_idle) update_ask_ = 2, update_ask_text_ = "Roll back to " + previous + "?"; });
+			r.shown = [us, us_idle] { return !us.previous.empty() && us_idle && us.state != update::State::Installed; };
+			s.rows.push_back(r);
+		}
+		s.rows.push_back(action("console.exit", "Exit to Home Screen", [] { return std::string("Exit"); }, "Closes the title and returns to the home screen of the console.", [this] { if (host_.close) host_.close(); }));
 		sections.push_back(std::move(s));
 	}
 	/* What Gopher64 has on a PC only */
 	{
-		Section s{ "PC only", "slot", "Gopher64's settings that have no place on the console, and why.", {} };
-		s.rows.push_back(info("Fullscreen", "always", "The console's screen is always the whole picture."));
-		s.rows.push_back(info("Keyboard bindings", "no keyboard", "Each input's first binding is a keyboard key; the console's controller is the second."));
-		s.rows.push_back(info("Theme, ROM folder, recent games", "the library", "Gopher64's own window keeps these; PSGopher's library and board do that here."));
-		s.rows.push_back(info("Netplay, RetroAchievements", "not on the console", "Both need network sockets Gopher64 makes through Tokio, which the console refuses."));
+		Section s{ "PC Only", "slot", "Shows the Gopher64 settings that are not available on PS5, and why.", {} };
+		s.rows.push_back(info("video.fullscreen", "Fullscreen", "Always On", "The picture always fills the whole screen."));
+		s.rows.push_back(info("pc.keyboard", "Keyboard Bindings", "No Keyboard", "On a PC, the first binding of each input is a keyboard key. On PS5, the second binding, the controller's, is used."));
+		s.rows.push_back(info("pc.library", "Theme, ROM Folder, Recent ROMs", "The Library", "Gopher64's window holds these. The game library takes their place here."));
+		s.rows.push_back(info("pc.network", "Netplay, RetroAchievements", "Not Available", "Both need network features that are not available on PS5."));
 		sections.push_back(std::move(s));
 	}
+	if (g_settings_words_dump) {
+		dumpWords(g_settings_words_dump, sections);
+		fclose(g_settings_words_dump);
+		g_settings_words_dump = nullptr;
+	}
 
+	/* rows that depend on the updater's state are left out while they do not apply */
+	for (Section &sc : sections)
+		sc.rows.erase(std::remove_if(sc.rows.begin(), sc.rows.end(), [](const Row &r) { return r.shown && !r.shown(); }), sc.rows.end());
 	const int ns = (int)sections.size();
 	bench_section_ = std::clamp(bench_section_, 0, ns - 1);
 	Section &sec = sections[bench_section_];
@@ -1811,6 +2164,62 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			if (here && r.kind != Row::Info)
 				ink.rect(x + w - 40 - vw, y + 4, vw + 20, rh - 12, capturing ? kText : kAmber, 6);
 			ink.text(f.mono_bold, 16, x + w - 30 - vw, y + 11, here && r.kind != Row::Info ? kInk : (r.kind == Row::Info ? kDim : kText), v);
+		}
+		/* Console: what the updater offers or is doing, under the rows: its state, the progress and the notes */
+		if (sec.name == "Console" && host_.update_status) {
+			const update::Status us = host_.update_status();
+			const bool notes_wanted = us.state == update::State::Available || us.state == update::State::Downloading ||
+			                          us.state == update::State::Verifying || us.state == update::State::Ready;
+			float ty = list_top + n * rh + 10;
+			const float bottom = y0 + h - 100, tx = x + 28, tw = w - 56;
+			std::string head;
+			ImU32 head_colour = kAmber;
+			switch (us.state) {
+			case update::State::Available:
+				head = releaseTag(us) + (us.name.empty() || us.name == releaseTag(us) ? "" : "  " + us.name) + (us.skipped ? "  (skipped)" : "");
+				break;
+			case update::State::Downloading: head = us.rollback ? "Checking the kept files" : "Downloading " + releaseTag(us); break;
+			case update::State::Verifying: head = us.rollback ? "Checking the kept files" : "Checking the download"; break;
+			case update::State::Ready: head = releaseTag(us) + " is downloaded and checked: Install Update puts it in place"; break;
+			case update::State::Installed: head = "Installed: the title closes"; break;
+			case update::State::UpToDate:
+				head = us.developer_build ? "This is a developer build" + (us.tag.empty() ? std::string() : "; the newest release is " + us.tag) : "This is the newest release";
+				head_colour = kDim;
+				break;
+			case update::State::NoRelease: head = us.error.empty() ? "No release has been published yet" : us.error; break;
+			case update::State::Failed: head = us.error.empty() ? "The update did not work" : us.error, head_colour = IM_COL32(255, 128, 104, 255); break;
+			default: break;
+			}
+			if (!head.empty() && ty < bottom) {
+				ink.rect(x + 12, ty - 6, w - 24, 1, kLine);
+				const auto hl = wrap(ink, f.mono_bold, 15, head, tw, 2);
+				for (const std::string &l : hl) {
+					ink.text(f.mono_bold, 15, tx, ty, head_colour, l);
+					ty += 22;
+				}
+				if (us.state == update::State::Downloading || us.state == update::State::Verifying) {
+					const double part = us.state == update::State::Verifying ? 1.0 : us.total ? std::min(1.0, (double)us.done / (double)us.total) : 0.0;
+					ink.rect(tx, ty + 2, tw, 10, IM_COL32(16, 34, 38, 255), 5);
+					if (part > 0)
+						ink.rect(tx, ty + 2, (float)(tw * part), 10, kAmber, 5);
+					ty += 22;
+					if (us.state == update::State::Downloading) {
+						std::string line = fmtBytes(us.done) + (us.total ? " of " + fmtBytes(us.total) : "");
+						if (us.speed > 0)
+							line += "   " + fmtBytes((uint64_t)us.speed) + "/s";
+						ink.text(f.mono, 14, tx, ty, kText, line);
+						ty += 22;
+					}
+				}
+				if (notes_wanted && ty < bottom - 20) {
+					ty += 4;
+					const int room = std::max(1, (int)((bottom - ty) / 20));
+					for (const std::string &l : wrapParagraphs(ink, f.mono, 14, updateNotesText(us), tw, room)) {
+						ink.text(f.mono, 14, tx, ty, kDim, l);
+						ty += 20;
+					}
+				}
+			}
 		}
 		/* the scroll's place, when the list is longer than the panel */
 		if (n > visible) {

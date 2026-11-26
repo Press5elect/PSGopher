@@ -22,6 +22,7 @@
 #include <unistd.h>
 
 #include "ps5_vfs.h"
+#include "write_broker.h"
 
 extern "C" void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
@@ -734,6 +735,16 @@ std::string localCopy(const std::string &path, std::string *error)
 			*error = failed ? "the share stopped answering" : data.empty() ? "the file is empty" : "the file is too large for a ROM";
 		return {};
 	}
+	/* PSGopher: from OGBox db63d46 (the write broker): a copy under /data/ is written by the helper
+	 * payload (the console holds back the title's own writes after about 1.3 GiB; the helper's are not);
+	 * when it is off, not there or fails, the title writes the copy itself, as before */
+	std::string helperWhy;
+	if (helperWriteFile(g_root, target, data.data(), data.size(), &helperWhy)) {
+		chmod(target.c_str(), 0666);
+		say("library: %s copied from the share (%zu KiB, by the helper)", path.c_str(), data.size() / 1024);
+		return target;
+	}
+	unlink(target.c_str()); /* (what the helper left of it: its file may not be the title's to open) */
 	FILE *out = fopen(target.c_str(), "wb");
 	if (!out || fwrite(data.data(), 1, data.size(), out) != data.size()) {
 		if (out)

@@ -32,6 +32,7 @@
 #include "library.h"
 #include "menu.h"
 #include "title_settings.h"
+#include "update_net.h"
 #include "web.h"
 #include "ps5_vfs.h"
 
@@ -328,7 +329,9 @@ static int play(const std::string &rom, int load_state = -1)
        psgopher_setting_get("emulation.overclock") == 1 ? "on" : "off", psgopher_setting_get("emulation.rewind") == 1 ? "on" : "off",
        psgopher_setting_get("emulation.disable_expansion_pak") == 1 ? "off" : "on");
    psgopher_video_reset();
+   psgopher_stall_start(); /* the freeze watchdog: logging only, with Slow moments */
    const int status = psgopher_main(argc, argv);
+   psgopher_stall_stop();
    /* a profiling build: this game's counts to /data/psgopher/pgo (the title never returns from main,
     * so the runtime's own write at exit never happens; Crux2's way), then counted afresh */
    if (__llvm_profile_write_file && __llvm_profile_set_filename) {
@@ -372,6 +375,10 @@ int main()
    psgopher_crash_install();
    psgopher_sandbox_log(log_line);
    say("title folder: %s", title_dir);
+   /* an update an interrupted install left half done is undone before anything reads the title's
+    * files; then the updater is set up (it asks nothing until the front end does) */
+   psgopher::update::RecoverTitle(title_dir);
+   psgopher::update::StartTitle(title_dir);
    /* Crux2: outside the sandbox the effective group can differ from the real one, and Mesa's
     * shader cache is off while they differ */
    if (getegid() != getgid()) {
