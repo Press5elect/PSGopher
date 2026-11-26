@@ -9,6 +9,7 @@ The index of everything written about PSGopher. The user's guide is the reposito
 | --- | --- |
 | [`dev/workflow.md`](dev/workflow.md) | Before any change: the owner's rules, the loop, working with agents, lessons learned |
 | [`dev/open-work.md`](dev/open-work.md) | Choosing what to do next: known problems, what no console has run, unfinished work, decisions |
+| [`dev/handover.md`](dev/handover.md) | Picking the work up: where it stands, the latest console findings, the next steps in order |
 
 ## Reference (`dev/`)
 
