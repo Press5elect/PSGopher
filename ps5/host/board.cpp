@@ -30,6 +30,7 @@ struct Box {
 };
 const Box kCpu{ 502, 520, 228, 234 }, kRcp{ 833, 437, 238, 259 }, kRamA{ 866, 725, 205, 84 };
 const Box kVdac{ 1160, 440, 110, 120 }, kAdac{ 1286, 545, 94, 108 }, kPif{ 1340, 789, 78, 142 };
+constexpr float kPakFit = .62f; /* the seated pak's width as a part of the slot's pin row (630 wide, centred on x 971) */
 const Box kSlot{ 544, 178, 858, 125 }, kXtal1{ 1207, 712, 78, 48 }, kExp{ 817, 969, 312, 63 };
 const float kPortX[4] = { 340, 564, 1149, 1383 };
 const Box kPort(int i) { return Box{ kPortX[i], 1082, 214, 158 }; }
@@ -703,20 +704,41 @@ void drawBoard(ImDrawList *dl, ImTextureRef texture, const Projector &p, const M
 	if (m.overclock)
 		roundRect(dl, Box{ kXtal1.x - 4, kXtal1.y - 4, kXtal1.w + 8, kXtal1.h + 8 }, alpha(kAudio, .7f * op), 26, 3);
 
-	/* the cartridge, sliding down into the slot from above */
-	if (m.has_cartridge) {
-		const float s = m.seat, e = s * s * (3 - 2 * s), off = -360 * (1 - e);
-		/* the strip's cartridge (drawCartridge), in the board's pixels: the projection bends it with the board */
-		const float ch = 238, cw = ch * 196 / 126, cx0 = 668 + (610 - cw) / 2, cy0 = 6 + off;
-		const FlagHook flag = [&](float x, float y, float w) {
-			if (m.flag)
-				m.flag(dl, m.shown.region, cx0 + x, cy0 + y, w);
-		};
-		drawCartridge(dl, m.shown, fonts.mono, [cx0, cy0](ImVec2 v) { return ImVec2(cx0 + v.x, cy0 + v.y); }, cw, ch, 1.0f, true, op, flag);
-		dl->AddCircleFilled(ImVec2(cx0 + cw - 18, cy0 + 22), 6, alpha(colourOf(m.shown), e * op));
+	/* the slot's housing narrowed to the pak: its dark plastic (the art's own colour) over the pin rows (y 192..288,
+	 * x 656..1286) outside the pak's footprint, an edge line (the art's housing edge colour) where it meets the pak */
+	{
+		const ImU32 plastic = IM_COL32(5, 9, 11, 255), edge = IM_COL32(45, 48, 50, 255);
+		const float l = 971 - 315 * kPakFit, r = 971 + 315 * kPakFit, t = 188, b = 296;
+		dl->AddRectFilled(ImVec2(648, t), ImVec2(l, b), plastic);
+		dl->AddRectFilled(ImVec2(r, t), ImVec2(1294, b), plastic);
+		dl->AddLine(ImVec2(l, t), ImVec2(l, b), edge, 2);
+		dl->AddLine(ImVec2(r, t), ImVec2(r, b), edge, 2);
 	}
 	dl->PopClipRect();
 	transformFrom(dl, start, [&p](ImVec2 v) { return p(v); });
+
+	/* the cartridge, sliding down into the slot from above. It stands upright in the slot, as a real one does
+	 * (the board is tilted, the pak is not): its bottom edge is the slot's pin row, projected (board x 656..1286,
+	 * y 288: the pin rows of the art are at y 192..217 and 263..288), its sides vertical on screen, and its front
+	 * face the strip's proportions (196:126), so it is the strip's cartridge sheared to the slot's slant. */
+	if (m.has_cartridge) {
+		const float s = m.seat, e = s * s * (3 - 2 * s);
+		/* at full pin-row width an upright pak would reach the top bar, so it is scaled to kPakFit of the row, centred
+		 * on it, keeping its proportions; the housing is narrowed to match (above) */
+		const ImVec2 b0 = p(ImVec2(971 - 315 * kPakFit, 288)), b1 = p(ImVec2(971 + 315 * kPakFit, 288));
+		const float len = std::hypot(b1.x - b0.x, b1.y - b0.y), face = len * 126 / 196, unit = len / 196;
+		const float lift = (1 - e) * face * 1.4f; /* screen pixels above its seat */
+		auto to = [&](ImVec2 v) {
+			const float u = v.x / 196;
+			return ImVec2(b0.x + (b1.x - b0.x) * u, b0.y + (b1.y - b0.y) * u - (126 - v.y) / 126 * face - lift);
+		};
+		const FlagHook flag = [&](float x, float y, float w) {
+			if (m.flag)
+				m.flag(dl, m.shown.region, to(ImVec2(x, y)).x, to(ImVec2(x, y)).y, w * unit);
+		};
+		drawCartridge(dl, m.shown, fonts.mono, to, 196, 126, unit, true, op, flag);
+		dl->AddCircleFilled(to(ImVec2(196 - 8, 10)), 6 * unit, alpha(colourOf(m.shown), e * op));
+	}
 }
 
 } // namespace psgopher::board
