@@ -5,6 +5,7 @@
 #pragma once
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -86,6 +87,17 @@ enum psgopher_place {
    PSGOPHER_WHERE_MAIN_CALL,  /* (reserved: Gopher64 waits for no main-thread call) */
    PSGOPHER_WHERE_INPUT,      /* reading the controllers */
    PSGOPHER_WHERE_ACHIEVEMENTS,
+   /* the steps of parallel-rdp's frame (3 is the rest of it), and the GPU's memory */
+   PSGOPHER_WHERE_F_DRAIN,    /* 17: the command ring's drain */
+   PSGOPHER_WHERE_F_LOCK,     /* 18: lock_command_processing (waiting for the RDP to be idle) */
+   PSGOPHER_WHERE_F_FLUSH,    /* 19: flush_and_signal and the coherency resolve */
+   PSGOPHER_WHERE_F_VI,       /* 20: the video interface's scanout */
+   PSGOPHER_WHERE_F_PROGRAM,  /* 21: request_program */
+   PSGOPHER_WHERE_F_CMD,      /* 22: request_command_buffer */
+   PSGOPHER_WHERE_F_HDR,      /* 23: the HDR layers */
+   PSGOPHER_WHERE_F_PASS,     /* 24: the swapchain render pass */
+   PSGOPHER_WHERE_F_OSD,      /* 25: the quick menu and the stats overlay */
+   PSGOPHER_WHERE_GPU_ALLOC,  /* 26: Vulkan memory, image and buffer creation (emulation thread only) */
    PSGOPHER_WHERE_COUNT
 };
 /* enters `place`; returns the place it was in, for psgopher_where_restore */
@@ -93,16 +105,21 @@ int psgopher_where(int place);
 void psgopher_where_restore(int previous);
 /* the name the log uses */
 const char *psgopher_where_name(int place);
+/* for code other threads also run (the allocator): marks only on the emulation thread; -1 elsewhere */
+int psgopher_where_emu(int place);
+void psgopher_where_emu_restore(int previous);
 
 /* the freeze watchdog (a thread of its own, started with each game, stopped when it ends): logs a
  * stall when no VI has completed for 250 ms, and when VIs resume, where the time went. Logging
- * only; on unless PSGOPHER_SLOW_CAPTURE is 0. The VI counter is bumped by psgopher_bench_present. */
+ * only, so on whatever Slow Moments says. It also counts hitches (VI intervals over 50 ms). The VI counter is bumped by psgopher_bench_present. */
 void psgopher_stall_start(void);
 void psgopher_stall_stop(void);
 /* tuning for the host test: the threshold and the sample period, in ms */
 void psgopher_stall_configure(int threshold_ms, int period_ms);
 /* a VI completed on the emulation thread (psgopher_bench_present does it; the test calls it) */
 void psgopher_stall_vi(void);
+/* the hitches (VI intervals over 50 ms) since the last call, as the video line's tail */
+void psgopher_hitch_summary(char *out, size_t size);
 
 /* PSGopher: the video line's counts start again (before each game) */
 void psgopher_video_reset(void);

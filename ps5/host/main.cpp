@@ -33,6 +33,7 @@
 #include "menu.h"
 #include "title_settings.h"
 #include "update_net.h"
+#include "write_broker.h"
 #include "web.h"
 #include "ps5_vfs.h"
 
@@ -375,6 +376,7 @@ int main()
    psgopher_crash_install();
    psgopher_sandbox_log(log_line);
    say("title folder: %s", title_dir);
+   psgopher::helperSetTitleFolder(title_dir);
    /* an update an interrupted install left half done is undone before anything reads the title's
     * files; then the updater is set up (it asks nothing until the front end does) */
    psgopher::update::RecoverTitle(title_dir);

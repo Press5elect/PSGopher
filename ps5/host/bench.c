@@ -254,6 +254,8 @@ static _Atomic uint64_t live_rdram_ns, live_rdram_waits;
  * the monotonic clock over the same second) */
 static _Atomic uint64_t live_rdp_ticks, live_rdp_part_ticks[3];
 static uint64_t live_tsc_start;
+static _Atomic uint64_t live_frame_part_max; /* the longest single frame part this 10 s, TSC ticks */
+static double live_ticks_per_ns;
 
 /* the RSP's tasks (on the emulation thread only: no atomics needed for the nesting) */
 static uint64_t rsp_begin_tsc, live_rsp_ticks, live_rdp_in_rsp_ticks;
@@ -310,6 +312,8 @@ void psgopher_bench_rdp_part(int part, uint64_t ticks)
 {
    if (part >= 0 && part < 3) {
       atomic_fetch_add_explicit(&live_rdp_part_ticks[part], ticks, memory_order_relaxed);
+      if (part == 2 && ticks > atomic_load_explicit(&live_frame_part_max, memory_order_relaxed))
+         atomic_store_explicit(&live_frame_part_max, ticks, memory_order_relaxed); /* (the emulation thread only) */
       if (w_measuring())
          w_rdp_part[part] += ticks;
    }
@@ -365,6 +369,7 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
       live_now.rdram_waits = (double)waits / (double)live_frames;
       const uint64_t tsc = __rdtsc(), rdp_ticks = atomic_exchange(&live_rdp_ticks, 0);
       const double ticks_per_ns = (double)(tsc - live_tsc_start) / (double)span;
+      live_ticks_per_ns = ticks_per_ns;
       live_now.rdp_ms = ticks_per_ns > 0 ? (double)rdp_ticks / ticks_per_ns / 1e6 / (double)live_frames : -1.0;
       {
          const uint64_t rsp = live_rsp_ticks > live_rdp_in_rsp_ticks ? live_rsp_ticks - live_rdp_in_rsp_ticks : 0;
@@ -448,17 +453,38 @@ const char *psgopher_where_name(int place)
       "the VR4300 or other code", "the RSP", "parallel-rdp commands", "parallel-rdp frame", "a GPU fence wait",
       "a Vulkan submit", "an RDRAM sync wait", "present (vsync/FIFO wait)", "the speed limiter", "the audio queue",
       "a cartridge DMA", "save data", "a save state", "paused", "a main-thread call", "controller input", "achievements",
+      "the frame: command ring drain", "the frame: waiting for the RDP's idle lock", "the frame: flush and signal", "the frame: video interface scanout",
+      "the frame: request_program", "the frame: request_command_buffer", "the frame: HDR layers", "the frame: swapchain render pass",
+      "the frame: quick menu/overlay", "GPU memory allocation",
    };
    return place >= 0 && place < PSGOPHER_WHERE_COUNT ? names[place] : "an unknown place";
 }
 
 int pthread_getcpuclockid(pthread_t thread, clockid_t *clock) __attribute__((weak));
 
-static _Atomic uint64_t stall_vis;
+static _Atomic uint64_t stall_vis, stall_last_vi_ns, stall_peak_ns; /* the VI count; the last VI's time; the longest VI interval not yet looked at */
+/* hitches (a VI interval over 50 ms), counted since the last video line */
+#define HITCH_MS 50
+static _Atomic uint32_t hitch_count, hitch_longest_ms;
+static _Atomic int hitch_longest_place;
+static _Atomic uint32_t hitch_samples[PSGOPHER_WHERE_COUNT];
 static _Atomic bool stall_running, stall_emu_known;
 static pthread_t stall_thread, stall_emu;
 static bool stall_started;
 static int stall_threshold_ms = 250, stall_period_ms = 20;
+
+int psgopher_where_emu(int place)
+{
+   if (!atomic_load_explicit(&stall_emu_known, memory_order_relaxed) || !pthread_equal(pthread_self(), stall_emu))
+      return -1;
+   return psgopher_where(place);
+}
+
+void psgopher_where_emu_restore(int previous)
+{
+   if (previous >= 0)
+      psgopher_where_restore(previous);
+}
 
 void psgopher_stall_configure(int threshold_ms, int period_ms)
 {
@@ -473,6 +499,10 @@ void psgopher_stall_vi(void)
       stall_emu = pthread_self();
       atomic_store(&stall_emu_known, true);
    }
+   const uint64_t now = now_ns(CLOCK_MONOTONIC), previous = atomic_load_explicit(&stall_last_vi_ns, memory_order_relaxed);
+   if (previous && now - previous > atomic_load_explicit(&stall_peak_ns, memory_order_relaxed))
+      atomic_store_explicit(&stall_peak_ns, now - previous, memory_order_relaxed);
+   atomic_store_explicit(&stall_last_vi_ns, now, memory_order_relaxed);
    atomic_store_explicit(&stall_vis, atomic_load_explicit(&stall_vis, memory_order_relaxed) + 1, memory_order_relaxed);
 }
 
@@ -545,6 +575,20 @@ static void *stall_main(void *unused)
       /* a held game (paused, the quick menu) is no stall; before the first VI there is nothing to wait for */
       const bool held = place == PSGOPHER_WHERE_PAUSED || pauses != seen_pauses;
       if (vis != seen_vis || held || vis == 0) {
+         /* a VI after a gap over 50 ms (not across a pause) is a hitch; it was in its most sampled place */
+         const uint64_t peak = atomic_exchange_explicit(&stall_peak_ns, 0, memory_order_relaxed);
+         if (vis != seen_vis && !held && pauses == seen_pauses && peak > (uint64_t)HITCH_MS * 1000000u) {
+            int top = 0;
+            for (int i = 1; i < PSGOPHER_WHERE_COUNT; i++)
+               if (histogram[i] > histogram[top])
+                  top = i;
+            const uint32_t ms = (uint32_t)(peak / 1000000u);
+            atomic_fetch_add_explicit(&hitch_count, 1, memory_order_relaxed);
+            if (ms > atomic_load_explicit(&hitch_longest_ms, memory_order_relaxed)) {
+               atomic_store_explicit(&hitch_longest_ms, ms, memory_order_relaxed);
+               atomic_store_explicit(&hitch_longest_place, top, memory_order_relaxed);
+            }
+         }
          if (stalled) {
             const uint64_t cpu_now = stall_emu_cpu(&clock_resolved, &clock_id);
             stall_report((now - since_ns) / 1000000u, histogram,
@@ -558,6 +602,11 @@ static void *stall_main(void *unused)
          continue;
       }
       histogram[place >= 0 && place < PSGOPHER_WHERE_COUNT ? place : 0]++;
+      {
+         const uint64_t last = atomic_load_explicit(&stall_last_vi_ns, memory_order_relaxed);
+         if (last && now > last && now - last > (uint64_t)HITCH_MS * 1000000u)
+            atomic_fetch_add_explicit(&hitch_samples[place >= 0 && place < PSGOPHER_WHERE_COUNT ? place : 0], 1, memory_order_relaxed);
+      }
       if (!stalled && (now - since_ns) / 1000000u >= (uint64_t)stall_threshold_ms) {
          stalled = true;
          const uint64_t ticks = __rdtsc() - atomic_load_explicit(&where_since_tsc, memory_order_relaxed);
@@ -572,10 +621,15 @@ void psgopher_stall_start(void)
 {
    if (stall_started)
       return;
-   const char *e = getenv("PSGOPHER_SLOW_CAPTURE"); /* (Slow moments: logging only, on unless the setting is off) */
-   if (e && !strcmp(e, "0"))
-      return;
+   /* (logging only, so on whatever Slow Moments says: it controls the 600-VI window alone) */
    atomic_store(&stall_vis, 0);
+   atomic_store(&stall_last_vi_ns, 0);
+   atomic_store(&stall_peak_ns, 0);
+   atomic_store(&hitch_count, 0);
+   atomic_store(&hitch_longest_ms, 0);
+   atomic_store(&hitch_longest_place, 0);
+   for (int i = 0; i < PSGOPHER_WHERE_COUNT; i++)
+      atomic_store(&hitch_samples[i], 0);
    atomic_store(&stall_emu_known, false);
    atomic_store(&where_place, PSGOPHER_WHERE_CPU);
    atomic_store(&where_pauses, 0);
@@ -598,6 +652,36 @@ void psgopher_stall_stop(void)
    stall_started = false;
 }
 
+/* the hitches since the last call, as the tail of the video line; starts the next count */
+void psgopher_hitch_summary(char *out, size_t size)
+{
+   const uint32_t count = atomic_exchange(&hitch_count, 0), longest = atomic_exchange(&hitch_longest_ms, 0);
+   const int longest_place = atomic_load(&hitch_longest_place);
+   unsigned samples[PSGOPHER_WHERE_COUNT];
+   for (int i = 0; i < PSGOPHER_WHERE_COUNT; i++)
+      samples[i] = atomic_exchange(&hitch_samples[i], 0);
+   if (!count) {
+      snprintf(out, size, "; hitches: none");
+      return;
+   }
+   int used = snprintf(out, size, "; hitches: %u over %d ms, longest %u ms (in %s); time in hitches by place (%d ms samples): ", count,
+                       HITCH_MS, longest, psgopher_where_name(longest_place), stall_period_ms);
+   bool any = false;
+   for (int k = 0; k < 4 && used > 0 && (size_t)used < size; k++) {
+      int best = -1;
+      for (int i = 0; i < PSGOPHER_WHERE_COUNT; i++)
+         if (samples[i] && (best < 0 || samples[i] > samples[best]))
+            best = i;
+      if (best < 0)
+         break;
+      used += snprintf(out + used, size - (size_t)used, "%s%s %u", any ? ", " : "", psgopher_where_name(best), samples[best]);
+      any = true;
+      samples[best] = 0;
+   }
+   if (!any && used > 0 && (size_t)used < size)
+      snprintf(out + used, size - (size_t)used, "none sampled");
+}
+
 static uint64_t video_since_ns, video_count, video_total, video_underruns_at;
 
 /* a new game: its first frame is said again */
@@ -611,6 +695,7 @@ void psgopher_video_reset(void)
    live_since_ns = live_frames = live_present_ns = live_last_end = 0;
    atomic_store(&live_rdram_ns, 0);
    atomic_store(&live_rdram_waits, 0);
+   atomic_store(&live_frame_part_max, 0);
    atomic_store(&live_rdp_ticks, 0);
    for (int i = 0; i < 3; i++)
       atomic_store(&live_rdp_part_ticks[i], 0);
@@ -640,14 +725,20 @@ static void video_heartbeat(uint64_t end_ns)
       const struct psgopher_live l = live_now;
       psgopher_sdl3_audio_stats audio;
       psgopher_sdl3_audio_stats_read(&audio);
+      /* the frame part's figure above is the last second's, averaged over its VIs: one long call shows as a long average */
+      char longest_frame[64] = "", hitches[512];
+      const double frame_max_ms = live_ticks_per_ns > 0 ? (double)atomic_exchange(&live_frame_part_max, 0) / live_ticks_per_ns / 1e6 : 0.0;
+      if (frame_max_ms > 50.0)
+         snprintf(longest_frame, sizeof(longest_frame), "; longest frame part %.0f ms", frame_max_ms);
+      psgopher_hitch_summary(hitches, sizeof(hitches));
       say("video: %llu VIs in %.1f s (%.2f a second, %.0f%% speed); game %u fps; a VI: CPU %.2f ms (RSP %.2f, RDP %.2f: draw %.2f, sync %.2f, frame %.2f), present wait %.2f ms, "
           "RDRAM sync %.2f ms (%.1f); shading %.0f%% general (%llu compiled, %.0f ms each, %llu waiting); "
-          "audio queue %llu, %llu underrun(s) in 10 s",
+          "audio queue %llu, %llu underrun(s) in 10 s%s%s",
           (unsigned long long)video_count, (double)span / 1e9, (double)video_count * 1e9 / (double)span,
           l.target_vis ? (double)video_count * 1e9 / (double)span / l.target_vis * 100.0 : 0.0, l.game_fps, l.cpu_ms,
           l.rsp_ms, l.rdp_ms, l.rdp_part_ms[0], l.rdp_part_ms[1], l.rdp_part_ms[2], l.present_ms, l.rdram_ms, l.rdram_waits,
           l.general_share < 0 ? 0.0 : l.general_share * 100.0, l.compiles_done, l.compile_ms, l.compiles_waiting, (unsigned long long)audio.queued_frames,
-          (unsigned long long)(audio.underrun_grains - video_underruns_at));
+          (unsigned long long)(audio.underrun_grains - video_underruns_at), longest_frame, hitches);
       video_underruns_at = audio.underrun_grains;
       video_since_ns = end_ns;
       video_count = 0;

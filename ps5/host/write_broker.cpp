@@ -347,7 +347,11 @@ namespace psgopher
 {
 namespace
 {
-constexpr const char* kBrokerElf = "/app0/write-broker.elf";
+// The helper beside eboot.bin in the title folder. Not "/app0/...": once the title has left its sandbox
+// (ps5/host/sandbox.cpp) /app0 is gone, and the copies come after that (the console, 2026-11-26:
+// "/app0/write-broker.elf is missing" with the folder fully copied). main.cpp gives the folder.
+std::string g_title_dir = "/app0";
+std::string brokerElf() { return g_title_dir + "/write-broker.elf"; }
 constexpr int kHelloMs = 8000;     // the loader starts the payload: its first answer
 constexpr int kReplyMs = 120000;   // one message's answer (16 MiB at the held-back rate takes about 1.5 s)
 constexpr int kSyncMs = 120000;
@@ -403,9 +407,10 @@ bool connect(State& s, std::string& why)
 		why = "the helper ended more than once this run: not started again";
 		return false;
 	}
-	if (!s.connector && access(kBrokerElf, R_OK) != 0)
+	const std::string elf = brokerElf();
+	if (!s.connector && access(elf.c_str(), R_OK) != 0)
 	{
-		why = std::string(kBrokerElf) + " is missing from the title folder";
+		why = elf + " is missing from the title folder";
 		return false;
 	}
 	s.launches++;
@@ -415,7 +420,7 @@ bool connect(State& s, std::string& why)
 	{
 		if (attempt != 0)
 			std::this_thread::sleep_for(std::chrono::seconds(1)); // (the loader may be busy)
-		fd = s.connector ? s.connector(launched) : broker::Launch(kBrokerElf, launched);
+		fd = s.connector ? s.connector(launched) : broker::Launch(elf, launched);
 	}
 	if (fd < 0)
 	{
@@ -463,6 +468,12 @@ int writeThrough(broker::Client& c, const std::string& path, const unsigned char
 	return e != 0 ? e : closed;
 }
 } // namespace
+
+void helperSetTitleFolder(const char* title_dir)
+{
+	if (title_dir && *title_dir)
+		g_title_dir = title_dir;
+}
 
 bool helperEnabled()
 {

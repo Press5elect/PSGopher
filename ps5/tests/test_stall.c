@@ -1,7 +1,8 @@
 /*
  * PSGopher - host test of the freeze watchdog (ps5/host/bench.c): a fake emulation thread draws VIs,
  * then blocks 400 ms in a named place; the watchdog's two lines must name it. A held game (the place
- * PAUSED) logs nothing, nor does a game with Slow moments off.
+ * PAUSED) logs nothing. Slow moments does not matter: the watchdog is logging only. Hitches (VI
+ * intervals over 50 ms) are counted into the video line's tail (psgopher_hitch_summary).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
@@ -79,6 +80,32 @@ static void game(int place, int block_ms)
    psgopher_stall_stop();
 }
 
+static void *hitching(void *unused)
+{
+   (void)unused;
+   for (int i = 1; i <= 20; i++) {
+      sleep_ms(16);
+      if (i % 4 == 0) {
+         const int before = psgopher_where(PSGOPHER_WHERE_AUDIO);
+         sleep_ms(80);
+         psgopher_where_restore(before);
+      }
+      psgopher_stall_vi();
+   }
+   return NULL;
+}
+
+static void hitch_run(char *tail, size_t size)
+{
+   psgopher_stall_start();
+   pthread_t t;
+   pthread_create(&t, NULL, hitching, NULL);
+   pthread_join(t, NULL);
+   sleep_ms(60);
+   psgopher_hitch_summary(tail, size);
+   psgopher_stall_stop();
+}
+
 int main(void)
 {
    unsetenv("PSGOPHER_SLOW_CAPTURE");
@@ -119,10 +146,27 @@ int main(void)
    game(PSGOPHER_WHERE_PRESENT, 150);
    CHECK(!lines[0], "a 150 ms block logged:\n%s", lines);
 
-   /* Slow moments off: logging stops */
+   /* Slow moments off: the watchdog still logs */
    setenv("PSGOPHER_SLOW_CAPTURE", "0", 1);
    game(PSGOPHER_WHERE_SAVE_DATA, 400);
-   CHECK(!lines[0], "a game with Slow moments off logged:\n%s", lines);
+   CHECK(strstr(lines, "stall: no VI for 250 ms; the emulation thread in save data"), "Slow moments off silenced the watchdog:\n%s", lines);
+   unsetenv("PSGOPHER_SLOW_CAPTURE");
+
+   /* hitches: 20 VIs, every 4th one after an 80 ms block in the audio queue */
+   char tail[1024];
+   hitch_run(tail, sizeof(tail));
+   CHECK(strstr(tail, "; hitches: 5 over 50 ms, longest "), "5 hitches expected: %s", tail);
+   const char *longest = strstr(tail, "longest ");
+   CHECK(longest && atof(longest + 8) >= 80 && atof(longest + 8) < 140, "longest hitch off: %s", tail);
+   CHECK(strstr(tail, "(in the audio queue)") && strstr(tail, "(20 ms samples): the audio queue "), "place not named: %s", tail);
+   /* nothing since: none */
+   psgopher_hitch_summary(tail, sizeof(tail));
+   CHECK(!strcmp(tail, "; hitches: none"), "second read: %s", tail);
+
+   /* the same with Slow moments off */
+   setenv("PSGOPHER_SLOW_CAPTURE", "0", 1);
+   hitch_run(tail, sizeof(tail));
+   CHECK(strstr(tail, "; hitches: 5 over 50 ms"), "Slow moments off: hitches not counted: %s", tail);
    unsetenv("PSGOPHER_SLOW_CAPTURE");
 
    if (failures) {

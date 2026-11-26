@@ -1,8 +1,8 @@
 diff --git a/parallel-rdp/rdp_device.cpp b/parallel-rdp/rdp_device.cpp
-index 2e874f1..05b31c5 100644
+index 2e874f1..37b2dda 100644
 --- a/parallel-rdp/rdp_device.cpp
 +++ b/parallel-rdp/rdp_device.cpp
-@@ -22,6 +22,17 @@
+@@ -22,6 +22,24 @@
  
  #include "rdp_device.hpp"
  #include "rdp_common.hpp"
@@ -12,6 +12,13 @@ index 2e874f1..05b31c5 100644
 +extern "C" int psgopher_where(int place);
 +extern "C" void psgopher_where_restore(int previous);
 +// (the numbers are ps5/host/bench.h's: 4 a GPU fence wait, 5 a Vulkan submit, 6 an RDRAM sync wait)
++// the finer places inside the frame's scanout (bench.h: 17 drain, 18 lock, 19 flush, 20 the VI)
++struct PsgopherPlace {
++	int previous;
++	explicit PsgopherPlace(int place) : previous(psgopher_where(place)) {}
++	~PsgopherPlace() { psgopher_where_restore(previous); }
++};
++#define PSGOPHER_PLACE(n) PsgopherPlace psgopher_place_##n(n)
 +#define PSGOPHER_TIMED_SUBMIT(...) \
 +	do { const int psgopher_place = psgopher_where(5); const uint64_t psgopher_submit_begin = __rdtsc(); __VA_ARGS__; psgopher_bench_submit(__rdtsc() - psgopher_submit_begin); psgopher_where_restore(psgopher_place); } while (0)
 +#else
@@ -20,7 +27,7 @@ index 2e874f1..05b31c5 100644
  #include <chrono>
  
  #ifdef __SSE2__
-@@ -170,7 +181,7 @@ void CommandProcessor::begin_frame_context()
+@@ -170,7 +188,7 @@ void CommandProcessor::begin_frame_context()
  {
  	flush();
  	drain_command_ring();
@@ -29,7 +36,7 @@ index 2e874f1..05b31c5 100644
  }
  
  void CommandProcessor::init_renderer()
-@@ -249,8 +260,14 @@ void CommandProcessor::clear_buffer(Vulkan::Buffer &buffer, uint32_t value)
+@@ -249,8 +267,14 @@ void CommandProcessor::clear_buffer(Vulkan::Buffer &buffer, uint32_t value)
  		auto cmd = device.request_command_buffer();
  		cmd->fill_buffer(buffer, value);
  		Fence fence;
@@ -45,7 +52,7 @@ index 2e874f1..05b31c5 100644
  	}
  	else
  	{
-@@ -1094,9 +1111,15 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
+@@ -1094,9 +1118,15 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
  	Vulkan::QueryPoolHandle start_ts, end_ts;
  	if (measure_stall_time)
  		start_ts = device.write_calibrated_timestamp();
@@ -61,7 +68,49 @@ index 2e874f1..05b31c5 100644
  	if (measure_stall_time)
  	{
  		end_ts = device.write_calibrated_timestamp();
-@@ -1179,7 +1202,7 @@ void CommandProcessor::scanout_async_buffer(VIScanoutBuffer &buffer, const Scano
+@@ -1107,7 +1137,12 @@ void CommandProcessor::wait_for_timeline(uint64_t index)
+ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImageLayout target_layout)
+ {
+ 	Vulkan::QueryPoolHandle start_ts, end_ts;
+-	drain_command_ring();
++	{
++#ifdef PSGOPHER
++		PSGOPHER_PLACE(17);
++#endif
++		drain_command_ring();
++	}
+ 
+ 	if (dump_writer)
+ 	{
+@@ -1118,8 +1153,16 @@ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImag
+ 	}
+ 
+ 	// Block idle callbacks triggering while we're doing this.
+-	renderer.lock_command_processing();
+ 	{
++#ifdef PSGOPHER
++		PSGOPHER_PLACE(18);
++#endif
++		renderer.lock_command_processing();
++	}
++	{
++#ifdef PSGOPHER
++		PSGOPHER_PLACE(19);
++#endif
+ 		renderer.flush_and_signal();
+ 		if (!is_host_coherent)
+ 		{
+@@ -1130,6 +1173,9 @@ Vulkan::ImageHandle CommandProcessor::scanout(const ScanoutOptions &opts, VkImag
+ 	}
+ 	renderer.unlock_command_processing();
+ 
++#ifdef PSGOPHER
++	PSGOPHER_PLACE(20);
++#endif
+ 	auto scanout = vi.scanout(target_layout, opts, renderer.get_scaling_factor());
+ 	return scanout;
+ }
+@@ -1179,7 +1225,7 @@ void CommandProcessor::scanout_async_buffer(VIScanoutBuffer &buffer, const Scano
  	             VK_PIPELINE_STAGE_HOST_BIT, VK_ACCESS_HOST_READ_BIT);
  
  	buffer.fence.reset();
@@ -70,7 +119,7 @@ index 2e874f1..05b31c5 100644
  }
  
  void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width, unsigned &height,
-@@ -1200,7 +1223,13 @@ void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width,
+@@ -1200,7 +1246,13 @@ void CommandProcessor::scanout_sync(std::vector<RGBA> &colors, unsigned &width,
  	height = scanout.height;
  	colors.resize(width * height);
  
@@ -93120,3 +93169,84 @@ index 98a75e0..9e8de98 100644
  	struct
  	{
  		bool aa = true;
+diff --git a/vulkan/device.cpp b/vulkan/device.cpp
+index 60d791f..9de6b1b 100644
+--- a/vulkan/device.cpp
++++ b/vulkan/device.cpp
+@@ -59,6 +59,20 @@ static unsigned get_thread_index()
+ 
+ using namespace Util;
+ 
++#ifdef PSGOPHER
++#include <x86intrin.h>
++extern "C" int psgopher_where_emu(int place);
++extern "C" void psgopher_where_emu_restore(int previous);
++// the place "GPU memory allocation" (ps5/host/bench.h: 26), when the emulation thread is the one allocating
++struct PsgopherAllocPlace {
++	int previous = psgopher_where_emu(26);
++	~PsgopherAllocPlace() { psgopher_where_emu_restore(previous); }
++};
++#define PSGOPHER_ALLOC_PLACE PsgopherAllocPlace psgopher_alloc_place
++#else
++#define PSGOPHER_ALLOC_PLACE
++#endif
++
+ namespace Vulkan
+ {
+ static constexpr VkImageUsageFlags image_usage_video_flags =
+@@ -3975,6 +3989,7 @@ void Device::get_memory_budget(HeapBudget *budget)
+ 
+ ImageHandle Device::create_image(const ImageCreateInfo &create_info, const ImageInitialData *initial)
+ {
++	PSGOPHER_ALLOC_PLACE;
+ 	if (initial)
+ 	{
+ 		auto staging_buffer = create_image_staging_buffer(create_info, initial);
+@@ -5174,6 +5189,7 @@ RTASHandle Device::create_rtas(const BottomRTASCreateInfo &info, CommandBuffer *
+ 
+ BufferHandle Device::create_buffer(const BufferCreateInfo &create_info, const void *initial)
+ {
++	PSGOPHER_ALLOC_PLACE;
+ 	DeviceAllocation allocation;
+ 	VkBuffer buffer;
+ 
+diff --git a/vulkan/memory_allocator.cpp b/vulkan/memory_allocator.cpp
+index 5feb1ea..3733752 100644
+--- a/vulkan/memory_allocator.cpp
++++ b/vulkan/memory_allocator.cpp
+@@ -23,6 +23,19 @@
+ #include "memory_allocator.hpp"
+ #include "timeline_trace_file.hpp"
+ #include "device.hpp"
++#ifdef PSGOPHER
++#include <x86intrin.h>
++extern "C" int psgopher_where_emu(int place);
++extern "C" void psgopher_where_emu_restore(int previous);
++// the place "GPU memory allocation" (ps5/host/bench.h: 26), when the emulation thread is the one allocating
++struct PsgopherAllocPlace {
++	int previous = psgopher_where_emu(26);
++	~PsgopherAllocPlace() { psgopher_where_emu_restore(previous); }
++};
++#define PSGOPHER_ALLOC_PLACE PsgopherAllocPlace psgopher_alloc_place
++#else
++#define PSGOPHER_ALLOC_PLACE
++#endif
+ #include <algorithm>
+ 
+ #ifndef _WIN32
+@@ -761,6 +774,7 @@ bool DeviceAllocator::internal_allocate(
+ 	VkResult res;
+ 	{
+ 		GRANITE_SCOPED_TIMELINE_EVENT_FILE(device->get_system_handles().timeline_trace_file, "vkAllocateMemory");
++		PSGOPHER_ALLOC_PLACE;
+ 		res = table->vkAllocateMemory(device->get_device(), &info, nullptr, &device_memory);
+ 	}
+ 
+@@ -793,6 +807,7 @@ bool DeviceAllocator::internal_allocate(
+ 			{
+ 				GRANITE_SCOPED_TIMELINE_EVENT_FILE(device->get_system_handles().timeline_trace_file,
+ 				                                   "vkAllocateMemory");
++				PSGOPHER_ALLOC_PLACE;
+ 				res = table->vkAllocateMemory(device->get_device(), &info, nullptr, &device_memory);
+ 			}
+ 			++block_itr;

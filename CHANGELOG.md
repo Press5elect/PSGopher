@@ -113,6 +113,13 @@ console: the cheats, variable refresh, HDR10.
 
 ### From the siblings (2026-11-26)
 
+- Fixed: the write helper was looked for at `/app0/write-broker.elf`, which is gone once the title has
+  left its sandbox: it is looked for in the title folder.
+- Added: the RDP's frame step split into its parts for the freeze watchdog (the command ring, the
+  idle lock, flush, the VI scanout, the program and command buffer, the HDR layers, the render pass,
+  the overlay, GPU memory allocation), and `video: the picture is WxH ...` at each change of the
+  picture the game outputs.
+- Added: short hiccups counted in the boot log: each `video:` line says how many VIs took over 50 ms, the longest, and where the emulation thread was during them; the freeze watchdog no longer depends on Slow Moments.
 - Added: a freeze is named in the boot log. When a game goes 250 ms without a frame, `stall:` says
   where the emulation thread is (RSP, the RDP's commands or frame, a GPU wait, a submit, an RDRAM
   sync, the present, the audio queue, cartridge reads, save data, save states...), and `stall over:`

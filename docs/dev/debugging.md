@@ -25,7 +25,8 @@ What to look for:
 | `library:` | the search: places, budgets, headers read, the time it took |
 | `psgopher:` | Gopher64's runtime (the Tokio fallback), its messages and panics |
 | `rdp:` | the RDRAM path parallel-rdp took (imported host memory or the staging copy) |
-| `video:` | every 10 s: VIs (against 50 or 59.94), speed, the game's own frame rate, CPU time a VI with parallel-rdp's share (`RDP`: its drawing commands, SyncFull's submissions, the frame's render), present time, RDRAM syncs, audio queue and underruns (counted from the game's first audio) |
+| `video:` | every 10 s: VIs (against 50 or 59.94), speed, the game's own frame rate, CPU time a VI with parallel-rdp's share (`RDP`: its drawing commands, SyncFull's submissions, the frame's render), present time, RDRAM syncs, audio queue and underruns (counted from the game's first audio); the tail counts hitches, VIs that took over 50 ms (`; hitches: N over 50 ms, longest X ms (in <place>); time in hitches by place (20 ms samples): ...`, top 4, or `; hitches: none`), and `; longest frame part X ms` when one frame render took over 50 ms (the `frame` figure is the last second's average over its VIs, so one long call inflates it) |
+| `stall:`, `stall over:` | the freeze watchdog (always on, whatever Slow Moments says): 250 ms without a VI, the place the emulation thread is in; then how long it lasted, its 20 ms samples by place and its CPU time |
 | `quickmenu:` | the quick menu opened and what was chosen |
 | `covers:`, `about:` | each cover and description fetched, missing, or why the network failed |
 | `crash report:` | a fault: signal, registers, stack offsets |

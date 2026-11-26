@@ -97,6 +97,8 @@ using HelperConnector = std::function<int(std::string& why)>;
 
 /// Whether the copies may use the helper: the `write_helper` setting (title_settings.cpp puts it in
 /// PSGOPHER_WRITE_HELPER, "0" or "1"); on when the variable is not there.
+// The title folder (main.cpp, once the sandbox is left): the helper is <folder>/write-broker.elf.
+void helperSetTitleFolder(const char* title_dir);
 bool helperEnabled();
 
 /// Writes `size` bytes of `data` as the file `target` through the write broker, launching it at the
