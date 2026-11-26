@@ -15,6 +15,7 @@ struct MenuResult {
 	std::string rom;    // the ROM to play (a local path: a share's was copied)
 	std::string name;   // the game's name in the list (its play time is kept by it)
 	int load_state{ -1 }; // a probe (save state slot) to start from, -1 none
+	bool benchmark{ false }; // a benchmark from that probe (1x 2x 4x 8x), not a game to play
 };
 
 /* Shows the list until a game is chosen or the title is closed. `notice` is said at the top once

@@ -62,6 +62,8 @@ void TitleSettings::load()
 			driverThread = !strcmp(value, "on");
 		else if (!strcmp(key, "gpu_timing"))
 			gpuTiming = !strcmp(value, "on");
+		else if (!strcmp(key, "slow_capture"))
+			slowCapture = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "wave32"))
 			wave32 = !strcmp(value, "on");
 		else if (!strcmp(key, "small_types"))
@@ -117,6 +119,8 @@ bool TitleSettings::save() const
 		"driver_thread = %s\n"
 		"# gpu_timing: on writes the GPU's time in each of parallel-rdp's stages to the boot log (gpu: lines)\n"
 		"gpu_timing = %s\n"
+		"# slow_capture: on measures a slow moment in a game (below 95%% for 3 s) into the boot log\n"
+		"slow_capture = %s\n"
 		"# wave32: on runs the GPU's compute shaders 32 wide (RADV's default is 64); small_types: on lets\n"
 		"# parallel-rdp use 8 and 16-bit arithmetic (it turns that off on RADV). Measured with gpu_timing\n"
 		"wave32 = %s\n"
@@ -129,7 +133,7 @@ bool TitleSettings::save() const
 		"# quickmenu_tap: a touch pad tap opens the quick menu (on whenever nothing else leaves a game)\n"
 		"quickmenu_tap = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)
@@ -199,6 +203,7 @@ void TitleSettings::applyHdr() const
 		unsetenv("PARALLEL_RDP_SMALL_TYPES");
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");
+	setenv("PSGOPHER_SLOW_CAPTURE", slowCapture ? "1" : "0", 1);
 	if (gpuTiming)
 		setenv("PARALLEL_RDP_BENCH", "2", 1);
 	else

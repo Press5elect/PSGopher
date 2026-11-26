@@ -111,6 +111,8 @@ int main(void)
    CHECK(commands > 1.3 - tol && commands < 1.3 + tol, "commands without the syncs %.2f", commands);
    CHECK(rest > 1.0 - 2 * tol && rest < 1.0 + 2 * tol, "the VR4300's 1 ms is the rest: %.2f", rest);
    CHECK(work > vi - present - limiter - 0.01 && work < vi - present - limiter + 0.01, "work = VI - present - limiter");
+   /* a benchmark window ends the game; a slow moment's does not (interface.cpp asks this) */
+   CHECK(!psgopher_bench_window_auto(), "a benchmark's window is not a slow moment's");
    if (failures) {
       fprintf(stderr, "test_bench: %d failure(s)\n", failures);
       return 1;

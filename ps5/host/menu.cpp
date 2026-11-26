@@ -1376,6 +1376,11 @@ MenuResult runMenu(const std::string &notice)
 			m->result.load_state = slot;
 			m->play(g);
 		};
+		host.benchmark = [m](const Game &g, int slot) {
+			m->result.load_state = slot;
+			m->result.benchmark = true;
+			m->play(g);
+		};
 		host.shares = [m] { m->go(Screen::Shares); };
 		host.close = [m] {
 			m->result.play = false;

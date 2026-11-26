@@ -883,6 +883,13 @@ void Frontend::probePicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 		host_.play(g, slot);
 		return;
 	}
+	/* the same scene at 1x, 2x, 4x and 8x (benchmark mode, docs/dev/performance.md): back to the board after */
+	if ((pad.pressed & PAD_TRIANGLE) && n > 0 && host_.benchmark && !(host_.busy && host_.busy())) {
+		const int slot = probes_[probes_open_].slot;
+		probes_open_ = -1;
+		host_.benchmark(g, slot);
+		return;
+	}
 	const board::Look look = lookFor(g);
 	const float x = 1920 - 64 - 470, y = 150, w = 470;
 	const float h = 28 + 13 + 16 + 50 + 20 + n * 62 + 40;
@@ -901,7 +908,8 @@ void Frontend::probePicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 		ink.text(f.mono, 15, x + w - 48 - ink.width(f.mono, 15, when), cy + 18, on ? kInk : kDim, when);
 		cy += 62;
 	}
-	ink.text(f.mono, 14, 64, 1046, kDim, "\xE2\x96\xB2 \xE2\x96\xBC  PROBE      \xE2\x9C\x95  POWER ON FROM IT      \xE2\x97\x8B  BACK", .08f);
+	ink.text(f.mono, 14, 64, 1046, kDim,
+	         "\xE2\x96\xB2 \xE2\x96\xBC  PROBE      \xE2\x9C\x95  POWER ON FROM IT      \xE2\x96\xB3  BENCHMARK 1\xC3\x97 2\xC3\x97 4\xC3\x97 8\xC3\x97      \xE2\x97\x8B  BACK", .08f);
 }
 
 /* the game's cheats, as Gopher64 has them */
@@ -1443,6 +1451,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(title_row("8/16-bit maths", "parallel-rdp's 8 and 16-bit arithmetic, which it turns off on RADV (measured on PCs). GPU timing shows which is faster here.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.smallTypes; },
 		                           [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; }));
+		s.rows.push_back(title_row("Slow moments", "When a game falls below 95% for 3 seconds, the next 10 seconds are measured into the boot log (where the time goes), up to three times a game.",
+		                           { { "Off", 0 }, { "Measured", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
+		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }));
 		s.rows.push_back(title_row("GPU timing", "Writes the GPU's time in each of parallel-rdp's stages to the boot log every 10 s (gpu: lines), to find what a slow game costs.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.gpuTiming; },
 		                           [](TitleSettings &t, int64_t v) { t.gpuTiming = v != 0; }));

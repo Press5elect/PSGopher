@@ -21,7 +21,8 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 | The two-controller tap | `93a4309` | hold the touch pad with a second controller connected: no quick menu |
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
 | Shader compiles on 4 threads or at once; the driver's own thread | `2ab7c1d` (ran: no change at 8x) | the `video:` line's shading share and speed at 8x with each |
-| The core's profiling build (`PSGOPHER_PGO=generate`) | this commit | `pgo:` lines after each game; `.profraw` files in `/data/psgopher/pgo` |
+| The benchmark window, the board's Benchmark and slow moments | this commit | `benchmark window` lines; the board's notice after △ on a probe |
+| The core's profiling build (`PSGOPHER_PGO=generate`) | `2423b54` | `pgo:` lines after each game; `.profraw` files in `/data/psgopher/pgo` |
 | The configurable hotkeys and their new actions, the quick menu tap switch | `892ab0a` (the `hotkeys:` line has run) | each action in a game with the activator held; `hotkeys:` line at a game's start |
 | Binding a profile's input by pressing it, the Transfer Pak's file picker, port controller assignment | `892ab0a` | Profiles and Controllers in BENCH, then a game |
 | Cheats applied to a game | `33c8907` | a cheat on, the game started from the board |

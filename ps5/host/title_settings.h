@@ -23,6 +23,7 @@ struct TitleSettings {
 	                                  // thread (Gopher64's), "4" four, "now" compiled when first needed
 	bool driverThread{ false };  // RADV records and submits on a thread of its own (Crux2's switch)
 	bool gpuTiming{ false };     // parallel-rdp's GPU timestamps, each stage's time in the boot log
+	bool slowCapture{ true };    // a slow moment in a game (below 95% for 3 s) measured into the boot log
 	bool wave32{ false };        // RADV runs compute shaders 32 wide (RADV_PERFTEST=cswave32; its default is 64)
 	bool smallTypes{ false };    // parallel-rdp's 8/16-bit arithmetic (it turns it off on RADV by default)
 	/* the controller's hotkeys (Gopher64's: its Hotkey Activator held, the touch pad by default, and

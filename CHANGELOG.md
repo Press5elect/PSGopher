@@ -97,6 +97,12 @@ console: the cheats, variable refresh, HDR10.
 
 ### The performance programme: a trustworthy benchmark (2026-11-26)
 
+- Added: the benchmark from the board: HOME, □ Probes, △ on a probe runs it at 1x, 2x, 4x and 8x
+  (twice, 10 s of the game each) and shows each factor's speed; no file or restart.
+- Added: slow moments (BENCH, Video, on by default): a game below 95% for 3 s has its next 600 VIs
+  measured into the boot log (`benchmark window slow moment:`), without stopping it.
+- Fixed: a benchmark run in seconds could be ended early by an earlier run's timer.
+
 - Added: the audit's Phase A documents (`docs/dev/perf/`).
 - Changed: benchmark mode measures a window counted in VIs (`warmup_vis`, `measure_vis`) after which
   the game ends itself, so every upscale factor covers the same emulated VIs; `repeat` interleaves

@@ -46,7 +46,10 @@ to the board; with L1/R1: save/load state; with L2: fast forward; with C-left: r
 the pak). In BENCH, Hotkeys turns them all off, gives each action another button or none, and adds
 what Gopher64 has only on a keyboard (reset, pause, frame advance, volume, the save slot, its frame
 rate, cropping the letterbox); the quick menu's tap can be switched off too (it stays on while
-nothing else leaves a game). Saves and states are in
+nothing else leaves a game). **Speed**: HOME's □ Probes, △ on a probe benchmarks that moment at 1×,
+2×, 4× and 8× and shows each one's speed (take the probe at 1× to play at full speed); with Slow
+moments on (BENCH, Video), a slow stretch in a game is measured into the boot log by itself. Saves
+and states are in
 `/data/psgopher/data/`.
 
 **Network shares**: BENCH, This console, Network shares adds and edits SMB and NFS shares (an

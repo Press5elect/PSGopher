@@ -226,6 +226,72 @@ static Uint32 benchmark_timer(void *, SDL_TimerID, Uint32)
    return 100;
 }
 
+static int play(const std::string &rom, int load_state);
+
+/* The benchmark's sweep (benchmark.txt, or a probe's Benchmark on the board): one run a factor, each
+ * from the same probe, the whole sweep `repeat` times interleaved; Gopher64's upscale is put back
+ * after. *results gets each factor's average speed ("1x 98% · 2x 85% ..."). */
+static int run_sweep(psgopher::TitleSettings &settings, const std::string &rom, std::string *results)
+{
+   const int64_t upscale_before = psgopher_setting_get("video.upscale");
+   std::vector<int> runs = bench.upscales;
+   if (runs.empty())
+      runs.push_back(0); /* (as set) */
+   std::vector<double> speed_sum(runs.size(), 0.0);
+   std::vector<int> speed_n(runs.size(), 0);
+   int status = 0;
+   if (bench.unlimited)
+      setenv("PSGOPHER_BENCH_UNLIMITED", "1", 1);
+   const size_t total = runs.size() * (size_t)bench.repeat;
+   for (size_t k = 0; k < total; k++) {
+      const size_t r = k % runs.size();
+      if (runs[r])
+         psgopher_setting_set("video.upscale", runs[r]);
+      const long long factor = (long long)psgopher_setting_get("video.upscale");
+      char label[64];
+      snprintf(label, sizeof(label), "%lldx #%zu", factor, k / runs.size() + 1);
+      say("benchmark: run %zu of %zu: upscale %s", k + 1, total, label);
+      if (bench.cold)
+         remove_tree(std::string(ROOT) + "/cache/radv", false); /* the driver's shader cache, emptied */
+      char path[160];
+      snprintf(path, sizeof(path), "%s/bench-%lld-%lldx-%zu.csv", ROOT, (long long)time(nullptr), factor, k / runs.size() + 1);
+      settings.applyHdr();
+      bench.watched_since = 0;
+      psgopher_bench_window(bench.warmup_vis, bench.measure_vis);
+      psgopher_bench_start(path);
+      /* (a window ends the game itself; the wall-clock timer only for a run in seconds, and it stops
+       * itself when it has ended its game) */
+      if (bench.seconds > 0)
+         SDL_AddTimer(100, benchmark_timer, nullptr);
+      status = play(rom, bench.state);
+      psgopher_bench_stop();
+      if (bench.measure_vis > 0) {
+         const double speed = psgopher_bench_window_report(label); /* (after the game: off the emulation thread) */
+         if (speed >= 0)
+            speed_sum[r] += speed, speed_n[r]++;
+      }
+      if (status != 0)
+         break; /* (a game that did not start or ended in error: no more runs) */
+   }
+   unsetenv("PSGOPHER_BENCH_UNLIMITED");
+   psgopher_bench_window(0, 0);
+   if (upscale_before > 0)
+      psgopher_setting_set("video.upscale", upscale_before);
+   if (results) {
+      results->clear();
+      for (size_t r = 0; r < runs.size(); r++) {
+         char part[48];
+         if (speed_n[r])
+            snprintf(part, sizeof(part), "%s%dx %.0f%%", results->empty() ? "" : " \xC2\xB7 ", runs[r] ? runs[r] : (int)upscale_before,
+                     speed_sum[r] / speed_n[r]);
+         else
+            snprintf(part, sizeof(part), "%s%dx not measured", results->empty() ? "" : " \xC2\xB7 ", runs[r] ? runs[r] : (int)upscale_before);
+         *results += part;
+      }
+   }
+   return status;
+}
+
 /* autostart.txt's ROM: a path, or a file name in /data/psgopher/roms */
 static std::string autostart_rom()
 {
@@ -339,43 +405,8 @@ int main()
          return 2;
       }
       const std::string rom = bench.rom[0] == '/' ? bench.rom : std::string(ROOT) + "/roms/" + bench.rom;
-      /* one run a factor, each from the same probe: the same scene at each (Gopher64's setting is
-       * put back afterwards) */
-      const int64_t upscale_before = psgopher_setting_get("video.upscale");
-      std::vector<int> runs = bench.upscales;
-      if (runs.empty())
-         runs.push_back(0); /* (as set) */
-      int status = 0;
-      if (bench.unlimited)
-         setenv("PSGOPHER_BENCH_UNLIMITED", "1", 1);
-      const size_t total = runs.size() * (size_t)bench.repeat;
-      for (size_t k = 0; k < total; k++) {
-         const size_t r = k % runs.size();
-         if (runs[r])
-            psgopher_setting_set("video.upscale", runs[r]);
-         const long long factor = (long long)psgopher_setting_get("video.upscale");
-         char label[64];
-         snprintf(label, sizeof(label), "%lldx #%zu", factor, k / runs.size() + 1);
-         say("benchmark: run %zu of %zu: upscale %s", k + 1, total, label);
-         if (bench.cold)
-            remove_tree(std::string(ROOT) + "/cache/radv", false); /* the driver's shader cache, emptied */
-         char path[160];
-         snprintf(path, sizeof(path), "%s/bench-%lld-%lldx-%zu.csv", ROOT, (long long)time(nullptr), factor, k / runs.size() + 1);
-         settings.applyHdr();
-         bench.watched_since = 0;
-         psgopher_bench_window(bench.warmup_vis, bench.measure_vis);
-         psgopher_bench_start(path);
-         SDL_AddTimer(100, benchmark_timer, nullptr);
-         status = play(rom, bench.state);
-         psgopher_bench_stop();
-         if (bench.measure_vis > 0)
-            psgopher_bench_window_report(label); /* (after the game: off the emulation thread) */
-      }
-      unsetenv("PSGOPHER_BENCH_UNLIMITED");
-      psgopher_bench_window(0, 0);
-      if (upscale_before > 0)
-         psgopher_setting_set("video.upscale", upscale_before);
-      return status;
+      std::string results;
+      return run_sweep(settings, rom, &results);
    }
 
    psgopher::startShares(title_dir);
@@ -409,6 +440,20 @@ int main()
          break;
       settings.load(); /* the list may have changed HDR10 */
       settings.applyHdr();
+      if (chosen.benchmark) {
+         /* a probe's Benchmark on the board: 1x 2x 4x 8x twice, interleaved, from the probe; a short
+          * window (600 VIs, 10 s of the game, after 300 of warm-up), the speed limiter as set */
+         bench = Benchmark{};
+         bench.on = true, bench.state = chosen.load_state, bench.upscales = { 1, 2, 4, 8 };
+         bench.warmup_vis = 300, bench.measure_vis = 600, bench.repeat = 2;
+         say("benchmark: %s from probe %d: 1x 2x 4x 8x, twice; 300 VIs of warm-up, 600 measured", chosen.rom.c_str(),
+             chosen.load_state);
+         std::string results;
+         const int status = run_sweep(settings, chosen.rom, &results);
+         bench = Benchmark{};
+         notice = status == 0 ? "Benchmark: " + results + " (each part in the boot log)" : last_error();
+         continue;
+      }
       const double started = now_seconds();
       notice = play(chosen.rom, chosen.load_state) == 0 ? std::string() : last_error();
       if (!chosen.name.empty() && now_seconds() - started > 5) /* (one that did not start is no play) */

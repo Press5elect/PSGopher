@@ -70,6 +70,7 @@ struct FrontendHost {
 	TitleSettings *title = nullptr;                    // PSGopher's (saved on each change)
 	std::string display_at_start;                      // the refresh the display opened with
 	std::function<void(const Game &, int)> play;       // a game, with a probe's slot (-1 none)
+	std::function<void(const Game &, int)> benchmark;  // a benchmark from a probe (1x 2x 4x 8x)
 	std::function<void()> shares;                      // the share manager
 	std::function<void()> close;                       // close PSGopher
 	std::function<void(const std::string &)> tell;     // a notice

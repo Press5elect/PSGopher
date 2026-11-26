@@ -105,10 +105,10 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..6e97af3 100644
+index b741e0d..bfa9d05 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,62 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,64 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
@@ -152,6 +152,8 @@ index b741e0d..6e97af3 100644
 +extern "C" int psgopher_bench_window_edge(void);
 +extern "C" int psgopher_bench_window_state(void);
 +extern "C" void psgopher_bench_window_gpu(const char *line);
++extern "C" int psgopher_bench_window_auto(void);
++extern "C" double psgopher_bench_window_report(const char *label);
 +// GPU timing on (read at each game's start, not each frame) and its frame count
 +static bool psgopher_gpu_timing;
 +static unsigned psgopher_gpu_frames;
@@ -171,7 +173,7 @@ index b741e0d..6e97af3 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -427,6 +483,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
+@@ -427,6 +485,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
      case USER_EVENT_FAST_FORWARD:
        callback.enable_speedlimiter = !callback.enable_speedlimiter;
        break;
@@ -208,7 +210,7 @@ index b741e0d..6e97af3 100644
      default:
        break;
      }
-@@ -496,6 +582,14 @@ static void rdp_new_processor() {
+@@ -496,6 +584,14 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -223,7 +225,7 @@ index b741e0d..6e97af3 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -582,6 +676,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -582,6 +678,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -233,7 +235,7 @@ index b741e0d..6e97af3 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -606,6 +703,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -606,6 +705,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
  
    callback.emu_running = true;
    callback.enable_speedlimiter = true;
@@ -250,7 +252,7 @@ index b741e0d..6e97af3 100644
    callback.paused = false;
    callback.save_state_slot = save_state_slot;
    crop_letterbox = false;
-@@ -642,6 +749,10 @@ void rdp_close() {
+@@ -642,6 +751,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -261,7 +263,7 @@ index b741e0d..6e97af3 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +844,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +846,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -554,7 +556,7 @@ index b741e0d..6e97af3 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +1180,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1182,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -576,7 +578,7 @@ index b741e0d..6e97af3 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +1230,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1232,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -593,7 +595,7 @@ index b741e0d..6e97af3 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,8 +1266,19 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,8 +1268,19 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -613,7 +615,7 @@ index b741e0d..6e97af3 100644
    }
    device.submit(cmd);
  }
-@@ -857,6 +1288,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
+@@ -857,6 +1290,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
  }
  
  void rdp_render_frame() {
@@ -624,7 +626,7 @@ index b741e0d..6e97af3 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1305,46 @@ void rdp_update_screen() {
+@@ -870,9 +1307,50 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -661,17 +663,21 @@ index b741e0d..6e97af3 100644
 +      if (edge == 2) {
 +        if (psgopher_gpu_timing)
 +          psgopher_bench_window_gpu(gpu_line().c_str());
-+        callback.emu_running = false;
++        if (psgopher_bench_window_auto())
++          psgopher_bench_window_report("slow moment"); // (a slow moment's: the game goes on; one log write, after the window)
++        else
++          callback.emu_running = false;
 +      }
 +      // outside one, every 600 frames into the boot log
-+      if (psgopher_gpu_timing && psgopher_bench_window_state() == 0 && ++psgopher_gpu_frames % 600 == 0)
++      const int window = psgopher_bench_window_state();
++      if (psgopher_gpu_timing && (window == 0 || window == 3) && ++psgopher_gpu_frames % 600 == 0)
 +        psgopher_say("gpu: a frame: %s", gpu_line().c_str());
 +    }
 +#endif
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1376,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1382,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -687,7 +693,7 @@ index b741e0d..6e97af3 100644
  }
  
  size_t rdp_state_size() {
-@@ -1076,6 +1554,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -1076,6 +1560,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
@@ -700,7 +706,7 @@ index b741e0d..6e97af3 100644
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1233,8 +1717,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +1723,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -714,7 +720,7 @@ index b741e0d..6e97af3 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +1752,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +1758,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  

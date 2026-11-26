@@ -59,6 +59,16 @@ With `gpu_timing = on`, a second line gives the GPU stages over exactly the wind
 upscaled dispatches under separate tags (`depth-blending` and `depth-blending-upscaled`, and so on),
 `upscale-pre` and `upscale-post` timed, `render-pass`/`render-pass-upscaled` totals.
 
+**From the board** (no file, no restart): HOME, □ Probes, △ on a probe runs the same sweep (1x 2x 4x
+8x, twice interleaved, 300 VIs of warm-up, 600 measured each) and comes back to the board with each
+factor's average speed in the notice; the parts are in the boot log. Probes taken at 1x replay at any
+factor.
+
+**Slow moments** (normal play, BENCH > Video > Slow moments, on by default): when a game is below 95%
+for three whole seconds running, the next 600 VIs are measured as a window without ending the game,
+and a `benchmark window slow moment:` line (and its `gpu a VI:` line with GPU timing) is written when
+it closes: at most three a game, two minutes apart. One log write after each window; nothing else.
+
 The Phase B protocol (benchmark analysis section 4), one `benchmark.txt` a probe:
 
 ```

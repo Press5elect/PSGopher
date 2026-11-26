@@ -32,10 +32,11 @@ void psgopher_bench_rsp_end(uint64_t cycles);
  * the hooks parallel-rdp's interface and the core call; the summary after the game */
 void psgopher_bench_window(int warmup_vis, int measure_vis);
 int psgopher_bench_window_state(void);            /* 0 off, 1 warming up, 2 measuring, 3 done */
+int psgopher_bench_window_auto(void);             /* the window is a slow moment's (normal play): it does not end the game */
 int psgopher_bench_window_edge(void);             /* 1 began, 2 ended at the last present (read once) */
 void psgopher_bench_window_present(uint64_t begin_tsc, uint64_t end_tsc);
 void psgopher_bench_window_gpu(const char *line); /* the GPU stages over the window */
-void psgopher_bench_window_report(const char *label);
+double psgopher_bench_window_report(const char *label); /* its speed in %, -1 not complete */
 void psgopher_bench_fence(uint64_t tsc_ticks);    /* parallel-rdp waiting for a render pass's fence */
 void psgopher_bench_limiter_begin(void);          /* Gopher64's speed limiter's sleep */
 void psgopher_bench_limiter_end(void);

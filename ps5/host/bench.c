@@ -65,6 +65,11 @@ void psgopher_rdp_rates(uint32_t *fps, uint32_t *vis, int *pal) __attribute__((w
  * inside the window. */
 enum { W_OFF, W_WARMUP, W_MEASURE, W_DONE };
 static int w_state = W_OFF, w_warmup, w_measure, w_vis, w_edge;
+/* a slow-moment window (normal play: psgopher.ini's slow_capture): started by the speed itself, it
+ * does not end the game; its summary is said when it ends */
+static int w_auto;
+static int slow_seconds, slow_captures;
+static uint64_t slow_last_ns;
 static uint64_t w_tsc0, w_ns0, w_tsc1, w_ns1, w_cpu0, w_cpu1, w_last_present_tsc;
 static uint64_t w_present, w_rsp, w_rsp_rdp, w_rsp_bursts, w_rsp_cycles, w_rdp_total, w_rdp_part[3], w_fence, w_limiter;
 static uint64_t w_rdram_ns, w_rdram_waits, w_rsp_rdram_ns, w_underruns0, w_underruns1, w_fence_count;
@@ -72,8 +77,14 @@ static uint64_t *w_intervals; /* present-to-present, ticks */
 static int w_in_rsp;
 static char w_gpu[1024];
 
+int psgopher_bench_window_auto(void)
+{
+   return w_auto;
+}
+
 void psgopher_bench_window(int warmup_vis, int measure_vis)
 {
+   w_auto = 0;
    w_state = measure_vis > 0 ? W_WARMUP : W_OFF;
    w_warmup = warmup_vis < 0 ? 0 : warmup_vis, w_measure = measure_vis, w_vis = 0, w_edge = 0;
    w_present = w_rsp = w_rsp_rdp = w_rsp_bursts = w_rsp_cycles = w_rdp_total = w_fence = w_limiter = 0;
@@ -161,12 +172,12 @@ static int cmp_u64(const void *a, const void *b)
 }
 
 /* the window's summary, once the game has ended (not on the emulation thread's clock) */
-void psgopher_bench_window_report(const char *label)
+double psgopher_bench_window_report(const char *label)
 {
    if (w_state != W_DONE) {
       say("benchmark window %s: not complete (%d of %d VIs measured; warm-up %d)", label, w_state == W_MEASURE ? w_vis : 0,
           w_measure, w_warmup);
-      return;
+      return -1;
    }
    const double tpn = (double)(w_tsc1 - w_tsc0) / (double)(w_ns1 - w_ns0); /* ticks a ns */
    const double n = (double)w_measure;
@@ -204,6 +215,7 @@ void psgopher_bench_window_report(const char *label)
    if (w_gpu[0])
       say("benchmark window %s: gpu a VI: %s", label, w_gpu);
 #undef MS
+   return vis_per_s / target * 100.0;
 }
 
 static struct psgopher_live live_now;
@@ -351,6 +363,19 @@ static void live_frame(uint64_t begin_ns, uint64_t end_ns)
          live_now.target_vis = pal ? 50 : 60;
          live_now.speed = (double)live_frames * 1e9 / (double)span / live_now.target_vis * 100.0;
       }
+      /* a slow moment (normal play, slow_capture on): below 95% three whole seconds running (one slow
+       * second can be the quick menu's pause), at most three a game, two minutes apart: the next 600 VIs
+       * are measured as a benchmark window, without ending the game */
+      if (w_state == W_OFF || (w_auto && w_state == W_DONE)) {
+         const char *e = getenv("PSGOPHER_SLOW_CAPTURE"); /* (once a second; set before each game) */
+         const int enabled = !e || strcmp(e, "0") != 0;
+         slow_seconds = live_now.target_vis && live_now.speed < 95.0 ? slow_seconds + 1 : 0;
+         if (enabled && slow_seconds >= 3 && slow_captures < 3 && (!slow_last_ns || end_ns - slow_last_ns > 120000000000ull)) {
+            psgopher_bench_window(0, 600);
+            w_auto = 1;
+            slow_captures++, slow_last_ns = end_ns, slow_seconds = 0;
+         }
+      }
       psgopher_sdl3_audio_stats audio;
       psgopher_sdl3_audio_stats_read(&audio);
       live_now.audio_queue = audio.queued_frames;
@@ -366,6 +391,10 @@ static uint64_t video_since_ns, video_count, video_total, video_underruns_at;
 /* a new game: its first frame is said again */
 void psgopher_video_reset(void)
 {
+   slow_seconds = slow_captures = 0;
+   slow_last_ns = 0;
+   if (w_auto)
+      psgopher_bench_window(0, 0);
    video_since_ns = video_count = video_total = 0;
    live_since_ns = live_frames = live_present_ns = live_last_end = 0;
    atomic_store(&live_rdram_ns, 0);
