@@ -117,6 +117,27 @@ static void probe()
 
 /* ---------------------------------------------------------------- the benchmark mode (benchmark.txt) */
 
+/* a folder's contents taken away (and the folder itself when remove_self): the shader cache of a
+ * cold-cache run */
+static void remove_tree(const std::string &path, bool remove_self)
+{
+   if (DIR *dir = opendir(path.c_str())) {
+      while (dirent *e = readdir(dir)) {
+         if (!strcmp(e->d_name, ".") || !strcmp(e->d_name, ".."))
+            continue;
+         const std::string child = path + "/" + e->d_name;
+         struct stat st;
+         if (lstat(child.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            remove_tree(child, true);
+         else
+            unlink(child.c_str());
+      }
+      closedir(dir);
+   }
+   if (remove_self)
+      rmdir(path.c_str());
+}
+
 struct Benchmark {
    bool on = false;
    std::string rom;
@@ -124,6 +145,9 @@ struct Benchmark {
    bool unlimited = false;
    int state = -1;              /* a probe (save state slot) every run starts from: the same scene */
    std::vector<int> upscales;   /* one run for each factor, in order (none: one run as set) */
+   int warmup_vis = 300, measure_vis = 0; /* the window, in VIs after the game's first present (0: off) */
+   int repeat = 1;              /* the whole sweep this many times, interleaved (1x 2x 4x 8x, 1x 2x ...) */
+   bool cold = false;           /* the shader cache emptied before each run (cache cold), else kept (warm) */
    uint64_t watched_since = 0; /* when Gopher64's video was up */
 };
 static Benchmark bench;
@@ -147,6 +171,14 @@ static void read_benchmark(const std::string &path)
          bench.unlimited = true;
       else if (!strcmp(word, "state"))
          bench.state = atoi(value);
+      else if (!strcmp(word, "warmup_vis"))
+         bench.warmup_vis = atoi(value);
+      else if (!strcmp(word, "measure_vis"))
+         bench.measure_vis = atoi(value);
+      else if (!strcmp(word, "repeat"))
+         bench.repeat = std::max(1, atoi(value));
+      else if (!strcmp(word, "cache"))
+         bench.cold = !strcmp(value, "cold");
       else if (!strcmp(word, "upscale")) {
          char *at = value;
          while (*at) {
@@ -164,9 +196,11 @@ static void read_benchmark(const std::string &path)
    std::string factors;
    for (int u : bench.upscales)
       factors += std::to_string(u) + "x ";
-   say("benchmark: rom '%s', %d s a run, speed limiter %s, from %s, upscale %s", bench.rom.c_str(), bench.seconds,
-       bench.unlimited ? "off" : "on", bench.state >= 0 ? ("probe " + std::to_string(bench.state)).c_str() : "the start",
-       factors.empty() ? "as set" : factors.c_str());
+   say("benchmark: rom '%s', from %s, upscale %s, %d time(s); a run: %d VIs of warm-up then %d measured%s; "
+       "speed limiter %s; shader cache %s",
+       bench.rom.c_str(), bench.state >= 0 ? ("probe " + std::to_string(bench.state)).c_str() : "the start",
+       factors.empty() ? "as set" : factors.c_str(), bench.repeat, bench.warmup_vis, bench.measure_vis,
+       bench.measure_vis ? "" : " (no window: seconds only)", bench.unlimited ? "off" : "on", bench.cold ? "cold" : "warm");
 }
 
 /* Gopher64's own events (parallel-rdp's interface): 4 toggles the speed limiter, 3 ends the game */
@@ -182,11 +216,8 @@ static Uint32 benchmark_timer(void *, SDL_TimerID, Uint32)
 {
    if (psgopher_sdl3_watch_count() == 0)
       return 100; /* the video is not up yet */
-   if (!bench.watched_since) {
-      bench.watched_since = ns(CLOCK_MONOTONIC);
-      if (bench.unlimited)
-         send_user_event(4);
-   }
+   if (!bench.watched_since)
+      bench.watched_since = ns(CLOCK_MONOTONIC); /* (the limiter: PSGOPHER_BENCH_UNLIMITED, set before the run) */
    if (bench.seconds > 0 && ns(CLOCK_MONOTONIC) - bench.watched_since >= (uint64_t)bench.seconds * 1000000000u) {
       say("benchmark: %d s are up", bench.seconds);
       send_user_event(3);
@@ -315,20 +346,33 @@ int main()
       if (runs.empty())
          runs.push_back(0); /* (as set) */
       int status = 0;
-      for (size_t r = 0; r < runs.size(); r++) {
+      if (bench.unlimited)
+         setenv("PSGOPHER_BENCH_UNLIMITED", "1", 1);
+      const size_t total = runs.size() * (size_t)bench.repeat;
+      for (size_t k = 0; k < total; k++) {
+         const size_t r = k % runs.size();
          if (runs[r])
             psgopher_setting_set("video.upscale", runs[r]);
-         say("benchmark: run %zu of %zu: upscale %lldx", r + 1, runs.size(), (long long)psgopher_setting_get("video.upscale"));
+         const long long factor = (long long)psgopher_setting_get("video.upscale");
+         char label[64];
+         snprintf(label, sizeof(label), "%lldx #%zu", factor, k / runs.size() + 1);
+         say("benchmark: run %zu of %zu: upscale %s", k + 1, total, label);
+         if (bench.cold)
+            remove_tree(std::string(ROOT) + "/cache/radv", false); /* the driver's shader cache, emptied */
          char path[160];
-         snprintf(path, sizeof(path), "%s/bench-%lld-%lldx.csv", ROOT, (long long)time(nullptr),
-                  (long long)psgopher_setting_get("video.upscale"));
+         snprintf(path, sizeof(path), "%s/bench-%lld-%lldx-%zu.csv", ROOT, (long long)time(nullptr), factor, k / runs.size() + 1);
          settings.applyHdr();
          bench.watched_since = 0;
+         psgopher_bench_window(bench.warmup_vis, bench.measure_vis);
          psgopher_bench_start(path);
          SDL_AddTimer(100, benchmark_timer, nullptr);
          status = play(rom, bench.state);
          psgopher_bench_stop();
+         if (bench.measure_vis > 0)
+            psgopher_bench_window_report(label); /* (after the game: off the emulation thread) */
       }
+      unsetenv("PSGOPHER_BENCH_UNLIMITED");
+      psgopher_bench_window(0, 0);
       if (upscale_before > 0)
          psgopher_setting_set("video.upscale", upscale_before);
       return status;

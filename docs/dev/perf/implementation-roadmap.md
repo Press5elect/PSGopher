@@ -69,6 +69,21 @@ runs each, kept only with a gain larger than the run-to-run spread and no accura
 - **Benefit**: spread to judge gains; 1x headroom. **Risks**: restore user settings after the run.
 - **Benchmark**: a 119.88 Hz unlimited 1x run above 60 VI/s confirms the limiter is off.
 
+### B1-B3 status (implemented 2026-11-26, not yet run on a console)
+
+Done: windows in VIs from the game's first present (`warmup_vis`, `measure_vis`), totals on the
+emulation thread in TSC ticks with one conversion (wall = work + present wait + limiter; work split
+into RSP less its RDP and RDRAM waits, parallel-rdp commands/fence waits/syncs/frame, other RDRAM
+waits, the rest), no logging inside the window, the RDP hook once a batch (M8), RSP bursts and
+cycles, frame-interval percentiles, audio underruns; GPU tags native/upscaled apart, Pre and Post
+timed, the GPU log reset and read at the window's edges, the frame counter reset each game and the
+switch read once; `unlimited` absolute from `rdp_init`; `repeat`, `cache cold|warm`. Host-tested
+(`ps5/tests/test_bench.c`: each part within 0.15 ms of known work).
+
+Not done: guest instructions and idle-skipped cycles a VI (a counter in the interpreter's loop: left
+out so the measurement does not change the hot path), GPU busy as first-to-last timestamp, the
+calibrated-timestamp support line, a pad-event counter. The VR4300's time is the remainder.
+
 ### B4. Run the baseline
 - **Protocol**: [benchmark-analysis.md](benchmark-analysis.md) §4: probes A (heavy opening), B (in
   game), C (CPU framebuffer writes); 1x/2x/4x/8x; 3 interleaved repeats; overclock off (plus an 8x

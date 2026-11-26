@@ -1,23 +1,31 @@
 diff --git a/parallel-rdp/rdp_renderer.cpp b/parallel-rdp/rdp_renderer.cpp
-index b6d755f..61c8711 100644
+index b6d755f..0fcda6c 100644
 --- a/parallel-rdp/rdp_renderer.cpp
 +++ b/parallel-rdp/rdp_renderer.cpp
-@@ -36,6 +36,14 @@
+@@ -36,6 +36,22 @@
  #include "shaders/slangmosh.hpp"
  #endif
  
++#ifdef PSGOPHER
++// PSGopher (PS5): the GPU stages of native (1x) and upscaled passes are timed under tags of their own
++// (benchmark analysis B2: they shared one before)
++#define PSGOPHER_TAG(name, upscaled) ((upscaled) ? name "-upscaled" : name)
++#else
++#define PSGOPHER_TAG(name, upscaled) (name)
++#endif
 +#ifdef PSGOPHER
 +// PSGopher (PS5): the boot log's shading figures (ps5/host/bench.c)
 +#include <x86intrin.h>
 +extern "C" void psgopher_bench_shading_dispatch(int general);
 +extern "C" void psgopher_bench_shader_compile_asked(void);
 +extern "C" void psgopher_bench_shader_compiled(uint64_t tsc_ticks);
++extern "C" void psgopher_bench_fence(uint64_t tsc_ticks);
 +#endif
 +
  namespace RDP
  {
  Renderer::Renderer(CommandProcessor &processor_)
-@@ -71,6 +79,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
+@@ -71,6 +87,14 @@ bool Renderer::init_renderer(const RendererOptions &options)
  			Granite::Global::create_thread_context(), { device }));
  #else
  	pipeline_worker.reset(new WorkerThread<Vulkan::DeferredPipelineCompile, PipelineExecutor>({ device }));
@@ -32,7 +40,16 @@ index b6d755f..61c8711 100644
  #endif
  
  #ifdef PARALLEL_RDP_SHADER_DIR
-@@ -1906,11 +1922,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+@@ -1788,7 +1812,7 @@ void Renderer::submit_span_setup_jobs(Vulkan::CommandBuffer &cmd, bool upscale)
+ 	if (caps.timestamp >= 2)
+ 	{
+ 		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+-		device->register_time_interval("RDP GPU", std::move(begin_ts), std::move(end_ts), "span-info-jobs");
++		device->register_time_interval("RDP GPU", std::move(begin_ts), std::move(end_ts), PSGOPHER_TAG("span-info-jobs", upscale));
+ 	}
+ 	cmd.end_region();
+ }
+@@ -1906,11 +1930,27 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
  			if (pending_async_pipelines.count(compile.hash) == 0)
  			{
  				pending_async_pipelines.insert(compile.hash);
@@ -60,7 +77,72 @@ index b6d755f..61c8711 100644
  
  		cmd.dispatch_indirect(*indirect_dispatch_buffer, 4 * sizeof(uint32_t) * i);
  	}
-@@ -3677,8 +3709,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
+@@ -1918,7 +1958,7 @@ void Renderer::submit_rasterization(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &
+ 	if (caps.timestamp >= 2)
+ 	{
+ 		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+-		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), "shading");
++		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), PSGOPHER_TAG("shading", upscaling));
+ 	}
+ 	cmd.end_region();
+ }
+@@ -2021,7 +2061,7 @@ void Renderer::submit_tile_binning_combined(Vulkan::CommandBuffer &cmd, bool ups
+ 	if (caps.timestamp >= 2)
+ 	{
+ 		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+-		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), "tile-binning");
++		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), PSGOPHER_TAG("tile-binning", upscale));
+ 	}
+ 
+ 	cmd.enable_subgroup_size_control(false);
+@@ -2118,13 +2158,20 @@ void Renderer::submit_update_upscaled_domain(Vulkan::CommandBuffer &cmd, Resolve
+ 	cmd.push_constants(&push, 0, sizeof(push));
+ 
+ 	Vulkan::QueryPoolHandle start_ts, end_ts;
+-	if (caps.timestamp >= 2 && stage == ResolveStage::SSAAResolve)
++#ifdef PSGOPHER
++	// (PSGopher: Pre and Post are timed as well, B2)
++	const bool psgopher_timed = caps.timestamp >= 2;
++#else
++	const bool psgopher_timed = caps.timestamp >= 2 && stage == ResolveStage::SSAAResolve;
++#endif
++	if (psgopher_timed)
+ 		start_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+ 	cmd.dispatch(num_workgroups_x, num_workgroups_y, 1);
+-	if (caps.timestamp >= 2 && stage == ResolveStage::SSAAResolve)
++	if (psgopher_timed)
+ 	{
+ 		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+-		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), "ssaa-resolve");
++		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts),
++		                               stage == ResolveStage::Pre ? "upscale-pre" : stage == ResolveStage::Post ? "upscale-post" : "ssaa-resolve");
+ 	}
+ }
+ 
+@@ -2308,7 +2355,7 @@ void Renderer::submit_depth_blend(Vulkan::CommandBuffer &cmd, Vulkan::Buffer &tm
+ 	if (caps.timestamp >= 2)
+ 	{
+ 		end_ts = cmd.write_timestamp(VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
+-		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), "depth-blending");
++		device->register_time_interval("RDP GPU", std::move(start_ts), std::move(end_ts), PSGOPHER_TAG("depth-blending", upscaled));
+ 	}
+ 
+ 	cmd.end_region();
+@@ -3053,7 +3100,13 @@ void Renderer::flush_queues()
+ 		Vulkan::QueryPoolHandle start_ts, end_ts;
+ 		if (caps.timestamp)
+ 			start_ts = device->write_calibrated_timestamp();
++#ifdef PSGOPHER
++		const uint64_t psgopher_fence_begin = __rdtsc();
+ 		sync.fence->wait();
++		psgopher_bench_fence(__rdtsc() - psgopher_fence_begin);
++#else
++		sync.fence->wait();
++#endif
+ 		if (caps.timestamp)
+ 		{
+ 			end_ts = device->write_calibrated_timestamp();
+@@ -3677,8 +3730,14 @@ bool Renderer::supports_subgroup_size_control(uint32_t minimum_size, uint32_t ma
  
  void Renderer::PipelineExecutor::perform_work(const Vulkan::DeferredPipelineCompile &compile) const
  {

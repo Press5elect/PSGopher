@@ -95,6 +95,17 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### The performance programme: a trustworthy benchmark (2026-11-26)
+
+- Added: the audit's Phase A documents (`docs/dev/perf/`).
+- Changed: benchmark mode measures a window counted in VIs (`warmup_vis`, `measure_vis`) after which
+  the game ends itself, so every upscale factor covers the same emulated VIs; `repeat` interleaves
+  the sweep; `cache cold|warm`. Each run's summary splits a VI on one clock into work, present wait
+  and the limiter, and the work into the RSP (less what it waited for), parallel-rdp (commands, GPU
+  fence waits, syncs, the frame), RDRAM waits and the VR4300 with the rest, with frame-time
+  percentiles and underruns. GPU timing tags native and upscaled work apart and times the upscale's
+  Pre and Post steps. Nothing in the emulation itself changed.
+
 ### Interpreters only; the same scene at each upscale (2026-11-25)
 
 - Decided (the owner's): Gopher64's VR4300 and RSP interpreters are a fixed requirement; no

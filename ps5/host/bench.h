@@ -27,7 +27,18 @@ void psgopher_bench_shader_compile_asked(void);
 void psgopher_bench_shader_compiled(uint64_t tsc_ticks);
 /* an RSP task on the emulation thread (the core, psgopher.rs) */
 void psgopher_bench_rsp_begin(void);
-void psgopher_bench_rsp_end(void);
+void psgopher_bench_rsp_end(uint64_t cycles);
+/* the benchmark window (benchmark mode): warmup_vis presents, then measure_vis measured (0: off);
+ * the hooks parallel-rdp's interface and the core call; the summary after the game */
+void psgopher_bench_window(int warmup_vis, int measure_vis);
+int psgopher_bench_window_state(void);            /* 0 off, 1 warming up, 2 measuring, 3 done */
+int psgopher_bench_window_edge(void);             /* 1 began, 2 ended at the last present (read once) */
+void psgopher_bench_window_present(uint64_t begin_tsc, uint64_t end_tsc);
+void psgopher_bench_window_gpu(const char *line); /* the GPU stages over the window */
+void psgopher_bench_window_report(const char *label);
+void psgopher_bench_fence(uint64_t tsc_ticks);    /* parallel-rdp waiting for a render pass's fence */
+void psgopher_bench_limiter_begin(void);          /* Gopher64's speed limiter's sleep */
+void psgopher_bench_limiter_end(void);
 
 /* PSGopher: the quick menu's live figures, the last whole second's: frames shown a second, the
  * emulation thread's CPU time a frame (its waits are none), the present's wait a frame

@@ -105,10 +105,10 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..503ad1a 100644
+index b741e0d..6e97af3 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,54 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,62 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
@@ -147,6 +147,14 @@ index b741e0d..503ad1a 100644
 +// and three parts of it: 0 the drawing commands (parallel-rdp's enqueue_command), 1 a SyncFull's
 +// signal (the GPU work submitted), 2 the frame's render
 +extern "C" void psgopher_bench_rdp_part(int part, uint64_t ticks);
++// the benchmark window (ps5/host/bench.c)
++extern "C" void psgopher_bench_window_present(uint64_t begin_tsc, uint64_t end_tsc);
++extern "C" int psgopher_bench_window_edge(void);
++extern "C" int psgopher_bench_window_state(void);
++extern "C" void psgopher_bench_window_gpu(const char *line);
++// GPU timing on (read at each game's start, not each frame) and its frame count
++static bool psgopher_gpu_timing;
++static unsigned psgopher_gpu_frames;
 +#include <x86intrin.h>
 +struct PsgopherRdpTime {
 +  uint64_t begin = __rdtsc();
@@ -163,7 +171,7 @@ index b741e0d..503ad1a 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -427,6 +475,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
+@@ -427,6 +483,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
      case USER_EVENT_FAST_FORWARD:
        callback.enable_speedlimiter = !callback.enable_speedlimiter;
        break;
@@ -200,7 +208,7 @@ index b741e0d..503ad1a 100644
      default:
        break;
      }
-@@ -496,6 +574,14 @@ static void rdp_new_processor() {
+@@ -496,6 +582,14 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -215,7 +223,7 @@ index b741e0d..503ad1a 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -582,6 +668,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -582,6 +676,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -225,7 +233,24 @@ index b741e0d..503ad1a 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -642,6 +731,10 @@ void rdp_close() {
+@@ -606,6 +703,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+ 
+   callback.emu_running = true;
+   callback.enable_speedlimiter = true;
++#ifdef PSGOPHER
++  // GPU timing's flag, read once a game; a benchmark run without the speed limiter (benchmark.txt's
++  // `unlimited`): off from the start, not toggled by an event that a later one can undo (M3)
++  psgopher_gpu_timing = getenv("PARALLEL_RDP_BENCH") != nullptr;
++  psgopher_gpu_frames = 0;
++  if (const char *unlimited = getenv("PSGOPHER_BENCH_UNLIMITED"); unlimited && !strcmp(unlimited, "1")) {
++    callback.enable_speedlimiter = false;
++    psgopher_say("benchmark: the speed limiter is off for this run (presents are still paced by the display: FIFO)");
++  }
++#endif
+   callback.paused = false;
+   callback.save_state_slot = save_state_slot;
+   crop_letterbox = false;
+@@ -642,6 +749,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -236,7 +261,7 @@ index b741e0d..503ad1a 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +826,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,6 +844,292 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -529,7 +554,7 @@ index b741e0d..503ad1a 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -783,8 +1162,21 @@ static void render_frame(Vulkan::Device &device) {
+@@ -783,8 +1180,21 @@ static void render_frame(Vulkan::Device &device) {
    // Blit image on screen.
    auto cmd = device.request_command_buffer();
    {
@@ -551,7 +576,7 @@ index b741e0d..503ad1a 100644
      cmd->begin_render_pass(rp);
  
      cmd->set_program(program);
-@@ -820,6 +1212,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -820,6 +1230,16 @@ static void render_frame(Vulkan::Device &device) {
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -568,7 +593,7 @@ index b741e0d..503ad1a 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,8 +1248,19 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,8 +1266,19 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -588,7 +613,7 @@ index b741e0d..503ad1a 100644
    }
    device.submit(cmd);
  }
-@@ -857,6 +1270,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
+@@ -857,6 +1288,10 @@ void rdp_set_vi_register(uint32_t reg, uint32_t value) {
  }
  
  void rdp_render_frame() {
@@ -599,42 +624,54 @@ index b741e0d..503ad1a 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1287,34 @@ void rdp_update_screen() {
+@@ -870,9 +1305,46 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
 +#endif
 +#ifdef PSGOPHER
-+    const uint64_t present_begin = psgopher_now_ns();
++    const uint64_t present_begin = psgopher_now_ns(), present_begin_tsc = __rdtsc();
  #endif
      wsi->end_frame();
      wsi->begin_frame();
 +#ifdef PSGOPHER
++    psgopher_bench_window_present(present_begin_tsc, __rdtsc());
 +    psgopher_bench_present(present_begin, psgopher_now_ns());
 +    psgopher_quickmenu_check();
-+    // the GPU's time in each of parallel-rdp's stages, every 600 frames, when asked for
-+    // (psgopher.ini's gpu_timing sets PARALLEL_RDP_BENCH=2: parallel-rdp's own timestamps)
 +    {
-+      const bool timing = getenv("PARALLEL_RDP_BENCH") != nullptr;
-+      static unsigned frames;
-+      if (timing && ++frames % 600 == 0) {
-+        auto &device = wsi->get_device();
++      auto &device = wsi->get_device();
++      // the GPU stages of parallel-rdp's own timestamps (psgopher.ini's gpu_timing: PARALLEL_RDP_BENCH=2),
++      // as one line: each tag's time a frame (VI) and how many dispatches a frame
++      auto gpu_line = [&device]() {
 +        std::string line;
 +        device.timestamp_log([&line](const std::string &tag, const Vulkan::TimestampIntervalReport &r) {
 +          char part[160];
-+          snprintf(part, sizeof(part), "%s%s %.2f ms (%.1fx)", line.empty() ? "" : "; ", tag.c_str(),
++          snprintf(part, sizeof(part), "%s%s %.3f ms (%.1fx)", line.empty() ? "" : "; ", tag.c_str(),
 +                   1000.0 * r.time_per_frame_context, r.accumulations_per_frame_context);
 +          line += part;
 +        });
 +        device.timestamp_log_reset();
-+        psgopher_say("gpu: a frame: %s", line.empty() ? "no timestamps (the device gave none)" : line.c_str());
++        return line.empty() ? std::string("no timestamps (the device gave none)") : line;
++      };
++      // a benchmark window: the GPU log from its first VI to its last, then the game ends after
++      // exactly the window's VIs (benchmark analysis B1, B2)
++      const int edge = psgopher_bench_window_edge();
++      if (edge == 1 && psgopher_gpu_timing)
++        device.timestamp_log_reset();
++      if (edge == 2) {
++        if (psgopher_gpu_timing)
++          psgopher_bench_window_gpu(gpu_line().c_str());
++        callback.emu_running = false;
 +      }
++      // outside one, every 600 frames into the boot log
++      if (psgopher_gpu_timing && psgopher_bench_window_state() == 0 && ++psgopher_gpu_frames % 600 == 0)
++        psgopher_say("gpu: a frame: %s", gpu_line().c_str());
 +    }
 +#endif
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1346,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1376,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -650,32 +687,20 @@ index b741e0d..503ad1a 100644
  }
  
  size_t rdp_state_size() {
-@@ -1076,6 +1524,9 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -1076,6 +1554,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
 +#ifdef PSGOPHER
++  // a batch of commands, timed whole (part 0: once a call, not once a command, benchmark analysis M8;
++  // the syncs inside it are part 1, the summary takes them out)
 +  PsgopherRdpTime rdp_time;
++  PsgopherRdpPart rdp_part(0);
 +#endif
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1132,9 +1583,13 @@ uint64_t rdp_process_commands(uint64_t now) {
-       return interrupt_timer;
-     }
- 
--    if (command >= 8)
-+    if (command >= 8) {
-+#ifdef PSGOPHER
-+      PsgopherRdpPart rdp_part(0);
-+#endif
-       processor->enqueue_command(cmd_length * 2,
-                                  &rdp_device.cmd_data[2 * rdp_device.cmd_cur]);
-+    }
- 
-     if (command >= 0x26 && command <= 0x29) { // Sync{Load,Pipe,Tile,Full}
-       rdp_add_busy(RDP_SYNC_CLOCKS);
-@@ -1233,8 +1688,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +1717,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -689,7 +714,7 @@ index b741e0d..503ad1a 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +1723,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +1752,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  
@@ -1017,7 +1042,7 @@ index f35085d..d610980 100644
              device.cart.sc64.cfg[device::cart::sc64::SC64_ROM_WRITE_ENABLE as usize] = 1;
          }
 diff --git a/src/device/rsp_interface.rs b/src/device/rsp_interface.rs
-index 2823aef..6e84597 100644
+index 2823aef..9a81814 100644
 --- a/src/device/rsp_interface.rs
 +++ b/src/device/rsp_interface.rs
 @@ -509,7 +509,11 @@ fn do_task(device: &mut device::Device) {
@@ -1028,10 +1053,26 @@ index 2823aef..6e84597 100644
 +        crate::psgopher::rsp_begin();
          let timer = device::rsp_cpu::run(device);
 +        #[cfg(target_vendor = "sie")]
-+        crate::psgopher::rsp_end();
++        crate::psgopher::rsp_end(timer);
  
          device::events::create_event(device, device::events::EVENT_TYPE_SP, timer)
      }
+diff --git a/src/device/vi.rs b/src/device/vi.rs
+index 593659b..3c0c51f 100644
+--- a/src/device/vi.rs
++++ b/src/device/vi.rs
+@@ -199,7 +199,11 @@ pub fn update_screen(device: &mut device::Device) {
+             .is_multiple_of(device.ui.speed_limiter.limit_freq)
+         && device.ui.speed_limiter.enabled
+     {
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::limiter_begin();
+         speed_limiter(device);
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::limiter_end();
+     }
+ 
+     if !in_rollback {
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..7caeeb3 100644
 --- a/src/lib.rs
@@ -1073,10 +1114,10 @@ index 4e51a1b..7caeeb3 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..fc18ec8
+index 0000000..f87ee09
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,1206 @@
+@@ -0,0 +1,1218 @@
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -1283,7 +1324,9 @@ index 0000000..fc18ec8
 +unsafe extern "C" {
 +    /// The boot log's video line: the RSP's time on the emulation thread (ps5/host/bench.c)
 +    fn psgopher_bench_rsp_begin();
-+    fn psgopher_bench_rsp_end();
++    fn psgopher_bench_rsp_end(cycles: u64);
++    fn psgopher_bench_limiter_begin();
++    fn psgopher_bench_limiter_end();
 +}
 +
 +/// An RSP task begins and ends (its time, less the RDP work started inside it, is the line's RSP).
@@ -1292,8 +1335,18 @@ index 0000000..fc18ec8
 +    unsafe { psgopher_bench_rsp_begin() }
 +}
 +#[inline]
-+pub fn rsp_end() {
-+    unsafe { psgopher_bench_rsp_end() }
++pub fn rsp_end(cycles: u64) {
++    unsafe { psgopher_bench_rsp_end(cycles) }
++}
++
++/// The speed limiter's sleep (benchmark analysis B1: kept apart from the emulation's work).
++#[inline]
++pub fn limiter_begin() {
++    unsafe { psgopher_bench_limiter_begin() }
++}
++#[inline]
++pub fn limiter_end() {
++    unsafe { psgopher_bench_limiter_end() }
 +}
 +
 +/// A line to the boot log through the title's logger.

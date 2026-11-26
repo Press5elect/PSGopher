@@ -29,16 +29,44 @@ Benchmark mode is on when `/data/psgopher/benchmark.txt` exists (`ps5/host/main.
 | `unlimited` | speed limiter off (Gopher64's fast-forward event): the emulator's maximum speed |
 | `state <slot>` | every run starts from this probe (save state slot 1-5 of the ROM): the same scene |
 | `upscale 1 2 4 8` | one run for each factor, in order, from the same probe; Gopher64's setting is put back after |
+| `warmup_vis <n>` | VIs after the game's first present before measuring (default 300: the probe loads, shaders are made) |
+| `measure_vis <n>` | VIs measured; the game then ends by itself, so every factor covers the same emulated VIs. 0 (default): the old wall-clock run (`seconds`) |
+| `repeat <k>` | the whole sweep k times, interleaved (1x 2x 4x 8x, 1x 2x ...), for the spread |
+| `cache cold` | the driver's shader cache emptied before each run (default `warm`) |
 
-Each run writes `bench-<time>-<factor>x.csv` and ends with a `benchmark summary:` line: the
-seconds after the first five, averaged (VIs a second, speed, the game's frame rate, CPU time a VI
-with the RSP's and parallel-rdp's shares). With `gpu_timing = on` in `psgopher.ini`, the `gpu:`
-lines give each stage's GPU time. A first sweep, for the 1x-to-2x question:
+With `measure_vis`, `seconds` is only a safety limit (0: none). `unlimited` turns Gopher64's speed
+limiter off from the game's start (not toggled by an event); the console presents in FIFO only, so
+no run exceeds the display's refresh: the capacity figure is the **work** a VI below.
+
+Each run ends with a `benchmark window <factor> #<repeat>:` line, written after the game (nothing is
+logged on the emulation thread inside the window). Every part is in TSC ticks on the emulation
+thread, turned into milliseconds with the TSC's rate over the window (one clock; host test
+`ps5/tests/test_bench.c`):
+
+| Part | What |
+| --- | --- |
+| a VI | wall time between presents, averaged = work + present wait + limiter |
+| work | what the emulation needs a VI: its headroom against 16.68 ms (or 20 ms PAL) is how far from full speed |
+| RSP | inside `rsp_cpu::run`, less the RDP work and RDRAM waits started inside it; its bursts and cycles a VI |
+| parallel-rdp | its CPU time: commands (whole batches, less the syncs), of which GPU fence waits (render passes in flight), syncs (SyncFull's submissions), the frame's render |
+| RDRAM waits | the CPU waiting for the GPU before touching RDRAM (inside the RSP and elsewhere) |
+| VR4300 and the rest | work less the above: the CPU's interpreter, events, the core's other devices |
+| thread CPU time | `CLOCK_THREAD_CPUTIME_ID` over the window, a VI (spin-waits count, sleeps do not) |
+| frame intervals | present-to-present p50, p99, max |
+| audio underruns | over the window |
+
+With `gpu_timing = on`, a second line gives the GPU stages over exactly the window: native and
+upscaled dispatches under separate tags (`depth-blending` and `depth-blending-upscaled`, and so on),
+`upscale-pre` and `upscale-post` timed, `render-pass`/`render-pass-upscaled` totals.
+
+The Phase B protocol (benchmark analysis section 4), one `benchmark.txt` a probe:
 
 ```
-rom <a ROM in /data/psgopher/roms, or a full local path>
+rom /data/psgopher/cache/play/<the ROM's file name>
 state 1
-seconds 40
+warmup_vis 300
+measure_vis 1800
+repeat 3
 upscale 1 2 4 8
 ```
 

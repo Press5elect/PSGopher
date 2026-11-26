@@ -17,6 +17,11 @@ ${CXX:-g++} "${flags[@]}" "$root/ps5/sdl3/psgopher_sdl3.cpp" "$root/ps5/tests/te
     "$out/platform_host.o" -o "$out/test_sdl3" -lpthread -lm
 "$out/test_sdl3" "$root/vendor/gopher64/data/ui/RobotoMono-Regular.ttf"
 
+# the benchmark window's accounting (bench.c) against known work
+${CC:-gcc} -std=c11 -O1 -g -Wall -Wextra -Wno-unused-parameter -D_GNU_SOURCE -I"$root/ps5/host" -I"$root/ps5/sdl3" \
+    "$root/ps5/host/bench.c" "$root/ps5/tests/test_bench.c" -o "$out/test_bench" -lpthread
+"$out/test_bench"
+
 # the game list's search, the title's settings file and the shares file (ps5vfs stood in for)
 ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -DPSGOPHER_SHARES_HOST_TEST \
     -I"$root/ps5/host" -I"$root/ps5/vfs" "$root/ps5/tests/test_library.cpp" "$root/ps5/host/library.cpp" \

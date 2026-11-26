@@ -55,6 +55,157 @@ static uint64_t now_ns(clockid_t clock)
 /* PSGopher: the live figures (the quick menu, the stats overlay, the boot log's video line), each
  * the last whole second's; always on: one thread CPU clock read a VI (waiting, in present, the speed
  * limiter or an RDRAM sync, is no CPU time) */
+void psgopher_rdp_rates(uint32_t *fps, uint32_t *vis, int *pal) __attribute__((weak));
+
+/* ---- the benchmark window (benchmark mode; docs/dev/perf/benchmark-analysis.md B1-B3) ----------
+ * Counted in VIs, not seconds: warmup_vis presents after the game's first, then measure_vis presents
+ * measured; then the game is ended (interface.cpp). Every total below is kept on the emulation thread
+ * (the hooks all run there), in TSC ticks, and turned into time once, after the game, with the TSC's
+ * rate measured over the window against CLOCK_MONOTONIC: one clock for every part. Nothing is logged
+ * inside the window. */
+enum { W_OFF, W_WARMUP, W_MEASURE, W_DONE };
+static int w_state = W_OFF, w_warmup, w_measure, w_vis, w_edge;
+static uint64_t w_tsc0, w_ns0, w_tsc1, w_ns1, w_cpu0, w_cpu1, w_last_present_tsc;
+static uint64_t w_present, w_rsp, w_rsp_rdp, w_rsp_bursts, w_rsp_cycles, w_rdp_total, w_rdp_part[3], w_fence, w_limiter;
+static uint64_t w_rdram_ns, w_rdram_waits, w_rsp_rdram_ns, w_underruns0, w_underruns1, w_fence_count;
+static uint64_t *w_intervals; /* present-to-present, ticks */
+static int w_in_rsp;
+static char w_gpu[1024];
+
+void psgopher_bench_window(int warmup_vis, int measure_vis)
+{
+   w_state = measure_vis > 0 ? W_WARMUP : W_OFF;
+   w_warmup = warmup_vis < 0 ? 0 : warmup_vis, w_measure = measure_vis, w_vis = 0, w_edge = 0;
+   w_present = w_rsp = w_rsp_rdp = w_rsp_bursts = w_rsp_cycles = w_rdp_total = w_fence = w_limiter = 0;
+   w_rdp_part[0] = w_rdp_part[1] = w_rdp_part[2] = 0;
+   w_rdram_ns = w_rdram_waits = w_rsp_rdram_ns = w_fence_count = 0;
+   w_gpu[0] = 0;
+   free(w_intervals);
+   w_intervals = measure_vis > 0 ? calloc((size_t)measure_vis, sizeof(uint64_t)) : NULL;
+}
+
+int psgopher_bench_window_state(void)
+{
+   return w_state;
+}
+
+/* 1 when the window began at the last present, 2 when it ended, else 0 (read once) */
+int psgopher_bench_window_edge(void)
+{
+   const int e = w_edge;
+   w_edge = 0;
+   return e;
+}
+
+void psgopher_bench_window_gpu(const char *line)
+{
+   snprintf(w_gpu, sizeof(w_gpu), "%s", line);
+}
+
+static int w_measuring(void)
+{
+   return w_state == W_MEASURE;
+}
+
+/* a present: the window's clock (wall), its present wait, the frame-time distribution */
+void psgopher_bench_window_present(uint64_t begin_tsc, uint64_t end_tsc)
+{
+   if (w_state == W_WARMUP) {
+      if (++w_vis >= w_warmup) {
+         w_state = W_MEASURE, w_edge = 1, w_vis = 0;
+         w_tsc0 = end_tsc, w_ns0 = now_ns(CLOCK_MONOTONIC), w_cpu0 = now_ns(CLOCK_THREAD_CPUTIME_ID);
+         w_last_present_tsc = end_tsc;
+         psgopher_sdl3_audio_stats audio;
+         psgopher_sdl3_audio_stats_read(&audio);
+         w_underruns0 = audio.underrun_grains;
+      }
+      return;
+   }
+   if (w_state != W_MEASURE)
+      return;
+   w_present += end_tsc - begin_tsc;
+   if (w_intervals && w_vis < w_measure)
+      w_intervals[w_vis] = end_tsc - w_last_present_tsc;
+   w_last_present_tsc = end_tsc;
+   if (++w_vis >= w_measure) {
+      w_state = W_DONE, w_edge = 2;
+      w_tsc1 = end_tsc, w_ns1 = now_ns(CLOCK_MONOTONIC), w_cpu1 = now_ns(CLOCK_THREAD_CPUTIME_ID);
+      psgopher_sdl3_audio_stats audio;
+      psgopher_sdl3_audio_stats_read(&audio);
+      w_underruns1 = audio.underrun_grains;
+   }
+}
+
+void psgopher_bench_fence(uint64_t ticks)
+{
+   if (w_measuring())
+      w_fence += ticks, w_fence_count++;
+}
+
+static uint64_t w_limiter_begin;
+void psgopher_bench_limiter_begin(void)
+{
+   w_limiter_begin = __rdtsc();
+}
+
+void psgopher_bench_limiter_end(void)
+{
+   if (w_measuring())
+      w_limiter += __rdtsc() - w_limiter_begin;
+}
+
+static int cmp_u64(const void *a, const void *b)
+{
+   const uint64_t x = *(const uint64_t *)a, y = *(const uint64_t *)b;
+   return x < y ? -1 : x > y;
+}
+
+/* the window's summary, once the game has ended (not on the emulation thread's clock) */
+void psgopher_bench_window_report(const char *label)
+{
+   if (w_state != W_DONE) {
+      say("benchmark window %s: not complete (%d of %d VIs measured; warm-up %d)", label, w_state == W_MEASURE ? w_vis : 0,
+          w_measure, w_warmup);
+      return;
+   }
+   const double tpn = (double)(w_tsc1 - w_tsc0) / (double)(w_ns1 - w_ns0); /* ticks a ns */
+   const double n = (double)w_measure;
+#define MS(t) ((double)(t) / tpn / 1e6 / n)
+   const double wall = MS(w_tsc1 - w_tsc0), present = MS(w_present), limiter = MS(w_limiter);
+   const double rsp = MS(w_rsp > w_rsp_rdp ? w_rsp - w_rsp_rdp : 0) - (double)w_rsp_rdram_ns / 1e6 / n;
+   const double rsp_rdram = (double)w_rsp_rdram_ns / 1e6 / n, rdram = (double)w_rdram_ns / 1e6 / n;
+   const double rdp = MS(w_rdp_total), fence = MS(w_fence);
+   const double sync = MS(w_rdp_part[1]), frame = MS(w_rdp_part[2]);
+   const double commands = MS(w_rdp_part[0] > w_rdp_part[1] ? w_rdp_part[0] - w_rdp_part[1] : 0);
+   const double work = wall - present - limiter;
+   const double rest = work - rsp - rsp_rdram - rdp - (rdram - rsp_rdram);
+   const double cpu = (double)(w_cpu1 - w_cpu0) / 1e6 / n;
+   double p50 = 0, p99 = 0, pmax = 0;
+   if (w_intervals) {
+      qsort(w_intervals, (size_t)w_measure, sizeof(uint64_t), cmp_u64);
+      p50 = (double)w_intervals[w_measure / 2] / tpn / 1e6;
+      p99 = (double)w_intervals[(w_measure * 99) / 100] / tpn / 1e6;
+      pmax = (double)w_intervals[w_measure - 1] / tpn / 1e6;
+   }
+   uint32_t fps = 0, vis = 0;
+   int pal = 0;
+   if (psgopher_rdp_rates)
+      psgopher_rdp_rates(&fps, &vis, &pal);
+   const double target = pal ? 50.0 : 60.0 * 1000.0 / 1001.0;
+   const double vis_per_s = n / ((double)(w_ns1 - w_ns0) / 1e9);
+   say("benchmark window %s: %d VIs after %d of warm-up, %.2f s: %.2f VIs a second (%.1f%% of %.2f); a VI %.2f ms = "
+       "work %.2f + present wait %.2f + limiter %.2f; work = RSP %.2f (%llu bursts, %.0f cycles a VI) + RSP's RDRAM waits %.2f + "
+       "parallel-rdp %.2f (commands %.2f of which GPU fence waits %.2f in %.1f, syncs %.2f, frame %.2f) + other RDRAM waits %.2f + "
+       "VR4300 and the rest %.2f; thread CPU time %.2f; frame intervals p50 %.2f p99 %.2f max %.2f ms; audio underruns %llu",
+       label, w_measure, w_warmup, (double)(w_ns1 - w_ns0) / 1e9, vis_per_s, vis_per_s / target * 100.0, target, wall, work,
+       present, limiter, rsp, (unsigned long long)w_rsp_bursts, (double)w_rsp_cycles / n, rsp_rdram, rdp, commands, fence,
+       (double)w_fence_count / n, sync, frame, rdram - rsp_rdram, rest, cpu, p50, p99, pmax,
+       (unsigned long long)(w_underruns1 - w_underruns0));
+   if (w_gpu[0])
+      say("benchmark window %s: gpu a VI: %s", label, w_gpu);
+#undef MS
+}
+
 static struct psgopher_live live_now;
 static uint64_t live_since_ns, live_frames, live_present_ns, live_cpu_start, live_last_end;
 static _Atomic uint64_t live_rdram_ns, live_rdram_waits;
@@ -70,13 +221,18 @@ static int in_rsp;
 void psgopher_bench_rsp_begin(void)
 {
    in_rsp = 1;
+   w_in_rsp = 1;
    rsp_begin_tsc = __rdtsc();
 }
 
-void psgopher_bench_rsp_end(void)
+void psgopher_bench_rsp_end(uint64_t cycles)
 {
-   live_rsp_ticks += __rdtsc() - rsp_begin_tsc;
+   const uint64_t t = __rdtsc() - rsp_begin_tsc;
+   live_rsp_ticks += t;
    in_rsp = 0;
+   w_in_rsp = 0;
+   if (w_measuring())
+      w_rsp += t, w_rsp_bursts++, w_rsp_cycles += cycles;
 }
 
 void psgopher_bench_rdp(uint64_t ticks)
@@ -84,6 +240,11 @@ void psgopher_bench_rdp(uint64_t ticks)
    atomic_fetch_add_explicit(&live_rdp_ticks, ticks, memory_order_relaxed);
    if (in_rsp)
       live_rdp_in_rsp_ticks += ticks;
+   if (w_measuring()) {
+      w_rdp_total += ticks;
+      if (w_in_rsp)
+         w_rsp_rdp += ticks;
+   }
 }
 
 static _Atomic uint64_t live_dispatch_general, live_dispatch_special, compiles_asked, compiles_done, compiles_ticks;
@@ -106,14 +267,16 @@ void psgopher_bench_shader_compiled(uint64_t ticks)
 
 void psgopher_bench_rdp_part(int part, uint64_t ticks)
 {
-   if (part >= 0 && part < 3)
+   if (part >= 0 && part < 3) {
       atomic_fetch_add_explicit(&live_rdp_part_ticks[part], ticks, memory_order_relaxed);
+      if (w_measuring())
+         w_rdp_part[part] += ticks;
+   }
 }
 #define HISTORY 180
 static float history_ms[HISTORY];
 static int history_at, history_n;
 
-void psgopher_rdp_rates(uint32_t *fps, uint32_t *vis, int *pal) __attribute__((weak));
 
 void psgopher_live_read(struct psgopher_live *out)
 {
@@ -252,7 +415,8 @@ static void video_heartbeat(uint64_t end_ns)
 
 void psgopher_bench_present(uint64_t begin_ns, uint64_t end_ns)
 {
-   video_heartbeat(end_ns);
+   if (w_state == W_OFF || w_state == W_DONE)
+      video_heartbeat(end_ns); /* (no logging inside a benchmark window) */
    live_frame(begin_ns, end_ns);
    if (!atomic_load_explicit(&enabled, memory_order_relaxed))
       return;
@@ -270,6 +434,11 @@ void psgopher_bench_rdram_wait(uint64_t ns)
 {
    atomic_fetch_add(&live_rdram_ns, ns);
    atomic_fetch_add(&live_rdram_waits, 1);
+   if (w_measuring()) {
+      w_rdram_ns += ns, w_rdram_waits++;
+      if (w_in_rsp)
+         w_rsp_rdram_ns += ns;
+   }
    if (!atomic_load_explicit(&enabled, memory_order_relaxed))
       return;
    pthread_mutex_lock(&lock);
