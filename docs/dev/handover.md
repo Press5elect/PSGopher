@@ -7,7 +7,7 @@ in [`workflow.md`](workflow.md) (rule 9: interpreters only); the open items in
 ## State
 
 - Branch `claude/nice-hopper-9mlrrc`; everything is committed.
-- Gopher64 is pinned at `680769b7e548` (moved 2026-11-26); its changes are `ps5/patches/gopher64/ps5.patch`, plus
+- Gopher64 is pinned at `1cb0ff2518e0` (moved 2026-11-26); its changes are `ps5/patches/gopher64/ps5.patch`, plus
   `parallel-rdp.patch` for the submodule (`ps5/tools/fetch-gopher64.sh --export`, then `--check`).
 - Phase A of the performance programme (the audit and its six plans in `perf/`) is done. Of Phase
   B, B1-B3 (benchmark mode) are done:

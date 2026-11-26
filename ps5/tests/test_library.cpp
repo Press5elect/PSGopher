@@ -363,7 +363,7 @@ int main(int argc, char **argv)
 	t.hdrWhite = 250;
 	t.hdrPeak = 1500;
 	t.audioBuffer = 8;
-	t.shaderCompile = "now";
+	t.shaderCompile = "4";
 	t.driverThread = true;
 	t.wave32 = true;
 	t.smallTypes = true;
@@ -373,12 +373,12 @@ int main(int argc, char **argv)
 	psgopher::TitleSettings u;
 	u.file = t.file;
 	u.load();
-	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "now" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0);
-	write(t.file, "display = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\nrdp_layout = 3\n");
+	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0);
+	write(t.file, "shader_compile = now\ndisplay = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\nrdp_layout = 3\n");
 	psgopher::TitleSettings v;
 	v.file = t.file;
 	v.load();
-	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2);
+	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1");
 
 	/* the shares file (OGBox's format), written and read back with the accounts encoded */
 	psgopher::ShareFile sf;

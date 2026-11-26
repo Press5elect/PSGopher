@@ -20,7 +20,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 | The cover fixes (pool size, upload checks, RACK, after a game) | `93a4309` (no crash in one session) | covers in HOME after RACK and after a game; no SIGABRT; `about:` lines |
 | The two-controller tap | `93a4309` | hold the touch pad with a second controller connected: no quick menu |
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
-| Shader compiles on 4 threads or at once; the driver's own thread | `2ab7c1d` (ran: no change at 8x) | the `video:` line's shading share and speed at 8x with each |
+| Shader compiles on 4 threads; the driver's own thread (at once is removed: it froze at scene changes) | `2ab7c1d` (ran: no change at 8x) | the `video:` line's shading share and speed at 8x with each |
 | Per pixel's picture (speed measured: 100% at 8x), with supersampling and after a save state; Original's picture with its shaders made again | `8bc81c2` | the picture at 8x; BENCH → Video → Upscaled memory |
 | The board's Benchmark (△ on a probe) | `64422ca` | the board's notice; `benchmark window` lines with `state`, `upscale` |
 | The core's profiling build (`PSGOPHER_PGO=generate`) | `2423b54` | `pgo:` lines after each game; `.profraw` files in `/data/psgopher/pgo` |

@@ -57,7 +57,9 @@ void TitleSettings::load()
 		else if (!strcmp(key, "audio_buffer"))
 			audioBuffer = std::clamp(atoi(value), 2, 8) / 2 * 2;
 		else if (!strcmp(key, "shader_compile"))
-			shaderCompile = (!strcmp(value, "4") || !strcmp(value, "now")) ? value : "1";
+			/* "now" (compiled when first needed) is no longer offered: the game waited for each compile and
+			   froze at scene changes (console, 2026-11-26); it is read as "1" */
+			shaderCompile = !strcmp(value, "4") ? "4" : "1";
 		else if (!strcmp(key, "driver_thread"))
 			driverThread = !strcmp(value, "on");
 		else if (!strcmp(key, "gpu_timing"))
@@ -114,8 +116,7 @@ bool TitleSettings::save() const
 		"audio_buffer = %d\n"
 		"\n"
 		"# shader_compile: parallel-rdp's shading pipelines for each state, until compiled drawn with\n"
-		"# the slower general one: 1 one background thread (Gopher64's), 4 four, now compiled when first\n"
-		"# needed (a short pause the first time; kept in the shader cache for the next start)\n"
+		"# the slower general one: 1 one background thread (Gopher64's), 4 four\n"
 		"shader_compile = %s\n"
 		"# driver_thread: on records and submits the graphics commands on a thread of their own (Crux2's)\n"
 		"driver_thread = %s\n"
@@ -191,13 +192,8 @@ void TitleSettings::applyHdr() const
 	setenv("PSGOPHER_AUDIO_VIS", std::to_string(audioBuffer).c_str(), 1);
 	say("audio: %d VIs of sound kept queued (psgopher.ini: audio_buffer)", audioBuffer);
 	/* parallel-rdp's shading pipelines and the driver's thread: read when the game's device starts */
-	if (shaderCompile == "now") {
-		setenv("PARALLEL_RDP_FORCE_SYNC_SHADER", "1", 1);
-		unsetenv("PSGOPHER_RDP_COMPILE_THREADS");
-	} else {
-		unsetenv("PARALLEL_RDP_FORCE_SYNC_SHADER");
-		setenv("PSGOPHER_RDP_COMPILE_THREADS", shaderCompile.c_str(), 1);
-	}
+	unsetenv("PARALLEL_RDP_FORCE_SYNC_SHADER");
+	setenv("PSGOPHER_RDP_COMPILE_THREADS", shaderCompile.c_str(), 1);
 	if (wave32)
 		setenv("RADV_PERFTEST", "cswave32", 1);
 	else
@@ -230,8 +226,7 @@ void TitleSettings::applyHdr() const
 		say("hotkeys: %s; the quick menu's tap %s%s", hotkeys ? "on" : "off", tap ? "on" : "off",
 		    tap && !quickmenuTap ? " (kept on: nothing else leaves the game)" : "");
 	}
-	say("rdp: shading pipelines %s; the driver %s", shaderCompile == "now" ? "compiled when first needed" :
-	    shaderCompile == "4" ? "compiled by four background threads" : "compiled by one background thread (Gopher64's)",
+	say("rdp: shading pipelines %s; the driver %s", shaderCompile == "4" ? "compiled by four background threads" : "compiled by one background thread (Gopher64's)",
 	    driverThread ? "records on a thread of its own" : "records on the emulation thread");
 	if (!hdr) {
 		unsetenv("PSGOPHER_HDR");

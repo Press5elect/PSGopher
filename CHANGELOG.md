@@ -95,6 +95,18 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### From the console log of 2026-11-26 (`5f8bd8e`)
+
+- Changed: 8x supersampled runs at 96-100% in an NTSC game; what is left is the interpreters (the
+  CPU side 13-18 ms of a 16.7 ms VI).
+- Removed: "At once" from Shader compiles (`shader_compile = now`, read as one thread from now on).
+  It made the game wait for each new shading pipeline, and a game that changes scenes froze for
+  seconds at each change (about 3.5 s in one 10 s line, the emulation thread off the CPU). Earlier
+  it had measured no gain. Parallel-rdp draws with its general shader until the state's own is
+  compiled in the background, so the game never waits.
+- Changed: Gopher64's pin moved to `1cb0ff2518e0` (its per-game ROM patches in a file of their own) and
+  Dear ImGui's to 1.93.1.
+
 ### 8x: the memory layout experiment, the waits measured, the lockstep harness (2026-11-26)
 
 - Changed: the 1x-to-2x question is settled by a console log: from one probe, 1x, 2x and 4x hold

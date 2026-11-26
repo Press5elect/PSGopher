@@ -20,7 +20,7 @@ struct TitleSettings {
 	bool stats{ false };         // the stats overlay in a game
 	int audioBuffer{ 4 };        // the audio Gopher64 keeps queued, in VIs (2 is its own; 4, 6, 8)
 	std::string shaderCompile{ "1" }; // parallel-rdp's specialised shading pipelines: "1" one background
-	                                  // thread (Gopher64's), "4" four, "now" compiled when first needed
+	                                  // thread (Gopher64's), "4" four ("now" is read as "1")
 	bool driverThread{ false };  // RADV records and submits on a thread of its own (Crux2's switch)
 	bool gpuTiming{ false };     // parallel-rdp's GPU timestamps, each stage's time in the boot log
 	bool slowCapture{ true };    // a slow moment in a game (below 95% for 3 s) measured into the boot log

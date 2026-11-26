@@ -1439,10 +1439,10 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(choose("video.ssaa", "Supersampling", "Draws finely and shows the result at the original size: smoother edges, the original's sharpness.",
 		                        { { "Off", 0 }, { "On", 1 } }));
 		s.rows.push_back(choose("video.vsync", "Vsync", "Each frame waits for the screen's refresh (Gopher64's vsync).", { { "Off", 0 }, { "On", 1 } }));
-		s.rows.push_back(title_row("Shader compiles", "Until a state's own shader is made, parallel-rdp draws with a general, slower one: one thread (Gopher64's), four, or each made when first needed.",
-		                           { { "1 thread", 1 }, { "4 threads", 4 }, { "At once", 0 } },
-		                           [](TitleSettings &t) -> int64_t { return t.shaderCompile == "now" ? 0 : atoi(t.shaderCompile.c_str()); },
-		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 0 ? "now" : std::to_string(v); }));
+		s.rows.push_back(title_row("Shader compiles", "Until a state's own shader is made, parallel-rdp draws with a general, slower one, so the game never waits for a compile: one background thread (Gopher64's) or four.",
+		                           { { "1 thread", 1 }, { "4 threads", 4 } },
+		                           [](TitleSettings &t) -> int64_t { return atoi(t.shaderCompile.c_str()); },
+		                           [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 4 ? "4" : "1"; }));
 		s.rows.push_back(title_row("Graphics driver", "The driver records and submits on a thread of its own (Crux2's switch).", { { "Same thread", 0 }, { "Own thread", 1 } },
 		                           [](TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; }));
 		s.rows.push_back(title_row("Compute waves", "How wide the GPU runs parallel-rdp's shaders: 64 (RADV's default) or 32, which suits its per-pixel loops on RDNA. GPU timing shows which is faster.",
