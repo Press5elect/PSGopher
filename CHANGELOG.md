@@ -181,7 +181,7 @@ console: the cheats, variable refresh, HDR10.
   seconds at each change (about 3.5 s in one 10 s line, the emulation thread off the CPU). Earlier
   it had measured no gain. Parallel-rdp draws with its general shader until the state's own is
   compiled in the background, so the game never waits.
-- Changed: Gopher64's pin moved to `c9b959e5eb9e` (its per-game ROM patches in a file of their own,
+- Changed: Gopher64's pin moved to `e6459908ef21` (its per-game ROM patches in a file of their own,
   their codes updated) and Dear ImGui's to master after 1.93.1.
 
 ### 8x: the memory layout experiment, the waits measured, the lockstep harness (2026-11-26)

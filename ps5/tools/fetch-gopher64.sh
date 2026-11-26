@@ -13,8 +13,8 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 upstream=https://github.com/gopher64/gopher64.git
-# master of 2026-11-26 (pull request 1454: per-game ROM patch codes updated)
-revision=c9b959e5eb9ed263510e0674c6cb761a25c85817
+# master of 2026-11-26 (pull request 1455: a per-game ROM patch added)
+revision=e6459908ef2127169f8c4b7b40921bcfcb77d731
 patch="$root/ps5/patches/gopher64/ps5.patch"
 vendor="$root/vendor/gopher64"
 # parallel-rdp is a submodule of Gopher64's (its own repository, at the commit Gopher64's pin
