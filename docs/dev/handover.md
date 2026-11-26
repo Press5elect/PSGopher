@@ -63,33 +63,46 @@ Why, read from the code (not yet proven on a console):
 - **The cause is one of two.** Translation (TLB) thrash or channel conflicts would each explain the
   cliff. The measurements do not yet tell them apart.
 
+## Done since the log (2026-11-26, not yet run on a console)
+
+- **"8x memory layout"** (BENCH → Video, `rdp_layout`, env `PSGOPHER_RDP_LAYOUT`): Original (0, the
+  default), Padded (1: the copies 8 MB + 4352 bytes apart, an odd multiple of 256 bytes), Per pixel
+  (2: 32-bit words permuted to `word * factor² + slice`, the 8- and 16-bit and hidden views derived
+  from it so they alias as before). The helpers are in `shaders/rdram_layout.h`; 11 modules of
+  `slangmosh.hpp` are made again by `ps5/tools/make-rdp-shaders.py` (glslang and spirv-opt, not
+  Granite's slangmosh, which cannot be built here). Mode 0 was compared with the pristine shaders
+  over 784 specialisations on the PC.
+- **The benchmark window** reports `submits` (every `device->submit` and `next_frame_context` in
+  parallel-rdp, the VI path included) and `parallel-rdp off-CPU` (wall less thread CPU time in the
+  commands and frame parts); `bursts` is a VI's.
+- **Underruns** are not counted while the quick menu is open (the hotkey pause is not covered).
+- **The lockstep harness** (`ps5/tests/run-lockstep.sh`, [`testing.md`](testing.md)): no hooks in
+  `vendor/gopher64`; it builds the pin and the working tree for the PC and compares them.
+- **What the sources say of the cliff** (research, nothing proven): the winsys allocates every
+  buffer the same way whatever its size (direct memory type 12, 2 MiB alignment from 2 MiB up), so
+  there is no driver switch; the GPU has 16 pipes at a 256-byte interleave, which is why Padded's
+  pad is an odd multiple of 256 bytes. Crux2's upscaled targets are images in 64 KiB blocks.
+  RADV prints `radv/ps5 submissions: ... claim_ms ... suspend_ms` to the klog every 10 s.
+
 ## Next, in order
 
-All four were offered to the owner and not yet started.
+1. **The console run that decides the 8x layout.** One probe, 8x, each of the three layouts:
+   - Original first: the picture and the `gpu:` lines must be as before (the shaders were made
+     again by another compiler).
+   - Then Padded and Per pixel: depth-blending and extract-vram a pass in the `gpu:` lines, the
+     picture (with and without supersampling), a save state loaded.
+   - Padded alone fixing it means memory channels; only Per pixel fixing it means translation.
+   - The layout that wins becomes the default, the others are taken out.
+2. **Read the waits** in the same log: `submits` and `parallel-rdp off-CPU` in the window lines,
+   and the klog's `radv/ps5 submissions` line.
+3. **The interpreters, the RSP first** ([`perf/interpreter-optimisation-plan.md`](perf/interpreter-optimisation-plan.md)):
+   each change through `run-lockstep.sh`, then measured on the console. An NTSC VI is 16.7 ms and
+   the CPU side is about 18 ms in a demanding game.
+4. **Game start**: the upscaled RDRAM (768 MB at 8x) is zeroed twice on the CPU
+   (`RADV_PS5_STREAM_ZERO` is not set; Granite zeroes host-visible memory again).
+5. PGO last, measured before and after on the same probe.
 
-1. **4x as the default upscale.** Measured at 100% where 8x is not; the PS5 port of Mupen64Plus-Next
-   made the same choice after measuring ([`mupen64-ps5-comparison.md`](mupen64-ps5-comparison.md)).
-   Keep the owner's existing choice.
-2. **A default-off padded stride between the sample copies.** Make the stride a specialisation
-   constant, RDRAM_SIZE plus a few KiB, used in place of `slice * RDRAM_SIZE`:
-   - Change it in `memory_interfacing.h` and `update_upscaled_domain_{pre,post,resolve}.comp`, and
-     in the allocation sizes in `rdp_renderer.cpp` (`upscaling_multisampled_rdram`, `_hidden_rdram`,
-     the write mask after the copies).
-   - `RDRAM_MASK_8` must stay `RDRAM_SIZE - 1`.
-   - Regenerate `slangmosh.hpp` (`glslangValidator` is on the PC).
-   - On the console, compare depth-blending a pass at 8x in the `gpu:` lines, with the experiment
-     on and off, from the same probe.
-3. **Find the 6 ms off the CPU.** Time `device->submit` and the other blocking calls in
-   `rdp_renderer.cpp` and `rdp_device.cpp`, inside the benchmark only.
-4. **Two small log fixes:**
-   - Do not count audio underruns while the quick menu pauses the game.
-   - Report `bursts` per VI, not as the window's total.
-
-After those, follow [`perf/implementation-roadmap.md`](perf/implementation-roadmap.md):
-
-- **Before any interpreter change, build the correctness harness:** lockstep against the original
-  Gopher64. The interpreters are the next limit at 1x, NTSC first.
-- PGO comes last of the roadmap items, measured before and after on the same probe.
+The owner's direction (2026-11-26): no lowered default factor; 8x is to be made fast.
 
 ## Open questions to the owner
 

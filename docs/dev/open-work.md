@@ -7,11 +7,9 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | Problem | Evidence | Next step |
 | --- | --- | --- |
-| 8x below full speed (71-83% in a PAL game); 1x, 2x and 4x hold 100% from the same probe | boot log 2026-11-26 (`64422ca`): depth-blending a pass 0.025 ms at 2x, 0.11 ms at 4x, 2.0-2.7 ms at 8x (about 20 times 4x, not 4 times); extract-vram 16 times; shading and VI scale grow normally; the emulation thread 25 ms a VI against 19 ms of CPU time ([`handover.md`](handover.md#the-8x-cliff)) | 4x as the default; a default-off padded stride between the upscaled RDRAM's sample copies; time the Vulkan submits in the benchmark |
+| 8x below full speed (71-83% in a PAL game); 1x, 2x and 4x hold 100% from the same probe | boot log 2026-11-26 (`64422ca`): depth-blending a pass 0.025 ms at 2x, 0.11 ms at 4x, 2.0-2.7 ms at 8x (about 20 times 4x, not 4 times); extract-vram 16 times; shading and VI scale grow normally; the emulation thread 25 ms a VI against 19 ms of CPU time ([`handover.md`](handover.md#the-8x-cliff)) | the console run of the three memory layouts ([`handover.md`](handover.md#next-in-order)); no lowered default (the owner) |
 | The front end's remaining defects | [`../frontend-audit/BUGS.md`](../frontend-audit/BUGS.md) (FE-001 to FE-004 and FE-031 fixed, see `CHANGELOG.md`) | in the order of [`../frontend-audit/ROADMAP.md`](../frontend-audit/ROADMAP.md), FE-005 next |
 | The USB search uses its whole budget (60,000 entries) at every start | boot logs 2026-11-25 (5.7-34.7 s before the share is searched) | measure which folders take it; skip known non-game folders or search places in parallel |
-| Audio underruns counted while the quick menu pauses the game (631 in one 10 s line at 1x) | boot log 2026-11-26 | do not count underruns while paused |
-| The benchmark's `bursts` is the window's total, not a VI's | boot log 2026-11-26 | divide by the VIs, or label it |
 | The first search of a large share is slow (1,424 ROMs: 55.6 s, headers read over SMB) | boot log 2026-11-25 | later starts read `library.tsv`; measure again before changing anything |
 | The boot log does not name the game's ID when it starts | boot log 2026-11-25 | log the header's game code with `starting Gopher64` (needed for [`compatibility.md`](compatibility.md)) |
 
@@ -23,6 +21,8 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 | The two-controller tap | `93a4309` | hold the touch pad with a second controller connected: no quick menu |
 | A failed listing keeping the list | `3e13b39` | a share that times out: the list keeps its games (the share woke at once in the run since) |
 | Shader compiles on 4 threads or at once; the driver's own thread | `2ab7c1d` (ran: no change at 8x) | the `video:` line's shading share and speed at 8x with each |
+| "8x memory layout": Original with the shaders made again, Padded, Per pixel | this commit | the picture; depth-blending a pass in the `gpu:` lines at 8x from one probe |
+| `submits` and `parallel-rdp off-CPU` in the benchmark window; underruns not counted in the quick menu | this commit | the `benchmark window` lines at 8x |
 | The board's Benchmark (△ on a probe) | `64422ca` | the board's notice; `benchmark window` lines with `state`, `upscale` |
 | The core's profiling build (`PSGOPHER_PGO=generate`) | `2423b54` | `pgo:` lines after each game; `.profraw` files in `/data/psgopher/pgo` |
 | The configurable hotkeys and their new actions, the quick menu tap switch | `892ab0a` (the `hotkeys:` line has run) | each action in a game with the activator held; `hotkeys:` line at a game's start |

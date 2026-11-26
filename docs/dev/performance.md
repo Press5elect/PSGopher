@@ -47,13 +47,14 @@ thread, turned into milliseconds with the TSC's rate over the window (one clock;
 | --- | --- |
 | a VI | wall time between presents, averaged = work + present wait + limiter |
 | work | what the emulation needs a VI: its headroom against 16.68 ms (or 20 ms PAL) is how far from full speed |
-| RSP | inside `rsp_cpu::run`, less the RDP work and RDRAM waits started inside it; its bursts and cycles a VI |
-| parallel-rdp | its CPU time: commands (whole batches, less the syncs), of which GPU fence waits (render passes in flight), syncs (SyncFull's submissions), the frame's render |
+| RSP | inside `rsp_cpu::run`, less the RDP work and RDRAM waits started inside it; its bursts a VI (`%.0f bursts`) and cycles a VI |
+| parallel-rdp | its CPU time: commands (whole batches, less the syncs), of which GPU fence waits (render passes in flight), syncs (SyncFull's submissions), the frame's render, and `submits %.2f in %.1f`: every Vulkan `submit`/`submit_empty` and `next_frame_context` on the emulation thread, ms a VI and how many a VI (a part of the above, not added) |
 | RDRAM waits | the CPU waiting for the GPU before touching RDRAM (inside the RSP and elsewhere) |
 | VR4300 and the rest | work less the above: the CPU's interpreter, events, the core's other devices |
 | thread CPU time | `CLOCK_THREAD_CPUTIME_ID` over the window, a VI (spin-waits count, sleeps do not) |
+| parallel-rdp off-CPU | `parallel-rdp off-CPU %.2f`: the wall time of its commands and frame parts less the thread's CPU time (`CLOCK_THREAD_CPUTIME_ID`, read at the start and end of those two parts, only while the window measures; outside it one branch) = where the thread slept or was descheduled inside parallel-rdp |
 | frame intervals | present-to-present p50, p99, max |
-| audio underruns | over the window |
+| audio underruns | over the window; not counted while the quick menu has the game paused (`psgopher_sdl3_audio_hold`) |
 
 With `gpu_timing = on`, a second line gives the GPU stages over exactly the window: native and
 upscaled dispatches under separate tags (`depth-blending` and `depth-blending-upscaled`, and so on),

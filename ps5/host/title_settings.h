@@ -26,6 +26,8 @@ struct TitleSettings {
 	bool slowCapture{ true };    // a slow moment in a game (below 95% for 3 s) measured into the boot log
 	bool wave32{ false };        // RADV runs compute shaders 32 wide (RADV_PERFTEST=cswave32; its default is 64)
 	bool smallTypes{ false };    // parallel-rdp's 8/16-bit arithmetic (it turns it off on RADV by default)
+	int rdpLayout{ 0 };          // the upscaled RDRAM's layout, an experiment for 8x (PSGOPHER_RDP_LAYOUT):
+	                             // 0 parallel-rdp's, 1 padded stride between the samples' copies, 2 per pixel
 	/* the controller's hotkeys (Gopher64's: its Hotkey Activator held, the touch pad by default, and
 	 * a button): on or off, and each action's N64 button (an input profile index, -1 none); the
 	 * actions are kHotkeyActions' (psgopher.rs's HOTKEY_ACTIONS, in its order) */

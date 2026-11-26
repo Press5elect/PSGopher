@@ -1451,6 +1451,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(title_row("8/16-bit maths", "parallel-rdp's 8 and 16-bit arithmetic, which it turns off on RADV (measured on PCs). GPU timing shows which is faster here.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.smallTypes; },
 		                           [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; }));
+		s.rows.push_back(title_row("8\xC3\x97 memory layout", "An experiment for 8\xC3\x97: parallel-rdp keeps a copy of the N64's memory per sample, 8 MiB apart. Padded moves the copies off that stride; Per pixel keeps a pixel's samples together. GPU timing shows which is faster.",
+		                           { { "Original", 0 }, { "Padded", 1 }, { "Per pixel", 2 } }, [](TitleSettings &t) -> int64_t { return t.rdpLayout; },
+		                           [](TitleSettings &t, int64_t v) { t.rdpLayout = v == 1 || v == 2 ? int(v) : 0; }));
 		s.rows.push_back(title_row("Slow moments", "When a game falls below 95% for 3 seconds, the next 10 seconds are measured into the boot log (where the time goes), up to three times a game.",
 		                           { { "Off", 0 }, { "Measured", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
 		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }));

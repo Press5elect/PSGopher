@@ -31,6 +31,8 @@ void psgopher_sdl3_menu_pad(struct pad *pad);
 void psgopher_sdl3_hold_until_released(void);
 
 void psgopher_sdl3_audio_stats_read(psgopher_sdl3_audio_stats *stats);
+/* The game is paused (1) or running (0): while paused, an empty stream is no underrun to count. */
+void psgopher_sdl3_audio_hold(int held);
 
 /* Makes `frames` stereo frames at 48 kHz from the stream (silence where it has none): what the
  * PS5 layer's audio thread calls each grain. */

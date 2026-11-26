@@ -68,6 +68,8 @@ void TitleSettings::load()
 			wave32 = !strcmp(value, "on");
 		else if (!strcmp(key, "small_types"))
 			smallTypes = !strcmp(value, "on");
+		else if (!strcmp(key, "rdp_layout"))
+			rdpLayout = (!strcmp(value, "1") || !strcmp(value, "2")) ? atoi(value) : 0;
 		else if (!strcmp(key, "hotkeys"))
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
@@ -125,6 +127,9 @@ bool TitleSettings::save() const
 		"# parallel-rdp use 8 and 16-bit arithmetic (it turns that off on RADV). Measured with gpu_timing\n"
 		"wave32 = %s\n"
 		"small_types = %s\n"
+		"# rdp_layout: how parallel-rdp lays out the upscaled picture's memory, an experiment for 8x: 0 its\n"
+		"# own (a copy of RDRAM per sample, 8 MiB apart), 1 the copies padded apart, 2 a pixel's samples together\n"
+		"rdp_layout = %d\n"
 		"\n"
 		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
 		"# hotkey_<action>: the N64 button by Gopher64's input number (0 D Right, 1 D Left, 2 D Down, 3 D Up,\n"
@@ -133,7 +138,7 @@ bool TitleSettings::save() const
 		"# quickmenu_tap: a touch pad tap opens the quick menu (on whenever nothing else leaves a game)\n"
 		"quickmenu_tap = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)
@@ -201,6 +206,11 @@ void TitleSettings::applyHdr() const
 		setenv("PARALLEL_RDP_SMALL_TYPES", "1", 1);
 	else
 		unsetenv("PARALLEL_RDP_SMALL_TYPES");
+	/* the upscaled RDRAM's layout: read when the game's renderer makes its buffers (rdp_init logs it) */
+	if (rdpLayout)
+		setenv("PSGOPHER_RDP_LAYOUT", std::to_string(rdpLayout).c_str(), 1);
+	else
+		unsetenv("PSGOPHER_RDP_LAYOUT");
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");
 	setenv("PSGOPHER_SLOW_CAPTURE", slowCapture ? "1" : "0", 1);

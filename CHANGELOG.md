@@ -95,6 +95,25 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### 8x: the memory layout experiment, the waits measured, the lockstep harness (2026-11-26)
+
+- Changed: the 1x-to-2x question is settled by a console log: from one probe, 1x, 2x and 4x hold
+  full speed in a PAL game and only 8x falls (71-83%). Depth-blending a pass costs about 20 times
+  its 4x cost at 8x (not 4 times), as does every pass that touches the upscaled RDRAM.
+- Added: "8x memory layout" (BENCH's video stage, `rdp_layout`, Original by default; not yet run on
+  a console): Padded puts the upscaled RDRAM's sample copies an odd number of 256-byte steps beyond
+  8 MB apart; Per pixel stores a pixel's samples side by side, so an 8x8 tile reads 256 contiguous
+  bytes at 8x where it read 64 addresses 8 MB apart. Eleven of parallel-rdp's compiled shaders are
+  made again (`ps5/tools/make-rdp-shaders.py`); with Original they compute the same addresses as
+  before (784 specialisations compared on the PC).
+- Added: the benchmark window reports the time in the driver's submits and parallel-rdp's time off
+  the CPU; RSP bursts are a VI's, not the window's total.
+- Fixed: audio underruns are not counted while the quick menu holds the game.
+- Added: the lockstep harness (`ps5/tests/run-lockstep.sh`): the original Gopher64 at the pin and
+  the working tree run side by side on the PC (VR4300, RSP, RDRAM compared every VI and RSP burst;
+  1.49 million single RSP instructions compared), the first difference named. Required before any
+  interpreter change.
+
 ### The performance programme: a trustworthy benchmark (2026-11-26)
 
 - Added: the benchmark from the board: HOME, □ Probes, △ on a probe runs it at 1x, 2x, 4x and 8x

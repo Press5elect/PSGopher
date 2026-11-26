@@ -38,6 +38,9 @@ void psgopher_bench_window_present(uint64_t begin_tsc, uint64_t end_tsc);
 void psgopher_bench_window_gpu(const char *line); /* the GPU stages over the window */
 double psgopher_bench_window_report(const char *label); /* its speed in %, -1 not complete */
 void psgopher_bench_fence(uint64_t tsc_ticks);    /* parallel-rdp waiting for a render pass's fence */
+void psgopher_bench_submit(uint64_t tsc_ticks);   /* one Vulkan submit or next_frame_context, timed */
+uint64_t psgopher_bench_cpu_now(void);            /* thread CPU ns for a parallel-rdp part; 0 outside a window */
+void psgopher_bench_rdp_part_cpu(uint64_t begin_cpu_ns); /* closes it (commands, frame parts only) */
 void psgopher_bench_limiter_begin(void);          /* Gopher64's speed limiter's sleep */
 void psgopher_bench_limiter_end(void);
 

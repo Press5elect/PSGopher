@@ -367,6 +367,7 @@ extern "C" psgopher_quickmenu_answer psgopher_quickmenu_run(void)
       t.load();
       menu.stats_on = t.stats;
    }
+   psgopher_sdl3_audio_hold(1); /* the game is paused: the audio's underruns are not counted meanwhile */
    say("quickmenu: open (%s; %d probe(s) kept)", name[0] ? name : "no name", menu.kept());
 
    ImGuiContext *previous = ImGui::GetCurrentContext();
@@ -418,6 +419,7 @@ extern "C" psgopher_quickmenu_answer psgopher_quickmenu_run(void)
    ImGui::DestroyContext(context);
    ImGui::SetCurrentContext(previous);
    psgopher_sdl3_hold_until_released();
+   psgopher_sdl3_audio_hold(0);
    extern int g_osd_wanted;
    g_osd_wanted = menu.stats_on ? 1 : 0;
    static const char *const names[] = { "resume", "save state", "load state", "reset", "quit" };

@@ -786,6 +786,7 @@ struct SDL_AudioStream {
    double table_cutoff = 0;
    bool playing = false;
    bool fed = false; /* the game has given audio: an empty queue before that is no underrun */
+   bool held = false; /* the game is paused (the quick menu): nobody feeds the stream, so no underrun counts */
    psgopher_sdl3_audio_stats stats = {};
 };
 static SDL_AudioStream *the_stream;
@@ -876,12 +877,20 @@ extern "C" void psgopher_sdl3_audio_render(SDL_AudioStream *s, int16_t *out, int
    }
    if (made < frames) {
       memset(out + made * 2, 0, (size_t)(frames - made) * 4);
-      if (s->playing && s->fed) {
+      if (s->playing && s->fed && !s->held) {
          s->stats.underrun_grains++;
          s->stats.silent_frames += (uint64_t)(frames - made);
       }
    }
    s->stats.grains++;
+}
+
+extern "C" void psgopher_sdl3_audio_hold(int held)
+{
+   if (!the_stream)
+      return;
+   std::lock_guard<std::recursive_mutex> hold(the_stream->lock);
+   the_stream->held = held != 0;
 }
 
 extern "C" void psgopher_sdl3_audio_stats_read(psgopher_sdl3_audio_stats *stats)

@@ -128,6 +128,8 @@ extern "C" void psgopher_sdl3_menu_pad(struct pad *p)
    g_held = held;
 }
 static int g_holds = 0;
+extern "C" void psgopher_sdl3_audio_hold(int) {}
+
 extern "C" void psgopher_sdl3_hold_until_released(void)
 {
    g_holds++;

@@ -1,0 +1,14 @@
+# PSGopher lockstep harness: both core builds linked into one binary (see ps5/tests/run-lockstep.sh)
+[package]
+name = "lockstep-harness"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "lockstep"
+path = "src/main.rs"
+
+[dependencies]
+original = { package = "lockstep-core-original", path = "../core-original" }
+candidate = { package = "lockstep-core-candidate", path = "../core-candidate" }

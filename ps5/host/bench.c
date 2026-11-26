@@ -73,6 +73,9 @@ static uint64_t slow_last_ns;
 static uint64_t w_tsc0, w_ns0, w_tsc1, w_ns1, w_cpu0, w_cpu1, w_last_present_tsc;
 static uint64_t w_present, w_rsp, w_rsp_rdp, w_rsp_bursts, w_rsp_cycles, w_rdp_total, w_rdp_part[3], w_fence, w_limiter;
 static uint64_t w_rdram_ns, w_rdram_waits, w_rsp_rdram_ns, w_underruns0, w_underruns1, w_fence_count;
+/* the submissions and next_frame_context (TSC ticks, count), and parallel-rdp's thread CPU time in its
+ * commands and frame parts (ns) */
+static uint64_t w_submit, w_submit_count, w_rdp_cpu_ns;
 static uint64_t *w_intervals; /* present-to-present, ticks */
 static int w_in_rsp;
 static char w_gpu[1024];
@@ -90,6 +93,7 @@ void psgopher_bench_window(int warmup_vis, int measure_vis)
    w_present = w_rsp = w_rsp_rdp = w_rsp_bursts = w_rsp_cycles = w_rdp_total = w_fence = w_limiter = 0;
    w_rdp_part[0] = w_rdp_part[1] = w_rdp_part[2] = 0;
    w_rdram_ns = w_rdram_waits = w_rsp_rdram_ns = w_fence_count = 0;
+   w_submit = w_submit_count = w_rdp_cpu_ns = 0;
    w_gpu[0] = 0;
    free(w_intervals);
    w_intervals = measure_vis > 0 ? calloc((size_t)measure_vis, sizeof(uint64_t)) : NULL;
@@ -153,6 +157,26 @@ void psgopher_bench_fence(uint64_t ticks)
       w_fence += ticks, w_fence_count++;
 }
 
+/* a Vulkan submission or next_frame_context on the emulation thread (parallel-rdp) */
+void psgopher_bench_submit(uint64_t ticks)
+{
+   if (w_measuring())
+      w_submit += ticks, w_submit_count++;
+}
+
+/* the emulation thread's CPU clock at the start of parallel-rdp's commands or frame part, 0 outside a
+ * window (one branch); psgopher_bench_rdp_part_cpu closes it */
+uint64_t psgopher_bench_cpu_now(void)
+{
+   return w_measuring() ? now_ns(CLOCK_THREAD_CPUTIME_ID) : 0;
+}
+
+void psgopher_bench_rdp_part_cpu(uint64_t begin_cpu_ns)
+{
+   if (begin_cpu_ns && w_measuring())
+      w_rdp_cpu_ns += now_ns(CLOCK_THREAD_CPUTIME_ID) - begin_cpu_ns;
+}
+
 static uint64_t w_limiter_begin;
 void psgopher_bench_limiter_begin(void)
 {
@@ -188,6 +212,10 @@ double psgopher_bench_window_report(const char *label)
    const double rdp = MS(w_rdp_total), fence = MS(w_fence);
    const double sync = MS(w_rdp_part[1]), frame = MS(w_rdp_part[2]);
    const double commands = MS(w_rdp_part[0] > w_rdp_part[1] ? w_rdp_part[0] - w_rdp_part[1] : 0);
+   const double submits = MS(w_submit);
+   /* parallel-rdp's wall time is its commands (syncs inside) and its frame; its CPU time is what the
+    * thread clock counted inside the same two parts */
+   const double rdp_wall = MS(w_rdp_part[0] + w_rdp_part[2]), rdp_cpu = (double)w_rdp_cpu_ns / 1e6 / n;
    const double work = wall - present - limiter;
    const double rest = work - rsp - rsp_rdram - rdp - (rdram - rsp_rdram);
    const double cpu = (double)(w_cpu1 - w_cpu0) / 1e6 / n;
@@ -205,12 +233,13 @@ double psgopher_bench_window_report(const char *label)
    const double target = pal ? 50.0 : 60.0 * 1000.0 / 1001.0;
    const double vis_per_s = n / ((double)(w_ns1 - w_ns0) / 1e9);
    say("benchmark window %s: %d VIs after %d of warm-up, %.2f s: %.2f VIs a second (%.1f%% of %.2f); a VI %.2f ms = "
-       "work %.2f + present wait %.2f + limiter %.2f; work = RSP %.2f (%llu bursts, %.0f cycles a VI) + RSP's RDRAM waits %.2f + "
-       "parallel-rdp %.2f (commands %.2f of which GPU fence waits %.2f in %.1f, syncs %.2f, frame %.2f) + other RDRAM waits %.2f + "
-       "VR4300 and the rest %.2f; thread CPU time %.2f; frame intervals p50 %.2f p99 %.2f max %.2f ms; audio underruns %llu",
+       "work %.2f + present wait %.2f + limiter %.2f; work = RSP %.2f (%.0f bursts, %.0f cycles a VI) + RSP's RDRAM waits %.2f + "
+       "parallel-rdp %.2f (commands %.2f of which GPU fence waits %.2f in %.1f, syncs %.2f, frame %.2f, submits %.2f in %.1f) + other RDRAM waits %.2f + "
+       "VR4300 and the rest %.2f; thread CPU time %.2f; parallel-rdp off-CPU %.2f; frame intervals p50 %.2f p99 %.2f max %.2f ms; audio underruns %llu",
        label, w_measure, w_warmup, (double)(w_ns1 - w_ns0) / 1e9, vis_per_s, vis_per_s / target * 100.0, target, wall, work,
-       present, limiter, rsp, (unsigned long long)w_rsp_bursts, (double)w_rsp_cycles / n, rsp_rdram, rdp, commands, fence,
-       (double)w_fence_count / n, sync, frame, rdram - rsp_rdram, rest, cpu, p50, p99, pmax,
+       present, limiter, rsp, (double)w_rsp_bursts / n, (double)w_rsp_cycles / n, rsp_rdram, rdp, commands, fence,
+       (double)w_fence_count / n, sync, frame, submits, (double)w_submit_count / n, rdram - rsp_rdram, rest, cpu,
+       rdp_wall - rdp_cpu, p50, p99, pmax,
        (unsigned long long)(w_underruns1 - w_underruns0));
    if (w_gpu[0])
       say("benchmark window %s: gpu a VI: %s", label, w_gpu);

@@ -14,6 +14,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 #include <x86intrin.h>
 
 static int failures;
@@ -56,8 +57,8 @@ static double field(const char *key)
 int main(void)
 {
    /* 3 VIs of warm-up, then 20 measured: each VI RSP 2 ms (of which an RDRAM wait 0.3 ms and RDP
-    * work 0.4 ms started inside it), RDP 1.5 ms (a sync 0.2 ms, a fence wait 0.5 ms inside),
-    * the VR4300 1 ms, the limiter 0.8 ms, the present 1 ms: 6.3 ms a VI */
+    * work 0.4 ms started inside it), RDP 1.9 ms (a sync 0.2 ms, a fence wait 0.5 ms, a submit 0.25 ms and a 0.4 ms sleep inside),
+    * the VR4300 1 ms, the limiter 0.8 ms, the present 1 ms: 6.7 ms a VI */
    psgopher_bench_window(3, 20);
    int began = 0, ended = 0, vis = 0;
    for (int vi = 0; vi < 40 && psgopher_bench_window_state() != 3; vi++) {
@@ -68,12 +69,15 @@ int main(void)
       psgopher_bench_rdram_wait(300000);
       busy(300); /* (the RDRAM wait's time, reported in ns above) */
       psgopher_bench_rsp_end(1234);
-      const uint64_t rdp0 = __rdtsc();
-      busy(800);
+      const uint64_t rdp0 = __rdtsc(), cpu0 = psgopher_bench_cpu_now();
+      busy(550);
+      psgopher_bench_submit(busy(250)); /* a submission inside the commands */
+      usleep(400); /* parallel-rdp off the CPU (a sleep: the thread clock does not count it) */
       psgopher_bench_rdp_part(1, busy(200));
       psgopher_bench_fence(busy(500));
       const uint64_t rdp_t = __rdtsc() - rdp0;
       psgopher_bench_rdp_part(0, rdp_t);
+      psgopher_bench_rdp_part_cpu(cpu0);
       psgopher_bench_rdp(rdp_t);
       busy(1000); /* the VR4300 */
       psgopher_bench_limiter_begin();
@@ -96,19 +100,27 @@ int main(void)
    psgopher_bench_window_report("test");
    const double vi = field("a VI "), work = field("= work "), present = field("present wait "), limiter = field("limiter ");
    const double rsp = field("RSP "), rdram_rsp = field("RSP's RDRAM waits "), rdp = field("parallel-rdp ");
+   const char *paren = strchr(strstr(last_say, "work = RSP "), '(');
+   const double bursts = paren ? atof(paren + 1) : -1, submits = field("submits ");
+   const char *in = strstr(strstr(last_say, "submits "), " in ");
+   const double submit_count = in ? atof(in + 4) : -1, off_cpu = field("parallel-rdp off-CPU ");
    const double commands = field("commands "), fence = field("GPU fence waits "), sync = field("syncs "), rest = field("VR4300 and the rest ");
    printf("parsed: VI %.2f work %.2f present %.2f limiter %.2f RSP %.2f rdram %.2f rdp %.2f commands %.2f fence %.2f sync %.2f rest %.2f\n",
           vi, work, present, limiter, rsp, rdram_rsp, rdp, commands, fence, sync, rest);
    const double tol = 0.15; /* ms: busy-waits on a shared PC */
-   CHECK(vi > 6.1 && vi < 6.5, "a VI is 6.3 ms of known work (RSP 2.0 with what started inside it, RDP 1.5, VR4300 1.0, limiter 0.8, present 1.0): %.2f", vi);
+   CHECK(vi > 6.5 && vi < 6.9, "a VI is 6.7 ms of known work (RSP 2.0 with what started inside it, RDP 1.9, VR4300 1.0, limiter 0.8, present 1.0): %.2f", vi);
    CHECK(present > 1 - tol && present < 1 + tol, "present %.2f", present);
    CHECK(limiter > 0.8 - tol && limiter < 0.8 + tol, "limiter %.2f", limiter);
    CHECK(rsp > 1.3 - tol && rsp < 1.3 + tol, "RSP without its RDP and RDRAM wait: %.2f", rsp);
    CHECK(rdram_rsp > 0.29 && rdram_rsp < 0.31, "RSP's RDRAM waits %.2f", rdram_rsp);
-   CHECK(rdp > 1.9 - tol && rdp < 1.9 + tol, "parallel-rdp 0.4 + 1.5: %.2f", rdp);
+   CHECK(rdp > 2.3 - tol && rdp < 2.3 + tol, "parallel-rdp 0.4 + 1.9: %.2f", rdp);
    CHECK(sync > 0.2 - tol && sync < 0.2 + tol, "syncs %.2f", sync);
    CHECK(fence > 0.5 - tol && fence < 0.5 + tol, "fence %.2f", fence);
-   CHECK(commands > 1.3 - tol && commands < 1.3 + tol, "commands without the syncs %.2f", commands);
+   CHECK(commands > 1.7 - tol && commands < 1.7 + tol, "commands without the syncs %.2f", commands);
+   CHECK(bursts > 0.99 && bursts < 1.01, "one RSP burst a VI: %.2f", bursts);
+   CHECK(submits > 0.25 - tol && submits < 0.25 + tol, "submits %.2f", submits);
+   CHECK(submit_count > 0.99 && submit_count < 1.01, "one submit a VI: %.2f", submit_count);
+   CHECK(off_cpu > 0.4 - tol && off_cpu < 0.4 + 2 * tol, "parallel-rdp off the CPU 0.4 (a sleep; part 0 less its thread CPU time): %.2f", off_cpu);
    CHECK(rest > 1.0 - 2 * tol && rest < 1.0 + 2 * tol, "the VR4300's 1 ms is the rest: %.2f", rest);
    CHECK(work > vi - present - limiter - 0.01 && work < vi - present - limiter + 0.01, "work = VI - present - limiter");
    /* a benchmark window ends the game; a slow moment's does not (interface.cpp asks this) */
