@@ -56,6 +56,7 @@ struct Look {
 	/* the cartridge's box art (libretro's), drawn in the label's place when there is one */
 	ImTextureID cover = ImTextureID_Invalid;
 	float cover_aspect = 0; // its width / height
+	char region = 0;        // the header's region letter (the flag on the cartridge), 0 for none
 };
 Look lookOf(const std::string &name, const std::string &code);
 ImU32 hsl(float h, float s, float l, float a = 1.0f); // h 0..360, s and l 0..1
@@ -67,7 +68,17 @@ using Transform = std::function<ImVec2(ImVec2)>;
 void drawLabel(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to);
 /* its top part: visible_height of the label's 208 units (the slot shows less of it); the box art when
  * there is one, else the drawn label */
-void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height);
+void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height, float crop_x = 0);
+
+/* The cartridge, as the home strip and the board's slot both draw it (one function, so they cannot differ):
+ * the grey shell with its arch, centre panel, grooves and steps, and the label (or box art) in its recess,
+ * the cover cropped to the recess, not stretched. It is drawn in a w x h frame; `to` maps that frame to the
+ * output (flat for the strip; for the slot, board pixels, which the slot's projection then bends); `unit` is
+ * the output length of one frame pixel's line widths; `opacity` fades it; `on` outlines it in the game's colour.
+ * `flag` (optional) draws the region's flag at a frame position and width. */
+using FlagHook = std::function<void(float x, float y, float w)>;
+void drawCartridge(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float w, float h, float unit, bool on,
+                   float opacity = 1.0f, const FlagHook &flag = nullptr);
 
 /* ---- the moving parts ---- */
 struct Machine {
@@ -85,6 +96,8 @@ struct Machine {
 	float load_cpu = 0, load_rsp = 0, load_rdp = 0;
 	float levels[24] = {}; // each bus's level
 	Look shown;            // the cartridge in the slot
+	/* draws a region's flag in board pixels (x, y, w): set by the front end, which owns the flags */
+	std::function<void(ImDrawList *, char, float, float, float)> flag;
 	bool has_cartridge = false;
 	/* the next frame (dt seconds): the cartridge's slide and the buses' levels; `wanted` is the
 	 * game whose cartridge should be in the slot */

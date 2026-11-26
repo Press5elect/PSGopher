@@ -283,8 +283,9 @@ ImU32 lerpColour(ImU32 a, ImU32 b, float t)
 
 } // namespace
 
-void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height)
+void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float visible_height, float crop_x)
 {
+	const float cx0 = std::clamp(crop_x, 0.0f, 100.0f), cx1 = 236 - cx0; /* the label's visible columns */
 	if (look.cover != ImTextureID_Invalid && look.cover_aspect > 0) {
 		/* the box art, cropped to fill the label (centred), its top part when less is visible; in a
 		 * grid of quads, so the slot's projection bends it as it bends the board */
@@ -304,18 +305,18 @@ void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transfo
 		for (int j = 0; j < kCells; j++)
 			for (int i = 0; i < kCells; i++) {
 				const float a = (float)i / kCells, b = (float)(i + 1) / kCells, c = (float)j / kCells, d = (float)(j + 1) / kCells;
-				auto at = [&](float x, float y) { return to(ImVec2(x * 236, y * vis)); };
-				auto uv = [&](float x, float y) { return ImVec2(u0 + (u1 - u0) * x, v0 + (v1 - v0) * y); };
+				auto at = [&](float x, float y) { return to(ImVec2(cx0 + x * (cx1 - cx0), y * vis)); };
+				auto uv = [&](float x, float y) { return ImVec2(u0 + (u1 - u0) * (cx0 + x * (cx1 - cx0)) / 236, v0 + (v1 - v0) * y); };
 				dl->AddImageQuad(ImTextureRef(look.cover), at(a, c), at(b, c), at(b, d), at(a, d), uv(a, c), uv(b, c), uv(b, d), uv(a, d));
 			}
 		/* its edge, as the label's */
-		const ImVec2 edge[4] = { to(ImVec2(0, 0)), to(ImVec2(236, 0)), to(ImVec2(236, vis)), to(ImVec2(0, vis)) };
+		const ImVec2 edge[4] = { to(ImVec2(cx0, 0)), to(ImVec2(cx1, 0)), to(ImVec2(cx1, vis)), to(ImVec2(cx0, vis)) };
 		dl->AddPolyline(edge, 4, IM_COL32(0, 0, 0, 90), 1.0f, ImDrawFlags_Closed);
 		return;
 	}
 	Rng r{ look.seed };
 	const float h2 = std::fmod(look.hue + 40 + r() * 80, 360.0f);
-	LabelPainter p{ dl, to, 0, 0, 236, std::min(208.0f, visible_height) };
+	LabelPainter p{ dl, to, cx0, 0, cx1, std::min(208.0f, visible_height) };
 	/* the background: from hsl(hue 70% 16%) at the top left to hsl(h2 75% 30%) at the bottom right */
 	const ImU32 g0 = hsl(look.hue, .70f, .16f), g1 = hsl(h2, .75f, .30f);
 	auto along = [&](float x, float y) { return std::clamp((x * 236 + y * 208) / (236 * 236 + 208 * 208.0f), 0.0f, 1.0f); };
@@ -359,11 +360,82 @@ void drawLabelPart(ImDrawList *dl, const Look &look, ImFont *font, const Transfo
 		p.fill({ ImVec2(0, 168), ImVec2(236, 168), ImVec2(236, 208), ImVec2(0, 208) }, IM_COL32(3, 10, 13, 209));
 		if (font) {
 			const int start = dl->VtxBuffer.Size;
-			dl->AddText(font, 22, ImVec2(14, 196 - 22 * 0.8f), IM_COL32(0xe6, 0xf4, 0xf2, 255), look.code.c_str());
+			dl->AddText(font, 22, ImVec2(std::max(14.0f, cx0 + 4), 196 - 22 * 0.8f), IM_COL32(0xe6, 0xf4, 0xf2, 255), look.code.c_str());
 			transformFrom(dl, start, to);
 		}
 		p.fill({ ImVec2(196, 180), ImVec2(222, 180), ImVec2(222, 194), ImVec2(196, 194) }, colourOf(look));
 	}
+}
+
+/* An N64 cartridge seen from the front, as the owner's reference photo shows one: a grey shell wider
+ * than tall with an arched top, a raised centre panel set off by grooves, steps at the bottom of the
+ * side panels, and the label recessed into the centre panel (the box art, or the drawn label). The home
+ * strip and the board's slot both draw it here. */
+void drawCartridge(ImDrawList *dl, const Look &look, ImFont *font, const Transform &to, float sw, float sh, float unit, bool on,
+                   float opacity, const FlagHook &flag)
+{
+	auto P = [&](float x, float y) { return to(ImVec2(x * sw, y * sh)); };
+	auto F = [&](float x, float y) { return to(ImVec2(x, y)); };
+	auto A = [&](ImU32 c) {
+		const int base = (int)((c >> IM_COL32_A_SHIFT) & 0xff);
+		return (c & ~IM_COL32_A_MASK) | ((ImU32)std::clamp((int)(base * opacity), 0, 255) << IM_COL32_A_SHIFT);
+	};
+	auto arc = [](float x) { const float d = 2 * x - 1; return .13f * d * d; }; /* the top's curve: 0 at the middle */
+	/* the shell */
+	constexpr int kArc = 16;
+	ImVec2 shell[kArc + 1 + 4];
+	int n = 0;
+	for (int i = 0; i <= kArc; i++) {
+		const float x = (float)i / kArc;
+		shell[n++] = P(x, arc(x));
+	}
+	shell[n++] = P(1, .96f);
+	shell[n++] = P(.985f, 1);
+	shell[n++] = P(.015f, 1);
+	shell[n++] = P(0, .96f);
+	const ImU32 grey = A(IM_COL32(0x8e, 0x90, 0x95, 255)), light = A(IM_COL32(0xa2, 0xa4, 0xa9, 255)), groove = A(IM_COL32(0x6c, 0x6e, 0x73, 255)),
+	            shadow = A(IM_COL32(0x5c, 0x5e, 0x63, 255));
+	dl->AddConvexPolyFilled(shell, n, grey);
+	/* the centre panel, raised: lighter, on the same arch */
+	{
+		ImVec2 panel[kArc + 1 + 2];
+		int m = 0;
+		for (int i = 0; i <= kArc; i++) {
+			const float x = .19f + .62f * i / kArc;
+			panel[m++] = P(x, arc(x) - .005f);
+		}
+		panel[m++] = P(.81f, 1);
+		panel[m++] = P(.19f, 1);
+		dl->AddConvexPolyFilled(panel, m, light);
+	}
+	/* light from above: the lower part a little darker */
+	dl->AddRectFilledMultiColor(P(0, .45f), P(1, 1), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0), A(IM_COL32(0, 0, 0, 46)), A(IM_COL32(0, 0, 0, 46)));
+	/* the grooves either side of the centre panel */
+	for (float x : { .19f, .81f })
+		dl->AddLine(P(x, arc(x) + .01f), P(x, 1), groove, unit * 1.6f);
+	/* the steps at the bottom of the side panels */
+	for (int side = 0; side < 2; side++) {
+		auto X = [side](float x) { return side ? 1 - x : x; };
+		const ImVec2 step[4] = { P(X(.035f), 1), P(X(.035f), .70f), P(X(.13f), .70f), P(X(.13f), 1) };
+		dl->AddPolyline(step, 4, groove, unit * 1.3f);
+	}
+	/* the label's recess: a rounded inset, its edge in shadow; the label inside, filling it (the cover cropped to
+	 * the recess's shape, centred, so it keeps its proportions) */
+	const float lx = .245f * sw, ly = .085f * sh, lw = .51f * sw, lh = .83f * sh;
+	dl->AddRectFilled(F(lx - 3, ly - 3), F(lx + lw + 3, ly + lh + 3), shadow, 7 * unit);
+	{
+		const float k = std::max(lw / 236, lh / 208);
+		const float crop = std::max(0.0f, (236 - lw / k) / 2), ox = lx + lw / 2 - 118 * k;
+		drawLabelPart(dl, look, font, [&](ImVec2 v) { return F(ox + v.x * k, ly + v.y * k); }, lh / k, crop);
+	}
+	dl->AddRect(F(lx - 1, ly - 1), F(lx + lw + 1, ly + lh + 1), A(IM_COL32(0x4a, 0x4c, 0x50, 255)), 6 * unit, 1.5f * unit);
+	/* the region's flag, on the right of the label */
+	if (flag && look.region) {
+		const float fw = 22 * sw / 196;
+		flag(.86f * sw - 12 * sw / 196, .30f * sh, fw);
+	}
+	/* the shell's edge */
+	dl->AddPolyline(shell, n, A(on ? colourOf(look) : IM_COL32(0x55, 0x57, 0x5c, 255)), unit * (on ? 2.2f : 1.2f), ImDrawFlags_Closed);
 }
 
 namespace {
@@ -634,23 +706,14 @@ void drawBoard(ImDrawList *dl, ImTextureRef texture, const Projector &p, const M
 	/* the cartridge, sliding down into the slot from above */
 	if (m.has_cartridge) {
 		const float s = m.seat, e = s * s * (3 - 2 * s), off = -360 * (1 - e);
-		const float cx0 = 668, cy0 = 6 + off, cw = 610, ch = 238;
-		const ImVec2 body[6] = { ImVec2(cx0 + 30, cy0), ImVec2(cx0 + cw - 30, cy0), ImVec2(cx0 + cw, cy0 + 40),
-			                     ImVec2(cx0 + cw, cy0 + ch), ImVec2(cx0, cy0 + ch), ImVec2(cx0, cy0 + 40) };
-		dl->AddConvexPolyFilled(body, 6, alpha(IM_COL32(0x2f, 0x3a, 0x44, 255), op));
-		dl->AddRectFilledMultiColor(ImVec2(cx0, cy0 + 40), ImVec2(cx0 + cw, cy0 + ch), alpha(IM_COL32(0x26, 0x30, 0x39, 255), op),
-		                            alpha(IM_COL32(0x26, 0x30, 0x39, 255), op), alpha(IM_COL32(0x14, 0x1a, 0x20, 255), op),
-		                            alpha(IM_COL32(0x14, 0x1a, 0x20, 255), op));
-		dl->AddPolyline(body, 6, IM_COL32(255, 255, 255, (int)(41 * op)), 2.0f, ImDrawFlags_Closed);
-		for (float x = cx0 + 22; x < cx0 + 130; x += 20)
-			dl->AddRectFilled(ImVec2(x, cy0 + 60), ImVec2(x + 9, cy0 + ch - 30), IM_COL32(0, 0, 0, (int)(89 * op)));
-		for (float x = cx0 + cw - 130; x < cx0 + cw - 22; x += 20)
-			dl->AddRectFilled(ImVec2(x, cy0 + 60), ImVec2(x + 9, cy0 + ch - 30), IM_COL32(0, 0, 0, (int)(89 * op)));
-		/* the label, in its window (310 wide, 194 high: the label's top 148 of its 208) */
-		const float lw = cw - 300, k = lw / 236;
-		const ImVec2 at(cx0 + 150, cy0 + 26);
-		drawLabelPart(dl, m.shown, fonts.mono, [at, k](ImVec2 v) { return ImVec2(at.x + v.x * k, at.y + v.y * k); }, (ch - 44) / k);
-		dl->AddCircleFilled(ImVec2(cx0 + cw - 30, cy0 + 26), 6, alpha(colourOf(m.shown), e * op));
+		/* the strip's cartridge (drawCartridge), in the board's pixels: the projection bends it with the board */
+		const float ch = 238, cw = ch * 196 / 126, cx0 = 668 + (610 - cw) / 2, cy0 = 6 + off;
+		const FlagHook flag = [&](float x, float y, float w) {
+			if (m.flag)
+				m.flag(dl, m.shown.region, cx0 + x, cy0 + y, w);
+		};
+		drawCartridge(dl, m.shown, fonts.mono, [cx0, cy0](ImVec2 v) { return ImVec2(cx0 + v.x, cy0 + v.y); }, cw, ch, 1.0f, true, op, flag);
+		dl->AddCircleFilled(ImVec2(cx0 + cw - 18, cy0 + 22), 6, alpha(colourOf(m.shown), e * op));
 	}
 	dl->PopClipRect();
 	transformFrom(dl, start, [&p](ImVec2 v) { return p(v); });

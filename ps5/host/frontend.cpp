@@ -494,6 +494,7 @@ board::Look Frontend::lookFor(const Game &g) const
 		look.cover = c.first;
 		look.cover_aspect = c.second;
 	}
+	look.region = regionOf(g);
 	return look;
 }
 
@@ -593,6 +594,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 	machine_.overclock = host_.get ? host_.get("emulation.overclock") == 1 : false;
 	machine_.upscale = host_.get ? (int)std::max<int64_t>(1, host_.get("video.upscale")) : 1;
 	machine_.crt = host_.get ? host_.get("video.crt") == 1 : false;
+	machine_.flag = [this](ImDrawList *d, char region, float x, float y, float w) { flag(Ink{ d, 1.0f }, region, x, y, w); };
 	machine_.step(dt, g ? &look : nullptr);
 
 	/* the stage's light: the game's colour mixed into the dark at 38% 42% */
@@ -897,65 +899,6 @@ void Frontend::panel(ImDrawList *dl, const FrontendFonts &f, const Game &g, bool
 
 /* ---------------------------------------------------------------- HOME */
 
-/* An N64 cartridge seen from the front, as the owner's reference photo shows one: a grey shell wider
- * than tall with an arched top, a raised centre panel set off by grooves, steps at the bottom of the
- * side panels, and the label recessed into the centre panel (the box art, or the drawn label) */
-static void cartridge(ImDrawList *dl, const Ink &ink, float x0, float top, float sw, float sh, const board::Look &look, ImFont *font, bool on)
-{
-	auto P = [&](float x, float y) { return ink.at(x0 + x * sw, top + y * sh); };
-	auto arc = [](float x) { const float d = 2 * x - 1; return .13f * d * d; }; /* the top's curve: 0 at the middle */
-	/* the shell */
-	constexpr int kArc = 16;
-	ImVec2 shell[kArc + 1 + 4];
-	int n = 0;
-	for (int i = 0; i <= kArc; i++) {
-		const float x = (float)i / kArc;
-		shell[n++] = P(x, arc(x));
-	}
-	shell[n++] = P(1, .96f);
-	shell[n++] = P(.985f, 1);
-	shell[n++] = P(.015f, 1);
-	shell[n++] = P(0, .96f);
-	const ImU32 grey = IM_COL32(0x8e, 0x90, 0x95, 255), light = IM_COL32(0xa2, 0xa4, 0xa9, 255), groove = IM_COL32(0x6c, 0x6e, 0x73, 255),
-	            shadow = IM_COL32(0x5c, 0x5e, 0x63, 255);
-	dl->AddConvexPolyFilled(shell, n, grey);
-	/* the centre panel, raised: lighter, on the same arch */
-	{
-		ImVec2 panel[kArc + 1 + 2];
-		int m = 0;
-		for (int i = 0; i <= kArc; i++) {
-			const float x = .19f + .62f * i / kArc;
-			panel[m++] = P(x, arc(x) - .005f);
-		}
-		panel[m++] = P(.81f, 1);
-		panel[m++] = P(.19f, 1);
-		dl->AddConvexPolyFilled(panel, m, light);
-	}
-	/* light from above: the lower part a little darker */
-	dl->AddRectFilledMultiColor(P(0, .45f), P(1, 1), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 0), IM_COL32(0, 0, 0, 46), IM_COL32(0, 0, 0, 46));
-	/* the grooves either side of the centre panel */
-	for (float x : { .19f, .81f })
-		dl->AddLine(P(x, arc(x) + .01f), P(x, 1), groove, ink.u * 1.6f);
-	/* the steps at the bottom of the side panels */
-	for (int side = 0; side < 2; side++) {
-		auto X = [side](float x) { return side ? 1 - x : x; };
-		const ImVec2 step[4] = { P(X(.035f), 1), P(X(.035f), .70f), P(X(.13f), .70f), P(X(.13f), 1) };
-		dl->AddPolyline(step, 4, groove, ink.u * 1.3f);
-	}
-	/* the label's recess: a rounded inset, its edge in shadow; the label inside, filling it */
-	const float lx = x0 + .245f * sw, ly = top + .085f * sh, lw = .51f * sw, lh = .83f * sh;
-	ink.rect(lx - 3, ly - 3, lw + 6, lh + 6, shadow, 7);
-	dl->PushClipRect(ink.at(lx, ly), ink.at(lx + lw, ly + lh), true);
-	{
-		const float k = std::max(lw / 236, lh / 208), ox = lx + (lw - 236 * k) / 2, oy = ly;
-		board::drawLabelPart(dl, look, font, [&](ImVec2 v) { return ink.at(ox + v.x * k, oy + v.y * k); }, std::max(208.0f, lh / k));
-	}
-	dl->PopClipRect();
-	ink.frame(lx - 1, ly - 1, lw + 2, lh + 2, IM_COL32(0x4a, 0x4c, 0x50, 255), 6, 1.5f);
-	/* the shell's edge */
-	dl->AddPolyline(shell, n, on ? board::colourOf(look) : IM_COL32(0x55, 0x57, 0x5c, 255), ink.u * (on ? 2.2f : 1.2f), ImDrawFlags_Closed);
-}
-
 void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 {
 	Ink ink{ dl, u_ };
@@ -1027,9 +970,9 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		const board::Look look = lookFor(cg);
 		if (on)
 			ink.glow(x0, top, sw, sh, board::colourOf(look), 22, 10);
-		cartridge(dl, ink, x0, top, sw, sh, look, f.mono_heavy, on);
-		if (const char r = regionOf(cg))
-			flag(ink, r, x0 + sw * .86f - 12 * scale, top + sh * .30f, 22 * scale);
+		/* (the same drawing as the board's slot: board::drawCartridge) */
+		board::drawCartridge(dl, look, f.mono_heavy, [&](ImVec2 v) { return ink.at(x0 + v.x, top + v.y); }, sw, sh, ink.u, on, 1.0f,
+		                     [&](float fx, float fy, float fw) { flag(ink, look.region, x0 + fx, top + fy, fw); });
 		std::string name = titleOf(cg);
 		while (name.size() > 4 && ink.width(f.mono, 16, name) > 200)
 			name = name.substr(0, name.size() - 4) + "\xE2\x80\xA6";
