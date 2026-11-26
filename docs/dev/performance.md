@@ -105,6 +105,13 @@ Not a baseline (no benchmark mode, no fixed scene): what the owner's boot logs s
 | 2026-11-25, `33c8907` | — | The library's search of USB (60,000 entries, its budget) and the share took 10.2 s with `library.tsv` (29.9 s on the run before) |
 | 2026-11-25, `d7010d1` | — | The library's first search of an SMB share with 1,424 ROMs took 55.6 s (headers read over the network); later starts read `library.tsv` |
 
+## The performance programme
+
+The audit of 2026-11-26 and its plans are in [`perf/`](perf/implementation-roadmap.md): what each
+figure above measures and does not ([`perf/benchmark-analysis.md`](perf/benchmark-analysis.md)
+lists benchmark mode's defects M1-M8), and the Phase B protocol for a trustworthy baseline. Until
+Phase B has run, the observations above are indications, not a baseline.
+
 ## Baseline
 
 Not measured yet.

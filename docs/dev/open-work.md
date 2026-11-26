@@ -7,7 +7,7 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 | Problem | Evidence | Next step |
 | --- | --- | --- |
-| A demanding game runs below full speed at 8x | one NTSC game: depth-blending 1.2 ms a pass on the GPU, 10-12 passes a frame at 8x (wave32 and 8/16-bit arithmetic change nothing); the emulation thread ~21.5 ms a VI, the RSP's interpreter 9 ms ([`performance.md`](performance.md#first-console-observations)) | benchmark mode's upscale sweep from one probe (the same scene at 1x, 2x, 4x and 8x), then the priorities in Decisions on record |
+| Below full speed in demanding games; the 1x-to-2x drop unproven (different scenes) | the measurements in [`performance.md`](performance.md#first-console-observations); the audit in [`perf/`](perf/performance-audit.md) | the roadmap's Phase B first: benchmark-mode fixes B1-B3 (windows in emulated VIs, one clock, separate GPU tags, repeats), then the baseline B4 on the console ([`perf/implementation-roadmap.md`](perf/implementation-roadmap.md)) |
 | The front end's remaining defects | [`../frontend-audit/BUGS.md`](../frontend-audit/BUGS.md) (FE-001 to FE-004 and FE-031 fixed, see `CHANGELOG.md`) | in the order of [`../frontend-audit/ROADMAP.md`](../frontend-audit/ROADMAP.md), FE-005 next |
 | The USB search uses its whole budget (60,000 entries) at every start | boot logs 2026-11-25 (5.7-34.7 s before the share is searched) | measure which folders take it; skip known non-game folders or search places in parallel |
 | The first search of a large share is slow (1,424 ROMs: 55.6 s, headers read over SMB) | boot log 2026-11-25 | later starts read `library.tsv`; measure again before changing anything |
@@ -46,6 +46,9 @@ same commit as the change that adds or settles an item ([`workflow.md`](workflow
 
 ## Decisions on record
 
+- **RSP stores at the end of DMEM** (upstream behaviour, found by the audit): aligned `ssv`/`slv`/`sdv`
+  at 0xFFF/0xFFD/0xFF9 onwards write past DMEM into IMEM instead of wrapping
+  (`rsp_su_instructions.rs:1001-1065`). A correctness matter, kept apart from performance work.
 - **Interpreters only** (the owner, 2026-11-25): Gopher64's VR4300 and RSP interpreters are a fixed
   requirement; no recompiler or JIT in any form, nor as a roadmap item ([`workflow.md`](workflow.md)
   rule 9). The performance priorities, in order: the 1x-to-2x drop; parallel-rdp's GPU work

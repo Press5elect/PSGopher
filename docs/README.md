@@ -24,6 +24,20 @@ The index of everything written about PSGopher. The user's guide is the reposito
 | [`dev/compatibility.md`](dev/compatibility.md) | The benchmark set (by slot), the conformance results, the per-game record (by ID) |
 | [`dev/mupen64-ps5-comparison.md`](dev/mupen64-ps5-comparison.md) | PSGopher beside the PS5 port of Mupen64Plus-Next: recompilers against interpreters, 8x on the GPU, recommendations |
 
+## Performance programme (`dev/perf/`)
+
+Phase A of the performance programme (2026-11-26): an audit by specialists, each finding checked by an
+independent reviewer. The interpreters stay ([`dev/workflow.md`](dev/workflow.md) rule 9).
+
+| Document | What it holds |
+| --- | --- |
+| [`dev/perf/performance-audit.md`](dev/perf/performance-audit.md) | The work per VI on the emulation thread and the GPU, measured against inferred, the unknowns |
+| [`dev/perf/benchmark-analysis.md`](dev/perf/benchmark-analysis.md) | The measurements so far and their caveats, benchmark mode's defects, the Phase B protocol |
+| [`dev/perf/gpu-optimisation-plan.md`](dev/perf/gpu-optimisation-plan.md) | parallel-rdp: depth blending, Pre/Post, synchronisation, the upscale changed in a game, 4x as default |
+| [`dev/perf/interpreter-optimisation-plan.md`](dev/perf/interpreter-optimisation-plan.md) | The RSP and VR4300 interpreters, and the correctness tests against the original |
+| [`dev/perf/ps5-platform-optimisation.md`](dev/perf/ps5-platform-optimisation.md) | Threads and priorities, the GPU wait policy, memory, compiler target, PGO |
+| [`dev/perf/implementation-roadmap.md`](dev/perf/implementation-roadmap.md) | Phases B-E in priority order, each item with problem, evidence, change, risks, method |
+
 ## Frontend audit (`frontend-audit/`)
 
 The multi-agent audit of the front end (2026-11-25). Its bug IDs (`FE-nnn`) are cited by fixes.
