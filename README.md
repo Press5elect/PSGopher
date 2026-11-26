@@ -1,6 +1,8 @@
 # PSGopher
+<img width="3840" height="2160" alt="PSGopher_20261126210319" src="https://github.com/user-attachments/assets/a6c94ad9-86f1-48cd-9c6f-d216ef9df94c" />
+<img width="3840" height="2160" alt="PSGopher_20261126210333" src="https://github.com/user-attachments/assets/4979a8d6-bf02-49ba-96ce-3ea0a358bbc2" />
+<img width="3840" height="2160" alt="PSGopher_20261126210326" src="https://github.com/user-attachments/assets/54be3ca8-aa8c-44e5-a35d-876c9b27ee2d" />
 
-<img width="3840" height="2160" alt="PSGopher_20261125131517" src="https://github.com/user-attachments/assets/43609781-7e96-41b3-b453-aafb4a6957d9" />
 
 A native PlayStation 5 port of [Gopher64](https://github.com/gopher64/gopher64), the Nintendo 64
 emulator, for jailbroken consoles running homebrew. Gopher64's emulation is used unchanged:
