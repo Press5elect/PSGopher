@@ -23,6 +23,8 @@ The index of everything written about PSGopher. The user's guide is the reposito
 | [`dev/graphics.md`](dev/graphics.md) | parallel-rdp on RADV: why, where it comes from, the PS5 pieces, candidates |
 | [`dev/performance.md`](dev/performance.md) | Method, instrumentation, console observations, baseline, the optimisation log |
 | [`dev/compatibility.md`](dev/compatibility.md) | The benchmark set (by slot), the conformance results, the per-game record (by ID) |
+| [`dev/cartridge-art.md`](dev/cartridge-art.md) | Cartridge fronts as the library's art: identity, matching, the pipeline, the fallback order (a design) |
+| [`dev/cartridge-art-sources.md`](dev/cartridge-art-sources.md) | The cartridge image sources researched, their licences and attribution |
 | [`dev/mupen64-ps5-comparison.md`](dev/mupen64-ps5-comparison.md) | PSGopher beside the PS5 port of Mupen64Plus-Next: recompilers against interpreters, 8x on the GPU, recommendations |
 
 ## Performance programme (`dev/perf/`)
