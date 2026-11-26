@@ -63,12 +63,37 @@ Why, read from the code (not yet proven on a console):
 - **The cause is one of two.** Translation (TLB) thrash or channel conflicts would each explain the
   cliff. The measurements do not yet tell them apart.
 
-## Done since the log (2026-11-26, not yet run on a console)
+## The 8x fix (2026-11-26, measured on the console)
 
-- **"8x memory layout"** (BENCH → Video, `rdp_layout`, env `PSGOPHER_RDP_LAYOUT`): Original (0, the
-  default), Padded (1: the copies 8 MB + 4352 bytes apart, an odd multiple of 256 bytes), Per pixel
-  (2: 32-bit words permuted to `word * factor² + slice`, the 8- and 16-bit and hidden views derived
-  from it so they alias as before). The helpers are in `shaders/rdram_layout.h`; 11 modules of
+The second log of 2026-11-26 (build `8bc81c2`, the same PAL game and probe at 8x):
+
+| Layout | Speed | Depth-blending a pass | Extract-vram a VI | parallel-rdp on the CPU a VI |
+| --- | --- | --- | --- | --- |
+| Original (the first log) | 71-83% | 2.0-2.7 ms | 0.68 ms | 7-10 ms |
+| Padded | 90-99%, two stalls at 10% and 29% | 0.83-1.07 ms | 0.44 ms | 3.0-4.3 ms (19 ms in the stalls) |
+| Per pixel | **100%**, 0 underruns over 3 minutes | **0.12-0.15 ms** | **0.09 ms** | **1.5-1.9 ms** |
+
+- **Per pixel is the default** (`rdp_layout = 2`); Original (0) stays as a choice in case a game draws
+  wrongly. Padded is no longer offered and `1` is read as per pixel; its shader path remains in
+  `rdram_layout.h`, unused.
+- **What it says of the cause.** Padded removed only the channel concentration and recovered about
+  half; Per pixel removed the page spread too and recovered all of it, at 8x a pass is now only 1.2
+  times its 4x cost. So both mattered, translation (or coalescing) the more.
+- **Not yet known:**
+  - the picture with Per pixel was not reported on;
+  - supersampling and a save state loaded at 8x with Per pixel;
+  - what the Padded stalls were: parallel-rdp at 19 ms a VI on the CPU, thread CPU time 36 ms, not
+    off-CPU (1 ms).
+- **What is left at 8x is the CPU side:** the emulation thread is 17-20 ms of a 20 ms PAL VI (RSP
+  7-9 ms, VR4300 and the rest about 9 ms), so an NTSC game (16.7 ms a VI) is limited by the
+  interpreters, not the GPU.
+
+## Done before that log
+
+- **The layout switch** (`rdp_layout`, env `PSGOPHER_RDP_LAYOUT`): Original (0), Padded (1: the
+  copies 8 MB + 4352 bytes apart, an odd multiple of 256 bytes), Per pixel (2: 32-bit words permuted
+  to `word * factor² + slice`, the 8- and 16-bit and hidden views derived from it so they alias as
+  before). The helpers are in `shaders/rdram_layout.h`; 11 modules of
   `slangmosh.hpp` are made again by `ps5/tools/make-rdp-shaders.py` (glslang and spirv-opt, not
   Granite's slangmosh, which cannot be built here). Mode 0 was compared with the pristine shaders
   over 784 specialisations on the PC.
@@ -86,21 +111,14 @@ Why, read from the code (not yet proven on a console):
 
 ## Next, in order
 
-1. **The console run that decides the 8x layout.** One probe, 8x, each of the three layouts:
-   - Original first: the picture and the `gpu:` lines must be as before (the shaders were made
-     again by another compiler).
-   - Then Padded and Per pixel: depth-blending and extract-vram a pass in the `gpu:` lines, the
-     picture (with and without supersampling), a save state loaded.
-   - Padded alone fixing it means memory channels; only Per pixel fixing it means translation.
-   - The layout that wins becomes the default, the others are taken out.
-2. **Read the waits** in the same log: `submits` and `parallel-rdp off-CPU` in the window lines,
-   and the klog's `radv/ps5 submissions` line.
-3. **The interpreters, the RSP first** ([`perf/interpreter-optimisation-plan.md`](perf/interpreter-optimisation-plan.md)):
+1. **Confirm Per pixel's picture** at 8x, with supersampling, and after a save state is loaded;
+   and Original's picture (its shaders were made again by another compiler).
+2. **The interpreters, the RSP first** ([`perf/interpreter-optimisation-plan.md`](perf/interpreter-optimisation-plan.md)):
    each change through `run-lockstep.sh`, then measured on the console. An NTSC VI is 16.7 ms and
    the CPU side is about 18 ms in a demanding game.
-4. **Game start**: the upscaled RDRAM (768 MB at 8x) is zeroed twice on the CPU
+3. **Game start**: the upscaled RDRAM (768 MB at 8x) is zeroed twice on the CPU
    (`RADV_PS5_STREAM_ZERO` is not set; Granite zeroes host-visible memory again).
-5. PGO last, measured before and after on the same probe.
+4. PGO last, measured before and after on the same probe.
 
 The owner's direction (2026-11-26): no lowered default factor; 8x is to be made fast.
 

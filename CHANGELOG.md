@@ -100,12 +100,16 @@ console: the cheats, variable refresh, HDR10.
 - Changed: the 1x-to-2x question is settled by a console log: from one probe, 1x, 2x and 4x hold
   full speed in a PAL game and only 8x falls (71-83%). Depth-blending a pass costs about 20 times
   its 4x cost at 8x (not 4 times), as does every pass that touches the upscaled RDRAM.
-- Added: "8x memory layout" (BENCH's video stage, `rdp_layout`, Original by default; not yet run on
-  a console): Padded puts the upscaled RDRAM's sample copies an odd number of 256-byte steps beyond
-  8 MB apart; Per pixel stores a pixel's samples side by side, so an 8x8 tile reads 256 contiguous
-  bytes at 8x where it read 64 addresses 8 MB apart. Eleven of parallel-rdp's compiled shaders are
-  made again (`ps5/tools/make-rdp-shaders.py`); with Original they compute the same addresses as
-  before (784 specialisations compared on the PC).
+- Changed: 8x at full speed. The upscaled RDRAM keeps each pixel's samples side by side ("Upscaled
+  memory" in BENCH's video stage, `rdp_layout`, Per pixel by default), so an 8x8 tile reads 256
+  contiguous bytes at 8x where it read 64 addresses 8 MB apart. On the console, in the same PAL game
+  from one probe at 8x: depth-blending a pass 0.13 ms (was 2.0-2.7 ms), extract-vram 0.09 ms a VI
+  (was 0.68), parallel-rdp on the CPU 1.5-1.9 ms a VI (was 7-10), 100% speed for over three minutes
+  with no audio underruns (was 71-83%). Original (parallel-rdp's own layout) stays as a choice. A
+  padded stride between the copies was tried as well: about twice as fast as Original, with stalls of
+  its own; it is not offered. Eleven of parallel-rdp's compiled shaders are made again
+  (`ps5/tools/make-rdp-shaders.py`); with Original they compute the same addresses as before (784
+  specialisations compared on the PC).
 - Added: the benchmark window reports the time in the driver's submits and parallel-rdp's time off
   the CPU; RSP bursts are a VI's, not the window's total.
 - Fixed: audio underruns are not counted while the quick menu holds the game.

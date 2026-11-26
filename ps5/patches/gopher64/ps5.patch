@@ -105,7 +105,7 @@ index d4bd4a1..2b35144 100644
      rdp_build.flag(opt_flag);
      simd_build.flag(opt_flag);
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..ed345cd 100644
+index b741e0d..f848dbb 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
 @@ -20,6 +20,75 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
@@ -232,7 +232,7 @@ index b741e0d..ed345cd 100644
 +               processor->is_rdram_host_coherent() ? "shared with the GPU (host memory imported)"
 +                                                   : "copied to and from the GPU at each sync (no host memory import)",
 +               single_threaded ? "single-threaded" : "threaded", gfx_info.upscale, gfx_info.ssaa ? ", supersampled" : "");
-+  // the upscaled RDRAM's layout (PSGOPHER_RDP_LAYOUT, psgopher.ini: rdp_layout), an experiment for 8x
++  // the upscaled RDRAM's layout (PSGOPHER_RDP_LAYOUT, psgopher.ini: rdp_layout): per pixel unless asked otherwise
 +  {
 +    unsigned layout = gfx_info.upscale > 1 ? RDP::Renderer::rdram_layout_mode_from_env() : 0u;
 +    if (layout == RDP::Renderer::RdramLayoutPadded)

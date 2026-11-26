@@ -122,7 +122,7 @@ int main(void)
    CHECK(submit_count > 0.99 && submit_count < 1.01, "one submit a VI: %.2f", submit_count);
    CHECK(off_cpu > 0.4 - tol && off_cpu < 0.4 + 2 * tol, "parallel-rdp off the CPU 0.4 (a sleep; part 0 less its thread CPU time): %.2f", off_cpu);
    CHECK(rest > 1.0 - 2 * tol && rest < 1.0 + 2 * tol, "the VR4300's 1 ms is the rest: %.2f", rest);
-   CHECK(work > vi - present - limiter - 0.01 && work < vi - present - limiter + 0.01, "work = VI - present - limiter");
+   CHECK(work > vi - present - limiter - 0.02 && work < vi - present - limiter + 0.02, "work = VI - present - limiter (three values printed to 0.01)");
    /* a benchmark window ends the game; a slow moment's does not (interface.cpp asks this) */
    CHECK(!psgopher_bench_window_auto(), "a benchmark's window is not a slow moment's");
    if (failures) {

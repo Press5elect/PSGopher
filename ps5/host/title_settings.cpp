@@ -69,7 +69,7 @@ void TitleSettings::load()
 		else if (!strcmp(key, "small_types"))
 			smallTypes = !strcmp(value, "on");
 		else if (!strcmp(key, "rdp_layout"))
-			rdpLayout = (!strcmp(value, "1") || !strcmp(value, "2")) ? atoi(value) : 0;
+			rdpLayout = !strcmp(value, "0") ? 0 : 2;
 		else if (!strcmp(key, "hotkeys"))
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
@@ -127,8 +127,8 @@ bool TitleSettings::save() const
 		"# parallel-rdp use 8 and 16-bit arithmetic (it turns that off on RADV). Measured with gpu_timing\n"
 		"wave32 = %s\n"
 		"small_types = %s\n"
-		"# rdp_layout: how parallel-rdp lays out the upscaled picture's memory, an experiment for 8x: 0 its\n"
-		"# own (a copy of RDRAM per sample, 8 MiB apart), 1 the copies padded apart, 2 a pixel's samples together\n"
+		"# rdp_layout: how the upscaled copy of RDRAM is laid out: 2 a pixel's samples together (the default),\n"
+		"# 0 parallel-rdp's own (a copy of RDRAM per sample, 8 MiB apart)\n"
 		"rdp_layout = %d\n"
 		"\n"
 		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
@@ -207,10 +207,7 @@ void TitleSettings::applyHdr() const
 	else
 		unsetenv("PARALLEL_RDP_SMALL_TYPES");
 	/* the upscaled RDRAM's layout: read when the game's renderer makes its buffers (rdp_init logs it) */
-	if (rdpLayout)
-		setenv("PSGOPHER_RDP_LAYOUT", std::to_string(rdpLayout).c_str(), 1);
-	else
-		unsetenv("PSGOPHER_RDP_LAYOUT");
+	setenv("PSGOPHER_RDP_LAYOUT", rdpLayout == 0 ? "0" : "2", 1);
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");
 	setenv("PSGOPHER_SLOW_CAPTURE", slowCapture ? "1" : "0", 1);

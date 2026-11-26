@@ -367,18 +367,18 @@ int main(int argc, char **argv)
 	t.driverThread = true;
 	t.wave32 = true;
 	t.smallTypes = true;
-	CHECK(t.rdpLayout == 0);
-	t.rdpLayout = 2;
+	CHECK(t.rdpLayout == 2);
+	t.rdpLayout = 0;
 	CHECK(t.save());
 	psgopher::TitleSettings u;
 	u.file = t.file;
 	u.load();
-	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "now" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 2);
+	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "now" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0);
 	write(t.file, "display = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\nrdp_layout = 3\n");
 	psgopher::TitleSettings v;
 	v.file = t.file;
 	v.load();
-	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 0);
+	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2);
 
 	/* the shares file (OGBox's format), written and read back with the accounts encoded */
 	psgopher::ShareFile sf;
