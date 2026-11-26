@@ -6,6 +6,7 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "game_settings.h"
 #include "library.h"
 #include "shares.h"
 #include "title_settings.h"
@@ -18,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <map>
 #include <string>
 #include <thread>
 #include <vector>
@@ -39,13 +41,40 @@ static int failures = 0;
 		}                                                                           \
 	} while (0)
 
+static std::vector<std::string> g_log; /* what was said, for the checks of the log's lines */
 extern "C" void say(const char *format, ...)
 {
 	va_list args;
 	va_start(args, format);
-	std::vfprintf(stdout, format, args);
+	char line[1024];
+	std::vsnprintf(line, sizeof(line), format, args);
 	va_end(args);
-	std::fputc('\n', stdout);
+	g_log.push_back(line);
+	std::fprintf(stdout, "%s\n", line);
+}
+static bool said(const std::string &text)
+{
+	for (const std::string &l : g_log)
+		if (l == text)
+			return true;
+	return false;
+}
+
+/* Gopher64's settings, stood in for (the rows a game's own settings change) */
+static std::map<std::string, int64_t> g_gopher = { { "video.upscale", 2 }, { "video.ssaa", 0 }, { "video.crt", 0 },
+	{ "emulation.overclock", 0 }, { "input.controller_enabled.1", 0 } };
+extern "C" int64_t psgopher_setting_get(const char *name)
+{
+	const auto it = g_gopher.find(name);
+	return it == g_gopher.end() ? -1 : it->second;
+}
+extern "C" bool psgopher_setting_set(const char *name, int64_t value)
+{
+	const auto it = g_gopher.find(name);
+	if (it == g_gopher.end())
+		return false;
+	it->second = value;
+	return true;
 }
 
 /* ---------------------------------------------------------------- ps5vfs, stood in for */
@@ -130,7 +159,7 @@ extern "C" bool psgopher_rom_facts(const uint8_t *rom, size_t len, PsgopherRomFa
 }
 
 /* a ROM's first 4 KiB and more: header name, code, then in the byte order asked */
-static std::string romImage(const char *name, const char *code, const char *order, size_t size = 0x2000)
+static std::string romImage(const char *name, const char *code, const char *order, size_t size = 0x2000, unsigned char revision = 0)
 {
 	std::string rom(size, '\0');
 	const unsigned char magic[4] = { 0x80, 0x37, 0x12, 0x40 };
@@ -140,6 +169,7 @@ static std::string romImage(const char *name, const char *code, const char *orde
 	memcpy(title, name, strlen(name));
 	memcpy(&rom[0x20], title, 20);
 	memcpy(&rom[0x3B], code, 4);
+	rom[0x3F] = (char)revision;
 	if (!strcmp(order, "v64"))
 		for (size_t i = 0; i + 1 < rom.size(); i += 2)
 			std::swap(rom[i], rom[i + 1]);
@@ -339,11 +369,11 @@ int main(int argc, char **argv)
 	folders(data + "/games/n64/deep/er");
 	folders(data + "/other/a/b/c/d/e/f/g");
 	write(data + "/psgopher/roms/Alpha (U).z64", romImage("COMET KART", "NCKE", "z64", 4096));
-	write(data + "/psgopher/roms/beta.V64", romImage("MOSS TEMPLE", "NMTP", "v64"));
+	write(data + "/psgopher/roms/beta.V64", romImage("MOSS TEMPLE", "NMTP", "v64", 0x2000, 2));
 	write(data + "/psgopher/roms/packed.zip", zipNaming("inside.n64"));
 	write(data + "/psgopher/roms/notrom.zip", zipNaming("readme.txt"));
 	write(data + "/psgopher/roms/seven.7z", "7z");
-	write(data + "/games/n64/deep/er/gamma.n64", romImage("HARBOR NIGHTS", "NHNJ", "n64"));
+	write(data + "/games/n64/deep/er/gamma.n64", romImage("HARBOR NIGHTS", "NHNJ", "n64", 0x2000, 11));
 	write(data + "/games/random.7z", "7z");           /* not in an N64 folder */
 	write(data + "/games/eboot.bin", "b");            /* .bin is never listed */
 	write(data + "/other/a/b/c/d/e/f/g/toodeep.z64", "x");
@@ -410,6 +440,19 @@ int main(int argc, char **argv)
 	CHECK(find(games, "packed") && !find(games, "packed")->facts); /* a .zip: none */
 	CHECK(find(games, "Delta") && !find(games, "Delta")->facts);   /* not a ROM inside */
 	CHECK(g_facts_calls == 3);
+	/* the revision byte is kept (a game's own settings are by the code, destination and revision) */
+	CHECK(alpha->revision == 0 && beta->revision == 2 && gamma->revision == 11);
+	{
+		bool from_header = false;
+		CHECK(psgopher::gameKey(*alpha, &from_header) == "NCKE-00" && from_header);
+		CHECK(psgopher::gameKey(*beta, &from_header) == "NMTP-02" && from_header);
+		CHECK(psgopher::gameKey(*gamma, &from_header) == "NHNJ-0B" && from_header);
+		/* no header facts (a .zip): the file's name, and it says so */
+		CHECK(psgopher::gameKey(*find(games, "packed"), &from_header) == "file-packed" && !from_header);
+		psgopher::Game odd;
+		odd.name = ".a:b/c*d";
+		CHECK(psgopher::gameKey(odd) == "file-_a_b_c_d");
+	}
 	CHECK(psgopher::regionText("NCKE") == "USA" && psgopher::regionText("NHNJ") == "Japan" && psgopher::regionText("NAAP") == "Europe");
 	CHECK(psgopher::saveText(1 | 4) == "EEPROM 4K or SRAM" && psgopher::saveText(32) == "Flash" && psgopher::saveText(0) == "None");
 	CHECK(psgopher::cicText(6102) == "CIC-6102" && psgopher::cicText(0) == "Unknown");
@@ -424,6 +467,20 @@ int main(int argc, char **argv)
 	CHECK(find(again, "Delta") && find(again, "Delta")->tab == psgopher::TabNetwork && find(again, "Delta")->size == 0);
 	CHECK(find(again, "beta") && find(again, "beta")->facts && find(again, "beta")->header == "MOSS TEMPLE" &&
 		find(again, "beta")->cic == 6105 && find(again, "beta")->save == 32 && find(again, "beta")->id == "NMTP");
+	CHECK(find(again, "beta")->revision == 2 && find(again, "Alpha (U)")->revision == 0 && find(again, "gamma")->revision == 11);
+	/* a list of the version before (no revision): read back with the revision unknown, and a game's key reads the header */
+	{
+		const std::string tsv = data + "/psgopher/cache/library.tsv", kept = slurp(tsv);
+		write(tsv, "#psgopher-library 3\n0\t4096\t1\t6102\t1\t0\tNCKE\tCOMET KART\t11223344-55667788-C:45\t" + alpha->path + "\n");
+		lib.load();
+		const auto old = lib.games();
+		CHECK(old.size() == 1 && old[0].facts && old[0].revision == -1);
+		bool from_header = false;
+		CHECK(psgopher::gameKey(old[0], &from_header) == "NCKE-00" && from_header);
+		write(tsv, kept);
+		lib.load();
+		CHECK(find(lib.games(), "beta")->revision == 2);
+	}
 	/* a second search reads no header it knows */
 	lib.rescan();
 	for (int i = 0; i < 500 && lib.scanning(); i++)
@@ -495,11 +552,13 @@ int main(int argc, char **argv)
 	t.smallTypes = true;
 	CHECK(t.rdpLayout == 2);
 	t.rdpLayout = 0;
+	CHECK(t.keepGpuMemory); /* on by default */
+	t.keepGpuMemory = false;
 	CHECK(t.save());
 	psgopher::TitleSettings u;
 	u.file = t.file;
 	u.load();
-	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0);
+	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0 && !u.keepGpuMemory);
 	write(t.file, "shader_compile = now\ndisplay = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\nrdp_layout = 3\n");
 	psgopher::TitleSettings v;
 	v.file = t.file;
@@ -513,7 +572,120 @@ int main(int argc, char **argv)
 	CHECK(!w.writeHelper && !psgopher::helperEnabled() && access(t.file.c_str(), F_OK) == 0 && slurp(t.file).find("write_helper = off") != std::string::npos);
 	t.writeHelper = true;
 	CHECK(t.save() && psgopher::helperEnabled());
-	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1");
+	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1" && v.keepGpuMemory);
+
+	/* the picture rows: their defaults, the file's words, values held in range, and the table a game's settings go through */
+	{
+		psgopher::TitleSettings d;
+		CHECK(d.finalFilter == 0 && d.viBilinear == 0 && d.viAa && d.ditherFilter && d.divotFilter && !d.gammaDither && !d.nativeTexRect &&
+		      d.cropOverscan == 0 && d.downsample == 0 && d.deinterlace == 0);
+		d.finalFilter = 2, d.viBilinear = 1, d.viAa = false, d.ditherFilter = false, d.divotFilter = false, d.gammaDither = true;
+		d.nativeTexRect = true, d.cropOverscan = 16, d.downsample = 2, d.deinterlace = 1;
+		d.file = data + "/psgopher/config/picture.ini";
+		CHECK(d.save());
+		const std::string text = slurp(d.file);
+		CHECK(text.find("final_filter = nearest") != std::string::npos && text.find("vi_bilinear = on") != std::string::npos &&
+		      text.find("deinterlace = blend") != std::string::npos && text.find("crop_overscan = 16") != std::string::npos);
+		psgopher::TitleSettings e;
+		e.file = d.file;
+		e.load();
+		CHECK(e.finalFilter == 2 && e.viBilinear == 1 && !e.viAa && !e.ditherFilter && !e.divotFilter && e.gammaDither && e.nativeTexRect &&
+		      e.cropOverscan == 16 && e.downsample == 2 && e.deinterlace == 1);
+		write(d.file, "final_filter = fancy\ncrop_overscan = 11\ndownsample = 9\nvi_bilinear = maybe\ndeinterlace = weave\n");
+		psgopher::TitleSettings f;
+		f.file = d.file;
+		f.load();
+		CHECK(f.finalFilter == 0 && f.cropOverscan == 8 && f.downsample == 3 && f.viBilinear == 0 && f.deinterlace == 0);
+		/* the environment the renderer reads once a game */
+		e.applyHdr();
+		CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "nearest") && !strcmp(getenv("PSGOPHER_VI_BILINEAR"), "on") && !strcmp(getenv("PSGOPHER_VI_AA"), "0") &&
+		      !strcmp(getenv("PSGOPHER_GAMMA_DITHER"), "1") && !strcmp(getenv("PSGOPHER_NATIVE_TEXRECT"), "1") && !strcmp(getenv("PSGOPHER_CROP_OVERSCAN"), "16") &&
+		      !strcmp(getenv("PSGOPHER_DOWNSAMPLE"), "2") && !strcmp(getenv("PSGOPHER_DEINTERLACE"), "blend"));
+		psgopher::TitleSettings plain;
+		plain.applyHdr();
+		CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "sharp") && !strcmp(getenv("PSGOPHER_VI_BILINEAR"), "auto") && !strcmp(getenv("PSGOPHER_GAMMA_DITHER"), "0") &&
+		      !strcmp(getenv("PSGOPHER_DEINTERLACE"), "bob") && !strcmp(getenv("PSGOPHER_CROP_OVERSCAN"), "0"));
+		/* the table: a value in, the same out; a key that is not one */
+		CHECK(psgopher::TitleSettings::isField("downsample") && !psgopher::TitleSettings::isField("display") && !psgopher::TitleSettings::isField("hdr"));
+		psgopher::TitleSettings g;
+		CHECK(g.assign("downsample", 3) && g.value("downsample") == 3 && g.assign("shader_compile", 4) && g.shaderCompile == "4" && g.value("shader_compile") == 4);
+		CHECK(!g.assign("display", 1) && g.value("display") == -1);
+	}
+
+	/* a game's own settings (game_settings.h): the file by the game's key, applied over the global settings for the game's length and put back */
+	{
+		using namespace psgopher;
+		CHECK(gameSettingEligible("video.upscale") && gameSettingEligible("emulation.rewind") && gameSettingEligible("input.controller_enabled.2") &&
+		      gameSettingEligible("input.transfer_pak.0") && gameSettingEligible("input.emulate_vru") && gameSettingEligible("final_filter") &&
+		      gameSettingEligible("audio_buffer"));
+		CHECK(!gameSettingEligible("display") && !gameSettingEligible("hdr") && !gameSettingEligible("hotkeys") && !gameSettingEligible("video.fullscreen") &&
+		      !gameSettingEligible("input.gb_rom_path.0") && !gameSettingEligible("input.controller_enabled.7") && !gameSettingEligible("slow_capture"));
+		CHECK(loadGameSettings("NCKE-00").empty());
+		GameSettings gs;
+		gs.set("video.upscale", 4);
+		gs.set("final_filter", 2);
+		gs.set("emulation.overclock", 1);
+		gs.set("video.upscale", 8); /* (the same row again: replaced) */
+		CHECK(gs.values.size() == 3 && *gs.find("video.upscale") == 8);
+		CHECK(saveGameSettings("NCKE-00", gs));
+		CHECK(access(gameSettingsFile("NCKE-00").c_str(), F_OK) == 0 && gameSettingsFile("NCKE-00") == data + "/psgopher/config/games/NCKE-00.ini");
+		write(gameSettingsFile("NCKE-00"), slurp(gameSettingsFile("NCKE-00")) + "display = 1\nbogus = 3\n"); /* (rows that are not a game's: ignored) */
+		const GameSettings back = loadGameSettings("NCKE-00");
+		CHECK(back.values.size() == 3 && *back.find("video.upscale") == 8 && *back.find("final_filter") == 2 && *back.find("emulation.overclock") == 1 && !back.find("display"));
+		CHECK(loadGameSettings("NMTP-02").empty()); /* (another game, another revision: its own file) */
+
+		/* applied: Gopher64's config has the game's rows, the title's copy has its own; the global ones stay */
+		TitleSettings global;
+		g_log.clear();
+		{
+			GameScope scope("NCKE-00", true, global);
+			CHECK(said("settings: per-game for NCKE-00: " + back.text()));
+			CHECK(g_gopher["video.upscale"] == 8 && g_gopher["emulation.overclock"] == 1);
+			CHECK(scope.settings().finalFilter == 2 && global.finalFilter == 0);
+			CHECK(access((data + "/psgopher/config/games/restore.txt").c_str(), F_OK) == 0);
+			/* a game that did not end: the next start puts Gopher64's config back */
+			recoverGameSettings();
+			CHECK(g_gopher["video.upscale"] == 2 && g_gopher["emulation.overclock"] == 0);
+			CHECK(access((data + "/psgopher/config/games/restore.txt").c_str(), F_OK) != 0);
+			CHECK(said("settings: a game did not end: its per-game settings are taken out of Gopher64's config again (2)"));
+		}
+		CHECK(g_gopher["video.upscale"] == 2 && g_gopher["emulation.overclock"] == 0);
+		/* put back at the end, and the next game has the global settings */
+		g_gopher["video.upscale"] = 4;
+		g_log.clear();
+		{
+			GameScope scope("NCKE-00", true, global);
+			CHECK(g_gopher["video.upscale"] == 8);
+		}
+		CHECK(g_gopher["video.upscale"] == 4 && g_gopher["emulation.overclock"] == 0 && said("settings: the global settings are back"));
+		g_log.clear();
+		{
+			GameScope scope("NMTP-02", true, global);
+			CHECK(said("settings: no per-game settings for NMTP-02"));
+			CHECK(g_gopher["video.upscale"] == 4 && scope.settings().finalFilter == 0);
+		}
+		/* a game with no header facts is kept by its file's name, and the log says so */
+		{
+			GameSettings zipped;
+			zipped.set("video.crt", 1);
+			CHECK(saveGameSettings("file-packed", zipped));
+			g_log.clear();
+			GameScope scope("file-packed", false, global);
+			CHECK(said("settings: the cartridge's header could not be read: its per-game settings are kept by the file's name (file-packed)"));
+			CHECK(said("settings: per-game for file-packed: video.crt=1") && g_gopher["video.crt"] == 1);
+		}
+		CHECK(g_gopher["video.crt"] == 0);
+		/* a row Gopher64 does not have is left out; an empty file is taken away */
+		GameSettings odd;
+		odd.set("input.controller_enabled.3", 1);
+		CHECK(saveGameSettings("NXXX-01", odd));
+		{
+			g_log.clear();
+			GameScope scope("NXXX-01", true, global);
+			CHECK(said("settings: Gopher64 has no input.controller_enabled.3: left out"));
+		}
+		CHECK(saveGameSettings("NXXX-01", GameSettings{}) && access(gameSettingsFile("NXXX-01").c_str(), F_OK) != 0);
+	}
 
 	/* the shares file (OGBox's format), written and read back with the accounts encoded */
 	psgopher::ShareFile sf;

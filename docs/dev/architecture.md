@@ -19,7 +19,8 @@ comments and the changelog. Labels as in ../history/porting-analysis.md.
   │   ├── web.cpp          covers and descriptions: fetch thread and cache (D18)               C++
   │   ├── image.cpp        PNG decoding (stb_image)                                             C++
   │   ├── library.cpp      the games found on the console, USB drives and shares (D16)        C++
-  │   ├── title_settings.cpp  psgopher.ini: display, HDR10, stats (D14)                        C++
+  │   ├── title_settings.cpp  psgopher.ini: display, HDR10, stats, the picture's options (D14) C++
+  │   ├── game_settings.cpp   a game's own settings (config/games/<key>.ini), applied around a game C++
   │   ├── bench.c          benchmark mode and the live stats (D11)                             C
   │   ├── sandbox.cpp      out of the sandbox, OGBox's (D15); ps5/elevation: its helper       C++
   │   └── shares.cpp       the network shares as the front end edits them, OGBox's (D15)      C++
@@ -144,6 +145,22 @@ frame's picture and its messages are drawn into two layers, and `ps5/shaders/psg
 (Crux2's light: gamma 2.2, BT.709 to BT.2020, white and highlights, PQ) writes each 10:10:10:2 word's
 bytes into the B8G8R8A8 swapchain image. Both are off by default until a console run shows them
 working (the owner's rule for what no console has tested).
+
+The picture's options (BENCH > Video, `psgopher.ini`, a game's page) reach `interface.cpp` as
+`PSGOPHER_*` variables read once a game by `psgopher_picture_init`: the final blit's filter (Sharp
+Bilinear is `ps5/shaders/psgopher_sharp.frag`, drawn with a linear sampler; Bilinear and Nearest use the
+plain blit with the matching sampler; the CRT shader keeps Nearest), the video interface's `vi.*`
+options in `ScanoutOptions`, `RDP::Quirks` for the texture rectangles, `crop_overscan_pixels` (added to
+the widescreen letterbox's `crop_rect` when that is on), `downscale_steps` and Bob or Blend
+deinterlacing. Downsampling's steps are independent of the upscale, and SSAA downscaling still means
+all of them (`psgopher_downscale_steps`: SSAA wins, else the row's steps, never past log2 of the upscale).
+
+A game's own settings (`game_settings.cpp`) are BENCH's rows, one number each, in
+`config/games/<key>.ini` (`gameKey`: the header's game code with destination and revision, or the file's
+name with no header facts). `GameScope` applies them around `play()` in `main.cpp`: the title's rows
+go into a copy of `TitleSettings` that `applyHdr` is given (the global ones are never changed), and
+Gopher64's rows through `psgopher_setting_set`, with the globals journalled in `config/games/restore.txt`
+until the game ends (`recoverGameSettings` at the title's start puts a game that never ended right).
 
 **D15. Storage everywhere, as OGBox and Crux2.** A title's sandbox shows only part of `/data` and no
 USB drive. Before anything starts a thread (klog's capture is the first), `main` asks the bundled

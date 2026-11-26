@@ -29,6 +29,7 @@
 #include <time.h>
 #include <x86intrin.h>
 
+#include "game_settings.h"
 #include "library.h"
 #include "menu.h"
 #include "title_settings.h"
@@ -401,6 +402,7 @@ int main()
    psgopher::TitleSettings settings;
    settings.load();
    settings.applyDisplay(title_dir);
+   psgopher::recoverGameSettings(); /* (a game that did not end left its own settings in Gopher64's config) */
 
    if (exists(std::string(ROOT) + "/probe.txt")) {
       probe();
@@ -448,8 +450,8 @@ int main()
       if (!chosen.play)
          break;
       settings.load(); /* the list may have changed HDR10 */
-      settings.applyHdr();
       if (chosen.benchmark) {
+         settings.applyHdr(); /* (a benchmark runs as set: a game's own settings are not applied) */
          /* a probe's Benchmark on the board: 1x 2x 4x 8x twice, interleaved, from the probe; a short
           * window (600 VIs, 10 s of the game, after 300 of warm-up), the speed limiter as set */
          bench = Benchmark{};
@@ -464,7 +466,12 @@ int main()
          continue;
       }
       const double started = now_seconds();
-      notice = play(chosen.rom, chosen.load_state) == 0 ? std::string() : last_error();
+      {
+         /* the game's own settings over the global ones for its length (game_settings.h) */
+         psgopher::GameScope scope(chosen.key, chosen.keyFromHeader, settings);
+         scope.settings().applyHdr();
+         notice = play(chosen.rom, chosen.load_state) == 0 ? std::string() : last_error();
+      }
       if (!chosen.name.empty() && now_seconds() - started > 5) /* (one that did not start is no play) */
          psgopher::addPlayed(chosen.name, now_seconds() - started);
    }

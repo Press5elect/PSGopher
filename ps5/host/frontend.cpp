@@ -371,8 +371,32 @@ void Frontend::setView(board::View v)
 	if (v == view_)
 		return;
 	from_ = view_;
+	if (v == board::View::Bench && view_ != board::View::Bench)
+		rack_chosen_ = view_ == board::View::Rack;
 	view_ = v;
 	blend_ = 0;
+}
+
+/* a game's page: its file's settings, BENCH's place kept and the pose of BENCH's board taken */
+void Frontend::openGamePage(const Game &g)
+{
+	game_page_ = true;
+	page_game_ = g;
+	page_key_ = gameKey(g);
+	page_overrides_ = loadGameSettings(page_key_);
+	page_saved_section_ = bench_section_, page_saved_sel_ = bench_sel_;
+	bench_section_ = bench_sel_ = 0, bench_scroll_ = 0;
+	setView(board::View::Bench);
+}
+
+const GameSettings &Frontend::markersOf(const Game &g)
+{
+	if (g.path != marker_path_ || marker_version_ != version_ || marker_key_.empty()) {
+		marker_path_ = g.path, marker_version_ = version_;
+		marker_key_ = gameKey(g);
+		marker_overrides_ = loadGameSettings(marker_key_);
+	}
+	return marker_overrides_;
 }
 
 /* the games, and the play time and probes they have */
@@ -432,7 +456,7 @@ void Frontend::order()
 
 const Game *Frontend::selected() const
 {
-	if (view_ == board::View::Rack && rack_sel_ < (int)rack_.size())
+	if ((view_ == board::View::Rack || (view_ == board::View::Bench && rack_chosen_ && !game_page_)) && rack_sel_ < (int)rack_.size())
 		return &games_[rack_[rack_sel_]];
 	if (strip_sel_ < (int)strip_.size())
 		return &games_[strip_[strip_sel_]];
@@ -519,7 +543,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 	const board::Look look = g ? lookFor(*g) : board::Look{};
 
 	/* the views: L1/R1 (not while the probe picker is up) */
-	if (probes_open_ < 0) {
+	if (probes_open_ < 0 && !game_page_) {
 		static const board::View order_of_views[3] = { board::View::Home, board::View::Rack, board::View::Bench };
 		int at = view_ == board::View::Rack ? 1 : view_ == board::View::Bench ? 2 : 0;
 		if (pad.pressed & PAD_R1)
@@ -908,13 +932,8 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		else
 			probes_open_ = 0;
 	}
-	if (g && (pad.pressed & PAD_TRIANGLE)) {
-		readCheats(*g);
-		if (cheats_.empty())
-			host_.tell(g->crc.empty() ? "No cheats: this cartridge's header could not be read" : "Gopher64 has no cheats for this cartridge");
-		else
-			cheats_open_ = 0;
-	}
+	if (g && (pad.pressed & PAD_TRIANGLE))
+		openGamePage(*g);
 
 	/* the line from the strip's cartridge to the slot */
 	if (g) {
@@ -961,7 +980,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 		const float nw = ink.width(f.mono, 16, name);
 		ink.text(f.mono, 16, cx - nw / 2, top + sh + 10, on ? kText : kDim, name);
 	}
-	ink.text(f.mono, 14, 64, 1046, kDim, "L1 \xC2\xB7 R1  VIEWS      \xE2\x97\x84 \xE2\x96\xBA  CARTRIDGE      \xE2\x9C\x95  POWER ON      \xE2\x96\xA1  PROBES      \xE2\x96\xB3  CHEATS      \xE2\x97\x8B  CLOSE", .08f);
+	ink.text(f.mono, 14, 64, 1046, kDim, "L1 \xC2\xB7 R1  VIEWS      \xE2\x97\x84 \xE2\x96\xBA  CARTRIDGE      \xE2\x9C\x95  POWER ON      \xE2\x96\xA1  PROBES      \xE2\x96\xB3  GAME PAGE      \xE2\x97\x8B  CLOSE", .08f);
 }
 
 /* the probes of the chosen game, to start it from one */
@@ -1440,7 +1459,9 @@ struct Row {
 	std::function<void()> run;                   // Action, File (the picker), Bind (press a button)
 	std::function<void()> clear;                 // File, Bind: left clears
 	std::function<bool()> shown;                 // empty: always; a row that is not shown is left out of the panel (its words are still dumped)
+	std::function<int64_t()> inherited;          // a game's page: the global setting's value, shown beside Use Global Setting
 };
+constexpr int64_t kUseGlobal = -(1LL << 40);     // a game's page: the option that leaves the row to the global setting
 struct Section {
 	std::string name, part, text;
 	std::vector<Row> rows;
@@ -1649,6 +1670,11 @@ static void dumpWords(FILE *out, const std::vector<Section> &sections)
 void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 {
 	Ink ink{ dl, u_ };
+	if (game_page_ && cheats_open_ >= 0 && !cheats_.empty()) {
+		cheatPicker(dl, pad, f, page_game_); /* (the game's cheats, from its page) */
+		return;
+	}
+	cheats_open_ = -1;
 	TitleSettings *ts = host_.title;
 	auto choose = [this](const char *key, const std::string &label, const std::string &help, std::vector<Option> options, int64_t def) {
 		Row r;
@@ -1671,6 +1697,11 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			}
 		};
 		return r;
+	};
+	/* a title setting that a game can have of its own (TitleSettings::value and assign: one table) */
+	auto field_row = [&title_row](const std::string &key, const std::string &label, const std::string &help, std::vector<Option> options, int64_t def) {
+		return title_row(key, label, help, std::move(options), [key](TitleSettings &t) -> int64_t { return t.value(key); },
+		                 [key](TitleSettings &t, int64_t v) { t.assign(key, v); }, def);
 	};
 	auto info = [](const std::string &key, const std::string &label, const std::string &value, const std::string &help) {
 		Row r;
@@ -1705,11 +1736,31 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	std::vector<Section> sections;
 	/* Video */
 	{
-		Section s{ "Video", "rdp", "Controls how the picture is drawn: its resolution, smoothing and how shaders are compiled.", {} };
+		Section s{ "Video", "rdp", "Controls how the picture is drawn: its resolution, filters and smoothing, and how shaders are compiled.", {} };
 		s.rows.push_back(choose("video.upscale", "Resolution", "Determines the internal resolution as a multiple of the original N64 resolution. Higher values give a sharper picture but reduce performance.",
 		                        { { "1x", 1 }, { "2x", 2 }, { "4x", 4 }, { "8x", 8 } }, 1));
 		s.rows.push_back(choose("video.ssaa", "SSAA downscaling", "When enabled, draws the picture at a higher resolution and scales it down to the original size. Smooths edges while keeping the original sharpness. Reduces performance.",
 		                        { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(field_row("downsample", "Downsampling", "Selects how far the upscaled picture is scaled down before it is shown: to 1/2, 1/4 or 1/8 of the Resolution, never below the original size. Smooths edges and reduces sharpness. SSAA downscaling, when enabled, always scales down all the way.",
+		                           { { "Off", 0 }, { "1/2", 1 }, { "1/4", 2 }, { "1/8", 3 } }, 0));
+		s.rows.push_back(field_row("final_filter", "Final Filter", "Selects how the picture is scaled to the screen. Sharp Bilinear keeps each pixel crisp and blends only at the edges between pixels, Bilinear smooths the whole picture, and Nearest repeats pixels without blending. The CRT shader replaces this filter.",
+		                           { { "Sharp Bilinear", 0 }, { "Bilinear", 1 }, { "Nearest", 2 } }, 0));
+		s.rows.push_back(field_row("vi_bilinear", "VI Bilinear", "Selects whether the video interface smooths the picture as it scales it, as the N64 does. Auto turns the smoothing off at 4x and 8x, where the larger picture is smooth already, and leaves it on at 1x and 2x.",
+		                           { { "Auto", 0 }, { "On", 1 }, { "Off", 2 } }, 0));
+		s.rows.push_back(field_row("vi_aa", "VI Anti-Aliasing", "When enabled, applies the video interface's edge smoothing, as the N64 does. When disabled, edges stay as drawn, which is sharper but more jagged.",
+		                           { { "Off", 0 }, { "On", 1 } }, 1));
+		s.rows.push_back(field_row("dither_filter", "Dither Filter", "When enabled, applies the N64's dither filter, which smooths the dotted patterns that games use to fake extra colors. When disabled, the dots show.",
+		                           { { "Off", 0 }, { "On", 1 } }, 1));
+		s.rows.push_back(field_row("divot_filter", "Divot Filter", "When enabled, applies the N64's divot filter, which removes stray bright or dark pixels at the edges of objects. When disabled, those pixels show.",
+		                           { { "Off", 0 }, { "On", 1 } }, 1));
+		s.rows.push_back(field_row("gamma_dither", "Gamma Dither", "When enabled, applies the N64's dither to the gamma curve, which adds fine noise to gradients. When disabled, the picture has no such noise.",
+		                           { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(field_row("deinterlace", "Deinterlacing", "Selects how interlaced pictures are shown. Bob draws each field by itself, which keeps motion clean but can make thin lines flicker. Blend merges each field with the one before it, which softens flicker but can leave trails behind motion.",
+		                           { { "Bob", 0 }, { "Blend", 1 } }, 0));
+		s.rows.push_back(field_row("native_texrect", "Native-Resolution Texture Rectangles", "When enabled, draws texture rectangles, which games use for sprites and backgrounds, at the N64's resolution instead of the upscaled one. Can fix drawing errors in some games, but those parts stay soft at high resolutions.",
+		                           { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(field_row("crop_overscan", "Crop Overscan", "Selects how many pixels are cropped at each edge of the N64's picture, which hides the borders and noise that some games draw there. The picture is enlarged to fill the screen.",
+		                           { { "None", 0 }, { "8 Pixels", 8 }, { "16 Pixels", 16 } }, 0));
 		s.rows.push_back(choose("video.vsync", "VSync", "When enabled, each frame waits for the display's refresh, which prevents tearing. When disabled, frames are shown as soon as they are ready.",
 		                        { { "Off", 0 }, { "On", 1 } }, 1));
 		s.rows.push_back(title_row("shader_compile", "Shader Compiles", "Determines how many background threads compile graphics shaders. Until a shader is ready, a general and slower one is used, so the game never waits for a compile. More threads can reduce stutter.",
@@ -1728,6 +1779,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(title_row("rdp_layout", "Upscaled Memory", "Selects how the upscaled copy of the N64's memory is arranged. Per Pixel keeps each pixel's samples together and improves performance at high resolutions. Original may fix drawing errors in some games.",
 		                           { { "Per Pixel", 2 }, { "Original", 0 } }, [](TitleSettings &t) -> int64_t { return t.rdpLayout; },
 		                           [](TitleSettings &t, int64_t v) { t.rdpLayout = v == 0 ? 0 : 2; }, 2));
+		s.rows.push_back(title_row("keep_gpu_memory", "Keep GPU Memory", "When enabled, keeps large blocks of graphics memory for reuse instead of returning them to the console, which can freeze a game for seconds when it switches picture modes at high resolutions. Uses up to 768 MB more memory.",
+		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.keepGpuMemory; },
+		                           [](TitleSettings &t, int64_t v) { t.keepGpuMemory = v != 0; }, 1));
 		s.rows.push_back(title_row("slow_capture", "Slow Moments", "When enabled, a game that runs below 95% speed for 3 seconds has the next 10 seconds recorded in the log, up to three times per game. Used to find what slows a game down.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
 		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }, 1));
@@ -2017,6 +2071,57 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	/* rows that depend on the updater's state are left out while they do not apply */
 	for (Section &sc : sections)
 		sc.rows.erase(std::remove_if(sc.rows.begin(), sc.rows.end(), [](const Row &r) { return r.shown && !r.shown(); }), sc.rows.end());
+	/* a game's page: its cheats, then the rows a game can have of its own, each with Use Global Setting first
+	 * (BENCH's rows themselves, changed to read and write the game's file; the words were dumped above) */
+	if (game_page_) {
+		std::vector<Section> page;
+		{
+			Section c{ "Cheats", "slot", "", {} };
+			c.rows.push_back(action("page.cheats", "Cheats", [] { return std::string("Open"); },
+			                        "Opens the cheats Gopher64 has for this game, to turn each on or off.", [this] {
+				                        readCheats(page_game_);
+				                        if (cheats_.empty())
+					                        host_.tell(page_game_.crc.empty() ? "No cheats: this cartridge's header could not be read" : "Gopher64 has no cheats for this cartridge");
+				                        else
+					                        cheats_open_ = 0;
+			                        }));
+			page.push_back(std::move(c));
+		}
+		for (Section &sc : sections) {
+			if (sc.name != "Video" && sc.name != "Screen & Sound" && sc.name != "Emulation" && sc.name != "Controllers")
+				continue;
+			Section out{ sc.name, sc.part, "", {} };
+			for (Row &r : sc.rows) {
+				if (r.kind != Row::Choice || !gameSettingEligible(r.key))
+					continue;
+				Row p = r;
+				const std::string key = r.key;
+				p.options.insert(p.options.begin(), { "Use Global Setting", kUseGlobal });
+				p.inherited = r.get;
+				p.get = [this, key]() -> int64_t {
+					const int64_t *v = page_overrides_.find(key);
+					return v ? *v : kUseGlobal;
+				};
+				p.set = [this, key](int64_t v) {
+					if (v == kUseGlobal)
+						page_overrides_.clear(key);
+					else
+						page_overrides_.set(key, v);
+					if (!saveGameSettings(page_key_, page_overrides_) && host_.tell)
+						host_.tell("This game's settings could not be written");
+					marker_path_.clear(); /* (BENCH's markers read the file again) */
+				};
+				p.help = r.help + " Use Global Setting leaves it to the setting in BENCH.";
+				out.rows.push_back(std::move(p));
+			}
+			if (!out.rows.empty())
+				page.push_back(std::move(out));
+		}
+		for (Section &sc : page)
+			if (sc.text.empty())
+				sc.text = "Sets rows for " + titleOf(page_game_) + " only. Each starts at Use Global Setting; the other games keep the global settings.";
+		sections = std::move(page);
+	}
 	const int ns = (int)sections.size();
 	bench_section_ = std::clamp(bench_section_, 0, ns - 1);
 	Section &sec = sections[bench_section_];
@@ -2046,8 +2151,13 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			bench_sel_ = (bench_sel_ + 1) % n;
 		if (pad.repeat(PAD_UP))
 			bench_sel_ = (bench_sel_ + n - 1) % n;
-		if (pad.pressed & PAD_CIRCLE)
+		if (pad.pressed & PAD_CIRCLE) {
+			if (game_page_) {
+				game_page_ = false;
+				bench_section_ = page_saved_section_, bench_sel_ = page_saved_sel_, bench_scroll_ = 0;
+			}
 			setView(board::View::Home);
+		}
 		Row &r = sections[bench_section_].rows[std::clamp(bench_sel_, 0, (int)sections[bench_section_].rows.size() - 1)];
 		switch (r.kind) {
 		case Row::Choice: {
@@ -2113,6 +2223,19 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		ink.rect(x, y0, w, h, solid, 16);
 		ink.frame(x, y0, w, h, kAmber, 16, 2);
 		ink.text(f.display, 28, x + 28, y0 + 18, kText, sec.name, -.01f);
+		/* the game's own settings: on its page how many rows it has set, in BENCH a marker for the chosen game's */
+		const Game *marked = game_page_ ? &page_game_ : selected();
+		const GameSettings *own = game_page_ ? &page_overrides_ : marked ? &markersOf(*marked) : nullptr;
+		if (own && !own->empty()) {
+			char tag[160];
+			snprintf(tag, sizeof(tag), game_page_ ? "%zu SET FOR THIS GAME \xC2\xB7 %s" : "\xE2\x97\x86 %zu SET FOR %s", own->values.size(),
+			         game_page_ ? page_key_.c_str() : marker_key_.c_str());
+			const float tw = ink.width(f.mono_bold, 13, tag);
+			ink.text(f.mono_bold, 13, x + w - 28 - tw, y0 + 26, kAmber, tag, .06f);
+		} else if (game_page_) {
+			const float tw = ink.width(f.mono, 13, page_key_);
+			ink.text(f.mono, 13, x + w - 28 - tw, y0 + 26, kDim, page_key_, .06f);
+		}
 		const auto lines = wrap(ink, f.mono, 14, sec.text, w - 56, 2);
 		float ty = y0 + 60;
 		for (const std::string &l : lines) {
@@ -2132,6 +2255,12 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			const bool here = i == bench_sel_;
 			if (here)
 				ink.rect(x + 12, y, w - 24, rh - 4, IM_COL32(255, 182, 72, 34), 8);
+			const bool owned = own && !own->empty() && own->find(r.key) != nullptr;
+			if (owned) {
+				const float cx = x + 20, cy = y + rh / 2 - 2, d = 5;
+				const ImVec2 diamond[4] = { S(cx, cy - d), S(cx + d, cy), S(cx, cy + d), S(cx - d, cy) };
+				dl->AddConvexPolyFilled(diamond, 4, kAmber);
+			}
 			ink.text(f.mono_bold, 16, x + 28, y + 11, here ? kText : kDim, r.label);
 			/* the value, right-aligned: ◄ value ► for what left and right change */
 			std::string v;
@@ -2142,6 +2271,18 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 				for (const Option &o : r.options)
 					if (o.value == cur)
 						v = o.label;
+				if (cur == kUseGlobal && r.inherited) {
+					/* the global setting's choice, beside it */
+					const int64_t global = r.inherited();
+					for (const Option &o : r.options)
+						if (o.value == global && o.value != kUseGlobal) {
+							std::string name = o.label;
+							const size_t at = name.find(" (Default)");
+							if (at != std::string::npos)
+								name.erase(at);
+							v += " \xC2\xB7 " + name;
+						}
+				}
 				v = "\xE2\x97\x84 " + v + " \xE2\x96\xBA";
 				break;
 			}
@@ -2237,7 +2378,8 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		}
 	}
 	ink.text(f.mono, 14, 64, 1046, kDim,
-	         "L1 \xC2\xB7 R1  VIEWS      L2 \xC2\xB7 R2  SECTION      \xE2\x96\xB2 \xE2\x96\xBC  SETTING      \xE2\x97\x84 \xE2\x96\xBA  CHANGE      \xE2\x9C\x95  CHOOSE      \xE2\x97\x8B  HOME",
+	         game_page_ ? "L2 \xC2\xB7 R2  SECTION      \xE2\x96\xB2 \xE2\x96\xBC  SETTING      \xE2\x97\x84 \xE2\x96\xBA  CHANGE      \xE2\x9C\x95  CHOOSE      \xE2\x97\x8B  BACK"
+	                    : "L1 \xC2\xB7 R1  VIEWS      L2 \xC2\xB7 R2  SECTION      \xE2\x96\xB2 \xE2\x96\xBC  SETTING      \xE2\x97\x84 \xE2\x96\xBA  CHANGE      \xE2\x9C\x95  CHOOSE      \xE2\x97\x8B  HOME",
 	         .08f);
 	if (picker_sel_ >= 0)
 		filePicker(dl, pad, f);

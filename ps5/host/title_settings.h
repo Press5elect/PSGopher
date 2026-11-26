@@ -8,6 +8,7 @@
 #pragma once
 
 #include <array>
+#include <cstdint>
 #include <string>
 
 namespace psgopher {
@@ -26,8 +27,22 @@ struct TitleSettings {
 	bool slowCapture{ true };    // a slow moment in a game (below 95% for 3 s) measured into the boot log
 	bool wave32{ false };        // RADV runs compute shaders 32 wide (RADV_PERFTEST=cswave32; its default is 64)
 	bool smallTypes{ false };    // parallel-rdp's 8/16-bit arithmetic (it turns it off on RADV by default)
+	bool keepGpuMemory{ true }; // large GPU memory blocks are kept for reuse instead of given back to the kernel
+	                            // (PSGOPHER_KEEP_GPU_MEMORY: its allocations stalled the game for seconds)
 	int rdpLayout{ 2 };          // the upscaled RDRAM's layout (PSGOPHER_RDP_LAYOUT): 2 per pixel (measured at
 	                             // 8x: depth blending ~15 times faster), 0 parallel-rdp's own
+	/* the picture (BENCH > Video; vendor/gopher64/parallel-rdp/interface.cpp reads them once a game) */
+	int finalFilter{ 0 };        // the final blit's filter (PSGOPHER_FINAL_FILTER): 0 sharp bilinear, 1 bilinear, 2 nearest
+	int viBilinear{ 0 };         // the video interface's bilinear scaling (PSGOPHER_VI_BILINEAR): 0 auto (off from 4x up), 1 on, 2 off
+	bool viAa{ true };           // the video interface's anti-aliasing (PSGOPHER_VI_AA)
+	bool ditherFilter{ true };   // its dither filter (PSGOPHER_DITHER_FILTER)
+	bool divotFilter{ true };    // its divot filter (PSGOPHER_DIVOT_FILTER)
+	bool gammaDither{ false };   // its gamma dither (PSGOPHER_GAMMA_DITHER)
+	bool nativeTexRect{ false }; // texture rectangles drawn at the N64's resolution (PSGOPHER_NATIVE_TEXRECT)
+	int cropOverscan{ 0 };       // pixels cropped at each edge: 0, 8 or 16 (PSGOPHER_CROP_OVERSCAN)
+	int downsample{ 0 };         // steps the upscaled picture is scaled down by, 0..3 (PSGOPHER_DOWNSAMPLE); SSAA
+	                             // downscaling takes it all the way, whatever this says
+	int deinterlace{ 0 };        // 0 bob, 1 blend (PSGOPHER_DEINTERLACE)
 	/* the controller's hotkeys (Gopher64's: its Hotkey Activator held, the touch pad by default, and
 	 * a button): on or off, and each action's N64 button (an input profile index, -1 none); the
 	 * actions are kHotkeyActions' (psgopher.rs's HOTKEY_ACTIONS, in its order) */
@@ -40,6 +55,12 @@ struct TitleSettings {
 	/* a game can be left: by the quick menu's tap or the hotkey's Leave game */
 	bool canLeaveGame() const { return quickmenuTap || (hotkeys && hotkey[2] >= 0); }
 	std::string file;            // "" is /data/psgopher/config/psgopher.ini (the host tests give another)
+
+	/* A setting by its BENCH row's key (the rows that a game can have of its own: game_settings.h). value() is -1 for
+	 * a key that is not one; assign() is false for a key that is not one (or a value it does not take). */
+	static bool isField(const std::string &key);
+	int64_t value(const std::string &key) const;
+	bool assign(const std::string &key, int64_t v);
 
 	/* Reads the file (written with the defaults when it is missing). */
 	void load();

@@ -5,6 +5,7 @@
 #
 #   psgopher_hdr.frag                          -> psgopher_hdr_spirv.hpp      (HDR10 packing, D14)
 #   psgopher_overlay.vert, psgopher_overlay.frag -> psgopher_overlay_spirv.hpp (the quick menu)
+#   psgopher_sharp.frag                        -> psgopher_sharp_spirv.hpp    (Final Filter: Sharp Bilinear)
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
@@ -39,3 +40,5 @@ compile psgopher_overlay.vert overlay_vert
 compile psgopher_overlay.frag overlay_frag
 header "$dir/psgopher_overlay_spirv.hpp" psgopher_overlay_vertex_spirv="$tmp/overlay_vert.spv" \
     psgopher_overlay_fragment_spirv="$tmp/overlay_frag.spv"
+compile psgopher_sharp.frag sharp
+header "$dir/psgopher_sharp_spirv.hpp" psgopher_sharp_fragment_spirv="$tmp/sharp.spv"

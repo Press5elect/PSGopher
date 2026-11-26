@@ -21,21 +21,39 @@ play time and your probes (save states). It finds every N64 ROM (`.z64`, `.n64`,
 storage, and on network shares.
 
 - **HOME**: the board and the cartridge strip (recently played first). ◄ ► cartridge, ✕ power on,
-  □ power on from a probe, △ cheats. ○ asks to close PSGopher (✕ closes, ○ stays). Each cartridge shows its box art (libretro's thumbnails) and
+  □ power on from a probe, △ the game's page (its cheats and its own settings, below). ○ asks to close PSGopher (✕ closes, ○ stays). Each cartridge shows its box art (libretro's thumbnails) and
   its region's flag, the panel three lines of its Wikipedia summary, fetched once over the network
   and kept in `/data/psgopher/cache/covers`.
 - **RACK**: every cartridge on shelves, A to Z. D-pad, L2/R2 by letter (hold to keep going; the letter is shown large), ○ back to HOME, □ sort (A-Z, recently
   played, most played, size), OPTIONS show (all, played, never played, has probes, internal, USB,
   network), ✕ power on, △ seat it on the home strip.
-- **BENCH**: every setting, in sections (L2/R2): Video (resolution, SSAA downscaling, VSync, shader
-  compiles, the graphics driver's thread), Screen & Sound (CRT shader, widescreen, integer scaling,
+- **BENCH**: every setting, in sections (L2/R2): Video (resolution, SSAA downscaling, downsampling, the
+  final filter, the video interface's smoothing, anti-aliasing and filters, gamma dither, deinterlacing,
+  native-resolution texture rectangles, crop overscan, VSync, shader compiles, the graphics driver's thread), Screen & Sound (CRT shader, widescreen, integer scaling,
   the audio buffer: 33 to 133 ms, 67 by default), TV Output (59.94 Hz, 119.88 Hz or variable refresh;
   HDR10 and its brightness), Emulation (overclock, Expansion Pak, rewind, UNFLoader), Controllers
   (each port: enabled, which DualSense, its input profile, its Transfer Pak with the Game Boy
   ROM and save), Profiles (every N64 button's DualSense control: ✕ then press it; the deadzone),
   Hotkeys, Console (network shares, the sandbox, searching again, fast writes, updates, exiting) and PC Only (what
   Gopher64 has on a PC alone, and why). ▲ ▼ setting, ◄ ► change, ✕ choose; the line below says what
-  the setting does. Gopher64's settings keep its labels.
+  the setting does. Gopher64's settings keep its labels. A ◆ beside a row means the chosen game has a
+  setting of its own for it (below).
+- **A game's page** (△ on HOME): **Cheats**, and the Video, Screen & Sound, Emulation and Controllers
+  rows that a game can have of its own (each port's Enabled and Transfer Pak, Emulate VRU; not the
+  profiles or the Game Boy files). Each row starts at **Use Global Setting** (and shows what that is
+  now); choosing a value sets it for this game only, kept in
+  `/data/psgopher/config/games/<key>.ini`, the key being the cartridge header's game code with its
+  destination and revision (`NXXE-00`; a `.zip` or `.7z` has no header and is kept by its file's name).
+  When the game starts they are applied over the global settings, and after it the global settings are
+  back. ◆ marks the rows the game has set, and BENCH marks them for the chosen game. The picture rows:
+  - **Final Filter**: Sharp Bilinear (crisp pixels, blended over one output pixel at their edges; the
+    default), Bilinear or Nearest. The CRT shader, when on, takes its place.
+  - **Downsampling**: Off, 1/2, 1/4 or 1/8: the upscaled picture scaled down by that much, never below
+    the original size. SSAA downscaling, when on, always scales down all the way.
+  - **VI Bilinear** (Auto: off at 4x and 8x, on at 1x and 2x; On; Off), **VI Anti-Aliasing**,
+    **Dither Filter**, **Divot Filter** (on) and **Gamma Dither** (off).
+  - **Deinterlacing**: Bob (each field on its own) or Blend (fields merged with the one before).
+  - **Native-Resolution Texture Rectangles** (off) and **Crop Overscan** (None, 8 or 16 pixels).
 
 L1/R1 change the view. **In a game**, tap the touch pad for the quick menu: resume, take a probe
 (save state), load one, turn the stats overlay on or off (speed, frame times, audio), reset, or

@@ -70,8 +70,30 @@ void TitleSettings::load()
 			wave32 = !strcmp(value, "on");
 		else if (!strcmp(key, "small_types"))
 			smallTypes = !strcmp(value, "on");
+		else if (!strcmp(key, "keep_gpu_memory"))
+			keepGpuMemory = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "rdp_layout"))
 			rdpLayout = !strcmp(value, "0") ? 0 : 2;
+		else if (!strcmp(key, "final_filter"))
+			finalFilter = !strcmp(value, "bilinear") ? 1 : !strcmp(value, "nearest") ? 2 : 0;
+		else if (!strcmp(key, "vi_bilinear"))
+			viBilinear = !strcmp(value, "on") ? 1 : !strcmp(value, "off") ? 2 : 0;
+		else if (!strcmp(key, "vi_aa"))
+			viAa = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "dither_filter"))
+			ditherFilter = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "divot_filter"))
+			divotFilter = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "gamma_dither"))
+			gammaDither = !strcmp(value, "on");
+		else if (!strcmp(key, "native_texrect"))
+			nativeTexRect = !strcmp(value, "on");
+		else if (!strcmp(key, "crop_overscan"))
+			cropOverscan = atoi(value) >= 16 ? 16 : atoi(value) >= 8 ? 8 : 0;
+		else if (!strcmp(key, "downsample"))
+			downsample = std::clamp(atoi(value), 0, 3);
+		else if (!strcmp(key, "deinterlace"))
+			deinterlace = !strcmp(value, "blend") ? 1 : 0;
 		else if (!strcmp(key, "hotkeys"))
 			hotkeys = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "quickmenu_tap"))
@@ -96,7 +118,7 @@ bool TitleSettings::save() const
 {
 	/* the share copy reads it when a game is started from the list, which is after the list's edit saves */
 	setenv("PSGOPHER_WRITE_HELPER", writeHelper ? "1" : "0", 1);
-	char text[4096];
+	char text[16384];
 	snprintf(text, sizeof(text),
 		"# PSGopher's own settings (Gopher64's are in config.json). The game list's Settings write\n"
 		"# this file; editing it over FTP works too.\n"
@@ -138,6 +160,30 @@ bool TitleSettings::save() const
 		"# rdp_layout: how the upscaled copy of RDRAM is laid out: 2 a pixel's samples together (the default),\n"
 		"# 0 parallel-rdp's own (a copy of RDRAM per sample, 8 MiB apart)\n"
 		"rdp_layout = %d\n"
+		"# keep_gpu_memory: on keeps the GPU's large memory blocks (the upscaled picture's) for reuse instead of\n"
+		"# giving each back and asking the console for it again (which stalled games for seconds); off gives them back\n"
+		"keep_gpu_memory = %s\n"
+		"\n"
+		"# The picture (BENCH, Video). final_filter: how the picture is scaled to the screen: sharp (crisp texels, a\n"
+		"# one-pixel blend at their edges), bilinear or nearest; the CRT shader, when on, takes the filter's place\n"
+		"final_filter = %s\n"
+		"# vi_bilinear: the N64's video interface's own smoothing when it scales: auto (off from 4x up), on, off\n"
+		"vi_bilinear = %s\n"
+		"# vi_aa, dither_filter, divot_filter: the video interface's anti-aliasing and two filters: on or off;\n"
+		"# gamma_dither: its noise on the gamma curve (the N64's, a game's own choice): on or off\n"
+		"vi_aa = %s\n"
+		"dither_filter = %s\n"
+		"divot_filter = %s\n"
+		"gamma_dither = %s\n"
+		"# native_texrect: on draws texture rectangles at the N64's resolution (the renderer's own way; off draws them upscaled)\n"
+		"native_texrect = %s\n"
+		"# crop_overscan: pixels cropped at each edge of the N64's picture: 0, 8 or 16\n"
+		"crop_overscan = %d\n"
+		"# downsample: steps the upscaled picture is scaled down by (0 off, 1 half, 2 a quarter, 3 an eighth; never below\n"
+		"# the N64's resolution). SSAA downscaling (Gopher64's) takes it all the way whatever this says\n"
+		"downsample = %d\n"
+		"# deinterlace: bob shows each field on its own; blend merges each with the one before\n"
+		"deinterlace = %s\n"
 		"\n"
 		"# hotkeys: Gopher64's, its Hotkey Activator (the touch pad by default) held and a button: on or off;\n"
 		"# hotkey_<action>: the N64 button by Gopher64's input number (0 D Right, 1 D Left, 2 D Down, 3 D Up,\n"
@@ -155,7 +201,10 @@ bool TitleSettings::save() const
 		"# downloaded without asking: BENCH, Console, Check for Updates)\n"
 		"update_check = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, keepGpuMemory ? "on" : "off",
+		finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto",
+		viAa ? "on" : "off", ditherFilter ? "on" : "off", divotFilter ? "on" : "off", gammaDither ? "on" : "off", nativeTexRect ? "on" : "off",
+		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)
@@ -178,6 +227,59 @@ bool TitleSettings::save() const
 	}
 	chmod(path.c_str(), 0666);
 	return true;
+}
+
+/* The settings a game can have of its own, by their BENCH rows' keys (one table: the rows, the per-game file and its
+ * application all go through it) */
+namespace {
+struct Field {
+	const char *key;
+	int64_t (*get)(const TitleSettings &);
+	void (*set)(TitleSettings &, int64_t);
+};
+const Field kFields[] = {
+	{ "shader_compile", [](const TitleSettings &t) -> int64_t { return atoi(t.shaderCompile.c_str()); },
+	  [](TitleSettings &t, int64_t v) { t.shaderCompile = v == 4 ? "4" : "1"; } },
+	{ "driver_thread", [](const TitleSettings &t) -> int64_t { return t.driverThread; }, [](TitleSettings &t, int64_t v) { t.driverThread = v != 0; } },
+	{ "wave32", [](const TitleSettings &t) -> int64_t { return t.wave32; }, [](TitleSettings &t, int64_t v) { t.wave32 = v != 0; } },
+	{ "small_types", [](const TitleSettings &t) -> int64_t { return t.smallTypes; }, [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; } },
+	{ "rdp_layout", [](const TitleSettings &t) -> int64_t { return t.rdpLayout; }, [](TitleSettings &t, int64_t v) { t.rdpLayout = v == 0 ? 0 : 2; } },
+	{ "keep_gpu_memory", [](const TitleSettings &t) -> int64_t { return t.keepGpuMemory; }, [](TitleSettings &t, int64_t v) { t.keepGpuMemory = v != 0; } },
+	{ "audio_buffer", [](const TitleSettings &t) -> int64_t { return t.audioBuffer; },
+	  [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)std::clamp<int64_t>(v, 2, 8) / 2 * 2; } },
+	{ "final_filter", [](const TitleSettings &t) -> int64_t { return t.finalFilter; }, [](TitleSettings &t, int64_t v) { t.finalFilter = (int)std::clamp<int64_t>(v, 0, 2); } },
+	{ "vi_bilinear", [](const TitleSettings &t) -> int64_t { return t.viBilinear; }, [](TitleSettings &t, int64_t v) { t.viBilinear = (int)std::clamp<int64_t>(v, 0, 2); } },
+	{ "vi_aa", [](const TitleSettings &t) -> int64_t { return t.viAa; }, [](TitleSettings &t, int64_t v) { t.viAa = v != 0; } },
+	{ "dither_filter", [](const TitleSettings &t) -> int64_t { return t.ditherFilter; }, [](TitleSettings &t, int64_t v) { t.ditherFilter = v != 0; } },
+	{ "divot_filter", [](const TitleSettings &t) -> int64_t { return t.divotFilter; }, [](TitleSettings &t, int64_t v) { t.divotFilter = v != 0; } },
+	{ "gamma_dither", [](const TitleSettings &t) -> int64_t { return t.gammaDither; }, [](TitleSettings &t, int64_t v) { t.gammaDither = v != 0; } },
+	{ "native_texrect", [](const TitleSettings &t) -> int64_t { return t.nativeTexRect; }, [](TitleSettings &t, int64_t v) { t.nativeTexRect = v != 0; } },
+	{ "crop_overscan", [](const TitleSettings &t) -> int64_t { return t.cropOverscan; },
+	  [](TitleSettings &t, int64_t v) { t.cropOverscan = v >= 16 ? 16 : v >= 8 ? 8 : 0; } },
+	{ "downsample", [](const TitleSettings &t) -> int64_t { return t.downsample; }, [](TitleSettings &t, int64_t v) { t.downsample = (int)std::clamp<int64_t>(v, 0, 3); } },
+	{ "deinterlace", [](const TitleSettings &t) -> int64_t { return t.deinterlace; }, [](TitleSettings &t, int64_t v) { t.deinterlace = v == 1 ? 1 : 0; } },
+};
+const Field *fieldOf(const std::string &key)
+{
+	for (const Field &f : kFields)
+		if (key == f.key)
+			return &f;
+	return nullptr;
+}
+} // namespace
+
+bool TitleSettings::isField(const std::string &key) { return fieldOf(key) != nullptr; }
+int64_t TitleSettings::value(const std::string &key) const
+{
+	const Field *f = fieldOf(key);
+	return f ? f->get(*this) : -1;
+}
+bool TitleSettings::assign(const std::string &key, int64_t v)
+{
+	const Field *f = fieldOf(key);
+	if (f)
+		f->set(*this, v);
+	return f != nullptr;
 }
 
 void TitleSettings::applyDisplay(const std::string &titleDir) const
@@ -220,6 +322,19 @@ void TitleSettings::applyHdr() const
 		unsetenv("PARALLEL_RDP_SMALL_TYPES");
 	/* the upscaled RDRAM's layout: read when the game's renderer makes its buffers (rdp_init logs it) */
 	setenv("PSGOPHER_RDP_LAYOUT", rdpLayout == 0 ? "0" : "2", 1);
+	/* read when the game's device starts (vulkan/memory_allocator.cpp logs what it does) */
+	setenv("PSGOPHER_KEEP_GPU_MEMORY", keepGpuMemory ? "1" : "0", 1);
+	/* the picture: read when the game's renderer starts (rdp_init logs them) */
+	setenv("PSGOPHER_FINAL_FILTER", finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", 1);
+	setenv("PSGOPHER_VI_BILINEAR", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto", 1);
+	setenv("PSGOPHER_VI_AA", viAa ? "1" : "0", 1);
+	setenv("PSGOPHER_DITHER_FILTER", ditherFilter ? "1" : "0", 1);
+	setenv("PSGOPHER_DIVOT_FILTER", divotFilter ? "1" : "0", 1);
+	setenv("PSGOPHER_GAMMA_DITHER", gammaDither ? "1" : "0", 1);
+	setenv("PSGOPHER_NATIVE_TEXRECT", nativeTexRect ? "1" : "0", 1);
+	setenv("PSGOPHER_CROP_OVERSCAN", std::to_string(cropOverscan).c_str(), 1);
+	setenv("PSGOPHER_DOWNSAMPLE", std::to_string(downsample).c_str(), 1);
+	setenv("PSGOPHER_DEINTERLACE", deinterlace == 1 ? "blend" : "bob", 1);
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");
 	setenv("PSGOPHER_SLOW_CAPTURE", slowCapture ? "1" : "0", 1);

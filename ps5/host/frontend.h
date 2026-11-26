@@ -29,6 +29,7 @@ extern "C" {
 }
 
 #include "board.h"
+#include "game_settings.h"
 #include "imgui.h"
 #include "library.h"
 #include "title_settings.h"
@@ -135,6 +136,20 @@ private:
 	int sort_ = 0, show_ = 0;
 	int bench_section_ = 0, bench_sel_ = 0;
 	float bench_scroll_ = 0;
+	/* a game's page (Triangle on HOME): BENCH's Video, Screen & Sound, Emulation and Controllers rows for one
+	 * game, each starting at Use Global Setting (game_settings.h); BENCH's own place is kept meanwhile */
+	bool game_page_ = false;
+	Game page_game_;
+	std::string page_key_;
+	GameSettings page_overrides_;
+	int page_saved_section_ = 0, page_saved_sel_ = 0;
+	void openGamePage(const Game &g);
+	/* BENCH's markers: the chosen game's own settings (looked up once a game, again when the list changes) */
+	bool rack_chosen_ = false; // BENCH was entered from the library: its game is the rack's
+	std::string marker_path_, marker_key_;
+	GameSettings marker_overrides_;
+	unsigned marker_version_ = ~0u;
+	const GameSettings &markersOf(const Game &g);
 	std::string bench_profile_;       // the profile BENCH's Profiles section edits
 	/* binding an input: the profile and input, when it began, and whether the button that began it
 	 * was let go */

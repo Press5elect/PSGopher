@@ -184,6 +184,7 @@ void readFacts(Game &g)
 	snprintf(crc, sizeof(crc), "%02X%02X%02X%02X-%02X%02X%02X%02X-C:%02X", head[0x10], head[0x11], head[0x12], head[0x13],
 	         head[0x14], head[0x15], head[0x16], head[0x17], head[0x3E]);
 	g.crc = crc;
+	g.revision = head[0x3F];
 	PsgopherRomFacts f = {};
 	if (psgopher_rom_facts && psgopher_rom_facts(head, sizeof(head), &f)) {
 		g.cic = f.cic;
@@ -273,15 +274,15 @@ void sortGames(std::vector<Game> &games)
 void save(const std::vector<Game> &games)
 {
 	std::string text;
-	/* v3: tab, size, facts, cic, save, rumble, id, header, crc, path (the path last: it may hold
-	 * anything but a newline; the header's name has no tab) */
-	text += "#psgopher-library 3\n";
+	/* v4: tab, size, facts, cic, save, rumble, id, header, crc, revision, path (the path last: it may hold
+	 * anything but a newline; the header's name has no tab). v3 has no revision (-1: read when asked) */
+	text += "#psgopher-library 4\n";
 	for (const Game &g : games) {
 		std::string header = g.header;
 		std::replace(header.begin(), header.end(), '\t', ' ');
 		text += std::to_string(g.tab) + "\t" + std::to_string(g.size) + "\t" + (g.facts ? "1" : "0") + "\t" +
 			std::to_string(g.cic) + "\t" + std::to_string(g.save) + "\t" + (g.rumble ? "1" : "0") + "\t" +
-			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + (g.crc.empty() ? "-" : g.crc) + "\t" + g.path + "\n";
+			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + (g.crc.empty() ? "-" : g.crc) + "\t" + std::to_string(g.revision) + "\t" + g.path + "\n";
 	}
 	const std::string file = listFile(), temporary = file + ".new";
 	if (FILE *f = fopen(temporary.c_str(), "wb")) {
@@ -402,7 +403,7 @@ void Library::load()
 			}
 			std::vector<std::string> fields;
 			size_t at = 0;
-			const int count = version >= 3 ? 10 : version == 2 ? 9 : 3;
+			const int count = version >= 4 ? 11 : version == 3 ? 10 : version == 2 ? 9 : 3;
 			for (int i = 0; i < count - 1; i++) {
 				const size_t tab_at = text.find('\t', at);
 				if (tab_at == std::string::npos)
@@ -428,7 +429,9 @@ void Library::load()
 				g.header = fields[7];
 				if (version >= 3)
 					g.crc = fields[8] == "-" ? "" : fields[8];
-				else
+				if (version >= 4)
+					g.revision = std::clamp(atoi(fields[9].c_str()), -1, 255);
+				if (version < 3)
 					g.facts = false; /* read again: v2 kept no key for cheats */
 			}
 			if (!g.path.empty())
@@ -489,7 +492,7 @@ void Library::rescan()
 			for (Game &g : found) {
 				auto it = std::lower_bound(known.begin(), known.end(), g.path,
 					[](const Game &k, const std::string &path) { return k.path < path; });
-				if (it != known.end() && it->path == g.path && it->size == g.size && it->facts) {
+				if (it != known.end() && it->path == g.path && it->size == g.size && it->facts && it->revision >= 0) {
 					g.facts = true;
 					g.id = it->id;
 					g.header = it->header;
@@ -497,6 +500,7 @@ void Library::rescan()
 					g.save = it->save;
 					g.rumble = it->rumble;
 					g.crc = it->crc;
+					g.revision = it->revision;
 					continue;
 				}
 				{
@@ -540,6 +544,38 @@ std::string Library::status() const
 {
 	std::lock_guard lock(state().mutex);
 	return state().status;
+}
+
+std::string libraryRoot() { return g_root; }
+
+std::string gameKey(const Game &g, bool *from_header)
+{
+	auto clean = [](const std::string &in) {
+		std::string out;
+		for (const char c : in)
+			out += (unsigned char)c < 0x20 || c == 0x7f || strchr("/\\:*?\"<>|", c) ? '_' : c;
+		while (!out.empty() && out[0] == '.')
+			out[0] = '_';
+		return out.substr(0, 96);
+	};
+	if (g.facts && g.id.size() == 4) {
+		int revision = g.revision;
+		if (revision < 0) {
+			uint8_t head[0x1000];
+			if (readHeader(g.path, head))
+				revision = head[0x3F];
+		}
+		if (revision >= 0) {
+			if (from_header)
+				*from_header = true;
+			char suffix[8];
+			snprintf(suffix, sizeof(suffix), "-%02X", revision & 0xFF);
+			return clean(g.id) + suffix;
+		}
+	}
+	if (from_header)
+		*from_header = false;
+	return "file-" + clean(g.name);
 }
 
 void libraryUseRoot(const std::string &root)

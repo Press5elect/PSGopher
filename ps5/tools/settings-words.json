@@ -167,6 +167,50 @@
   "label": "written",
   "choices": "written"
  },
+ "keep_gpu_memory": {
+  "label": "written",
+  "choices": "written"
+ },
+ "downsample": {
+  "label": "written",
+  "choices": "written"
+ },
+ "final_filter": {
+  "label": "written",
+  "choices": "written"
+ },
+ "vi_bilinear": {
+  "label": "written",
+  "choices": "written"
+ },
+ "vi_aa": {
+  "label": "written",
+  "choices": "written"
+ },
+ "dither_filter": {
+  "label": "written",
+  "choices": "written"
+ },
+ "divot_filter": {
+  "label": "written",
+  "choices": "written"
+ },
+ "gamma_dither": {
+  "label": "written",
+  "choices": "written"
+ },
+ "deinterlace": {
+  "label": "written",
+  "choices": "written"
+ },
+ "native_texrect": {
+  "label": "written",
+  "choices": "written"
+ },
+ "crop_overscan": {
+  "label": "written",
+  "choices": "written"
+ },
  "slow_capture": {
   "label": "written",
   "choices": "written"

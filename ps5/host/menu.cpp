@@ -968,6 +968,7 @@ void Menu::play(const Game &g)
 	if (g_copy.state == 1)
 		return;
 	result.name = g.name;
+	result.key = gameKey(g, &result.keyFromHeader);
 	if (g.tab != TabNetwork) {
 		result.play = true;
 		result.rom = g.path;

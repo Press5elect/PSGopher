@@ -32,7 +32,17 @@ struct Game {
 	uint32_t save{ 0 }; // bits: 1 EEPROM 4K, 2 EEPROM 16K, 4 SRAM, 8 SRAM 768K, 16 SRAM 1M, 32 Flash
 	bool rumble{ false }; // the controllers hold a Rumble Pak by default (else a Controller Pak)
 	std::string crc;    // Gopher64's key of the game ("CRC1-CRC2-C:country": its cheats, by storage::get_game_crc)
+	int revision{ -1 }; // the header's version byte (0x3F); -1 not read (a list of an earlier version)
 };
+
+/* The key a game's own settings are kept by: the header's game code with its destination (the four letters, "NABE")
+ * and the revision byte ("NABE-01"); for a game with no header facts (.zip, .7z) "file-" and the file's name
+ * without its extension. *from_header says which. Reads the header when the list has no revision (once, a few
+ * KiB). Characters a file name cannot hold become '_'. */
+std::string gameKey(const Game &g, bool *from_header = nullptr);
+
+/* The console's /data (or the host tests' folder, libraryUseRoot) */
+std::string libraryRoot();
 
 /* "EEPROM 4K", "Flash", "EEPROM 4K or SRAM" (Gopher64's choice for a game it does not list), "None" */
 std::string saveText(uint32_t save);

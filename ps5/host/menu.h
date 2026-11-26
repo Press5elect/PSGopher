@@ -16,6 +16,8 @@ struct MenuResult {
 	std::string name;   // the game's name in the list (its play time is kept by it)
 	int load_state{ -1 }; // a probe (save state slot) to start from, -1 none
 	bool benchmark{ false }; // a benchmark from that probe (1x 2x 4x 8x), not a game to play
+	std::string key;    // the game's key for its own settings (library.h's gameKey)
+	bool keyFromHeader{ true }; // false: the key is the file's name (no header facts)
 };
 
 /* Shows the list until a game is chosen or the title is closed. `notice` is said at the top once

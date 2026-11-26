@@ -109,5 +109,5 @@ The owner's standing rules. They hold for every session and every agent.
 | `ps5/tools/merge-profiles.sh` | The console's `.profraw` files into `ps5/pgo/core.profdata` ([`building.md`](building.md#profile-guided-builds)) |
 | `ps5/tools/build-deps.sh` | libsmb2, libnfs, Dear ImGui, the fonts at their pins |
 | `ps5/tools/make-board-art.mjs` | The board's picture from `ps5/art/live-board.html` |
-| `ps5/tools/make-shaders.sh` | The overlay and HDR shaders' SPIR-V |
+| `ps5/tools/make-shaders.sh` | The overlay, HDR and sharp-bilinear shaders' SPIR-V |
 | `ps5/tests/run-host-tests.sh` | The host tests and the interface pictures |

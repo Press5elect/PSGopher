@@ -111,8 +111,45 @@ console: the cheats, variable refresh, HDR10.
   log says whether the emulated CPU and RSP or the RDP's command processing takes a slow game's time.
   Underruns are counted from the game's first audio on (before it the queue is empty by design).
 
+### Picture and per-game settings (2026-11-26)
+
+- Added: BENCH > Video has the picture's options: **Final Filter** (Sharp Bilinear, Bilinear, Nearest),
+  **Downsampling** (Off, 1/2, 1/4, 1/8), **VI Bilinear** (Auto, On, Off), **VI Anti-Aliasing**,
+  **Dither Filter**, **Divot Filter**, **Gamma Dither**, **Deinterlacing** (Bob, Blend),
+  **Native-Resolution Texture Rectangles** and **Crop Overscan** (None, 8, 16 pixels). Read once a game;
+  `video: picture:` in the boot log says what the game has. Downsampling scales the upscaled picture
+  down by that many halvings and is independent of the upscale (never below the original size);
+  SSAA downscaling keeps its meaning, all the way down, and wins when it is on. Sharp Bilinear is a
+  fragment shader (`ps5/shaders/psgopher_sharp.frag`): each texel's centre is shown flat and the
+  colors blend only across one output pixel at its edge (equal to Nearest at a whole-number scale).
+  Not yet run on a console.
+- Changed defaults (the owner's, 2026-11-26): the final blit was Nearest, it is now Sharp Bilinear;
+  the video interface's bilinear scaling was always on, it is now Auto (off at 4x and 8x); Gamma Dither
+  was on, it is now off; texture rectangles were drawn at the N64's resolution, they are now drawn
+  upscaled (Native-Resolution Texture Rectangles off); interlaced pictures were woven and blended
+  with the last frame (Bob only with SSAA downscaling), they are now Bob (Deinterlacing: Blend gives the
+  old way back); with Bob nothing is blended with the last frame any more. VI anti-aliasing, the dither
+  filter and the divot filter stay on; Crop Overscan None.
+- Added: a game's page (△ on a cartridge on HOME): Cheats, and BENCH's Video, Screen & Sound, Emulation
+  and Controllers rows, each starting at Use Global Setting, can be set for one game. They are kept in
+  `/data/psgopher/config/games/<key>.ini` (the key: the header's game code with its destination and the
+  revision byte, `NXXE-00`; a ROM with no header facts, a `.zip` or `.7z`, by its file's name, and the
+  boot log says so), applied when the game starts over the global settings and put back when it ends
+  (Gopher64's config keeps the globals in `restore.txt` meanwhile, so a game that never ended is put
+  right at the next start). The boot log has `settings: per-game for <key>: ...` or `settings: no
+  per-game settings for <key>`. BENCH marks (◆) the rows the chosen game has set. Benchmarks and
+  `autostart.txt` run on the global settings. The library list keeps each ROM's revision byte (list
+  version 4; an older list is read as it was and its keys read the header when asked).
+
 ### From the siblings (2026-11-26)
 
+- Added: large graphics memory blocks are kept for reuse (BENCH > Video > Keep GPU Memory, on by default).
+  At 8x a 640x480 interlaced picture is a 75 MiB block that was taken from the console and given back every
+  frame, and the console's kernel now and then took ~3.4 s to give one (the freezes at picture-mode
+  switches); with the setting on, a freed block of 16 MiB or more waits for the next of its size (at most
+  4 of a size, 768 MiB in all, given back when the game ends). `gpu memory:` lines in the boot log: what
+  the setting does at a game's start, any allocation over 100 ms, and a minute's count of large blocks
+  allocated, reused and given back. Not yet run on a console.
 - Fixed: the write helper was looked for at `/app0/write-broker.elf`, which is gone once the title has
   left its sandbox: it is looked for in the title folder.
 - Added: the RDP's frame step split into its parts for the freeze watchdog (the command ring, the
@@ -139,7 +176,7 @@ console: the cheats, variable refresh, HDR10.
   it had measured no gain. Parallel-rdp draws with its general shader until the state's own is
   compiled in the background, so the game never waits.
 - Changed: Gopher64's pin moved to `c9b959e5eb9e` (its per-game ROM patches in a file of their own,
-  their codes updated) and Dear ImGui's to 1.93.1.
+  their codes updated) and Dear ImGui's to master after 1.93.1.
 
 ### 8x: the memory layout experiment, the waits measured, the lockstep harness (2026-11-26)
 

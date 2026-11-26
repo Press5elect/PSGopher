@@ -10,6 +10,7 @@
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
  */
+#include "game_settings.h"
 #include "image.h"
 #include "library.h"
 #include "probe_picture.h"
@@ -536,6 +537,52 @@ int main(int argc, char **argv)
 		const psgopher::MenuResult r5 = psgopher::runMenu("");
 		CHECK(!r5.play && g_rollbacks == 1 && g_installs == 1 && g_checks == 1);
 	}
+	/* A game's page (Triangle on HOME): its rows start at Use Global Setting; Resolution and Final Filter set for
+	 * the game go to its file by its key; BENCH marks them; the game starts with them over the global settings and
+	 * the next game, which has none, with the global ones */
+	{
+		const int64_t global_upscale = g_settings["video.upscale"];
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = {
+			{ none, nullptr, 6 },
+			{ PAD_TRIANGLE, nullptr, 2 }, { none, nullptr, 6 }, { none, "25-game-page", 3 },      /* Cheats first */
+			{ R2, nullptr, 2 }, { none, "26-game-page-video", 3 },                              /* Video: Resolution */
+			{ PAD_CROSS, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, { PAD_CROSS, nullptr, 2 },      /* 1x, 2x, 4x */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 },         /* SSAA, Downsampling, Final Filter */
+			{ PAD_CROSS, nullptr, 2 }, { PAD_CROSS, nullptr, 2 },                                  /* Sharp Bilinear, Bilinear */
+			{ none, "27-game-page-set", 3 },
+			{ R2, nullptr, 2 }, { R2, nullptr, 2 }, { R2, "28-game-page-controllers", 3 },        /* Screen & Sound, Emulation, Controllers */
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 },                                    /* back to HOME */
+			{ PAD_L1, nullptr, 2 }, { none, nullptr, 8 }, { none, "29-bench-marker", 3 },        /* BENCH marks them */
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 8 },
+			{ PAD_CROSS, nullptr, 2 } };                                                         /* power on */
+		const psgopher::MenuResult rg = psgopher::runMenu("");
+		CHECK(rg.play && rg.name == "Kart Champs (U)" && rg.key == "NKAE-00" && rg.keyFromHeader);
+		CHECK(g_settings["video.upscale"] == global_upscale); /* (the page changed nothing global) */
+		const std::string file = work + "/data/psgopher/config/games/NKAE-00.ini";
+		const psgopher::GameSettings own = psgopher::loadGameSettings("NKAE-00");
+		CHECK(access(file.c_str(), F_OK) == 0 && own.values.size() == 2 && own.find("video.upscale") && *own.find("video.upscale") == 4 &&
+		      own.find("final_filter") && *own.find("final_filter") == 1);
+		psgopher::TitleSettings title;
+		{
+			psgopher::GameScope scope(rg.key, rg.keyFromHeader, title);
+			CHECK(g_settings["video.upscale"] == 4 && scope.settings().finalFilter == 1 && title.finalFilter == 0);
+			scope.settings().applyHdr();
+			CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "bilinear"));
+		}
+		CHECK(g_settings["video.upscale"] == global_upscale);
+		title.applyHdr();
+		CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "sharp"));
+		/* the next game has none */
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_RIGHT, nullptr, 2 }, { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult rn = psgopher::runMenu("");
+		CHECK(rn.play && rn.key != rg.key && !rn.key.empty());
+		{
+			psgopher::GameScope scope(rn.key, rn.keyFromHeader, title);
+			CHECK(g_settings["video.upscale"] == global_upscale && scope.settings().finalFilter == 0);
+		}
+	}
 	/* Circle and the letters (a fresh menu each): the library back to HOME, HOME asking before it
 	 * closes, L2 / R2 across the letters */
 	{
@@ -566,7 +613,7 @@ int main(int argc, char **argv)
 		const psgopher::MenuResult r3 = psgopher::runMenu(""); /* Cross on the question: the menu ends, no game */
 		CHECK(!r3.play && r3.rom.empty());
 	}
-	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask" }) {
+	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask", "25-game-page", "26-game-page-video", "27-game-page-set", "28-game-page-controllers", "29-bench-marker" }) {
 		struct stat st;
 		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);
 	}

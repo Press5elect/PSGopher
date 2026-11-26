@@ -113,10 +113,10 @@ index d4bd4a1..4b19cd4 100644
          .allowlist_function("rdp_idle")
          .allowlist_function("rdp_set_fps")
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..31004af 100644
+index b741e0d..0945665 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,94 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,106 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
@@ -126,6 +126,7 @@ index b741e0d..31004af 100644
 +#include <vector>
 +#include "psgopher_hdr_spirv.hpp"
 +#include "psgopher_overlay_spirv.hpp"
++#include "psgopher_sharp_spirv.hpp"
 +// PSGopher (PS5): HDR10 output through Crux2's RADV (its ps5/patches/mesa-27/0020): the driver retypes
 +// the framebuffers as HDR10 and reads the output's dynamic range. Weak: another driver has none.
 +extern "C" int wsi_videoout_set_hdr10(int enable) __attribute__((weak));
@@ -168,6 +169,17 @@ index b741e0d..31004af 100644
 +// GPU timing on (read at each game's start, not each frame) and its frame count
 +static bool psgopher_gpu_timing;
 +static unsigned psgopher_gpu_frames;
++// The picture options (BENCH > Video; the title's PSGOPHER_* variables, ps5/host/title_settings.cpp), read
++// once a game in rdp_init (psgopher_picture_init), not each frame. The defaults are the ones BENCH shows.
++static struct {
++  int final_filter = 0; // the final blit's filter: 0 sharp bilinear, 1 bilinear, 2 nearest (the CRT shader keeps nearest)
++  int vi_bilinear = 0;  // the video interface's own bilinear scaling: 0 auto (off from 4x up), 1 on, 2 off
++  bool vi_aa = true, dither_filter = true, divot_filter = true, gamma_dither = false;
++  bool native_tex_rect = false; // RDP::Quirks: texture rectangles drawn at the N64's resolution
++  unsigned crop_overscan = 0;   // pixels of the N64's picture cropped at each edge
++  unsigned downsample = 0;      // steps the upscaled picture is scaled down by (at most log2 of the upscale)
++  bool bob = true;              // deinterlacing: bob (the field upscaled in Y), else blend (weave with the last frame)
++} psg_picture;
 +#include <x86intrin.h>
 +// where the emulation thread is, for the freeze watchdog (ps5/host/bench.c; the numbers are bench.h's)
 +extern "C" int psgopher_where(int place);
@@ -211,7 +223,7 @@ index b741e0d..31004af 100644
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -427,6 +515,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
+@@ -427,6 +527,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
      case USER_EVENT_FAST_FORWARD:
        callback.enable_speedlimiter = !callback.enable_speedlimiter;
        break;
@@ -248,7 +260,75 @@ index b741e0d..31004af 100644
      default:
        break;
      }
-@@ -496,6 +614,26 @@ static void rdp_new_processor() {
+@@ -459,6 +589,52 @@ JoystickEvent get_joystick_event() {
+ 
+ void rdp_idle() { processor->idle(); }
+ 
++#ifdef PSGOPHER
++static void psgopher_picture_init() {
++  psg_picture = {};
++  auto word = [](const char *name, const char *fallback) {
++    const char *v = getenv(name);
++    return v && v[0] ? v : fallback;
++  };
++  auto flag = [&](const char *name, bool fallback) {
++    const char *v = word(name, fallback ? "1" : "0");
++    return v[0] == '1';
++  };
++  const char *filter = word("PSGOPHER_FINAL_FILTER", "sharp");
++  psg_picture.final_filter = !strcmp(filter, "bilinear") ? 1 : !strcmp(filter, "nearest") ? 2 : 0;
++  const char *vi = word("PSGOPHER_VI_BILINEAR", "auto");
++  psg_picture.vi_bilinear = !strcmp(vi, "on") ? 1 : !strcmp(vi, "off") ? 2 : 0;
++  psg_picture.vi_aa = flag("PSGOPHER_VI_AA", true);
++  psg_picture.dither_filter = flag("PSGOPHER_DITHER_FILTER", true);
++  psg_picture.divot_filter = flag("PSGOPHER_DIVOT_FILTER", true);
++  psg_picture.gamma_dither = flag("PSGOPHER_GAMMA_DITHER", false);
++  psg_picture.native_tex_rect = flag("PSGOPHER_NATIVE_TEXRECT", false);
++  const int crop = atoi(word("PSGOPHER_CROP_OVERSCAN", "0"));
++  psg_picture.crop_overscan = crop >= 16 ? 16 : crop >= 8 ? 8 : 0;
++  psg_picture.downsample = unsigned(std::clamp(atoi(word("PSGOPHER_DOWNSAMPLE", "0")), 0, 3));
++  psg_picture.bob = strcmp(word("PSGOPHER_DEINTERLACE", "bob"), "blend") != 0;
++  static const char *const filters[] = {"sharp bilinear", "bilinear", "nearest"};
++  static const char *const vis[] = {"auto", "on", "off"};
++  psgopher_say("video: picture: %s%s; VI bilinear %s, anti-aliasing %s, dither filter %s, divot filter %s, gamma dither %s; "
++               "native-resolution texture rectangles %s; crop %u px; downsample %u step(s); %s deinterlacing",
++               filters[psg_picture.final_filter], gfx_info.crt ? " (the CRT shader takes the place of the filter)" : "",
++               vis[psg_picture.vi_bilinear], psg_picture.vi_aa ? "on" : "off", psg_picture.dither_filter ? "on" : "off",
++               psg_picture.divot_filter ? "on" : "off", psg_picture.gamma_dither ? "on" : "off",
++               psg_picture.native_tex_rect ? "on" : "off", psg_picture.crop_overscan, psg_picture.downsample,
++               psg_picture.bob ? "bob" : "blend");
++}
++
++// The steps the picture is scaled down by: SSAA downscaling takes it all the way to the N64's resolution, else
++// the Downsampling row's steps, never more than log2 of the upscale (a picture is not scaled below 1x).
++static unsigned psgopher_downscale_steps() {
++  const unsigned full = gfx_info.upscale == 2 ? 1 : gfx_info.upscale == 4 ? 2 : gfx_info.upscale == 8 ? 3 : 0;
++  return gfx_info.ssaa ? full : std::min(psg_picture.downsample, full);
++}
++
++// how many times the picture handed to the final blit is the N64's size (for its aspect and integer scaling)
++static unsigned psgopher_display_divisor() { return std::max(1u, gfx_info.upscale >> psgopher_downscale_steps()); }
++#endif
++
+ static void rdp_new_processor() {
+   RDP::CommandProcessorFlags flags =
+       RDP::COMMAND_PROCESSOR_FLAG_HOST_VISIBLE_HIDDEN_RDRAM_BIT |
+@@ -480,6 +656,14 @@ static void rdp_new_processor() {
+   processor = new RDP::CommandProcessor(wsi->get_device(), gfx_info.RDRAM, 0,
+                                         gfx_info.RDRAM_SIZE,
+                                         gfx_info.RDRAM_SIZE / 2, flags);
++#ifdef PSGOPHER
++  {
++    // Native-Resolution Texture Rectangles (parallel-rdp draws them at 1x by default; BENCH says Off)
++    RDP::Quirks quirks;
++    quirks.set_native_resolution_tex_rect(psg_picture.native_tex_rect);
++    processor->set_quirks(quirks);
++  }
++#endif
+   g_tmem = processor->get_tmem();
+   if (!g_tmem) {
+     LOGE("Failed to get tmem\n");
+@@ -496,6 +680,26 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -275,7 +355,26 @@ index b741e0d..31004af 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -582,6 +720,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -547,10 +751,18 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+   }
+ 
+   gfx_info = _gfx_info;
++#ifdef PSGOPHER
++  psgopher_picture_init();
++#endif
+ 
+   if (gfx_info.crt) {
+     fragment_spirv = crt_fragment_spirv;
+     fragment_size = sizeof(crt_fragment_spirv);
++#ifdef PSGOPHER
++  } else if (psg_picture.final_filter == 0) {
++    fragment_spirv = psgopher_sharp_fragment_spirv; // Sharp Bilinear (ps5/shaders/psgopher_sharp.frag)
++    fragment_size = sizeof(psgopher_sharp_fragment_spirv);
++#endif
+   } else {
+     fragment_spirv = plain_fragment_spirv;
+     fragment_size = sizeof(plain_fragment_spirv);
+@@ -582,6 +794,9 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    rdp_new_processor();
@@ -285,7 +384,7 @@ index b741e0d..31004af 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -606,6 +747,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -606,6 +821,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
  
    callback.emu_running = true;
    callback.enable_speedlimiter = true;
@@ -302,7 +401,7 @@ index b741e0d..31004af 100644
    callback.paused = false;
    callback.save_state_slot = save_state_slot;
    crop_letterbox = false;
-@@ -642,6 +793,10 @@ void rdp_close() {
+@@ -642,6 +867,10 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -313,7 +412,7 @@ index b741e0d..31004af 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,6 +888,313 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,9 +962,327 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -605,7 +704,7 @@ index b741e0d..31004af 100644
 +
 +#ifdef PSGOPHER
 +// each change of what parallel-rdp scans out is logged with the time, to match a stall to a mode switch
-+static void psgopher_log_picture(const Vulkan::ImageHandle &image, unsigned upscale, bool ssaa) {
++static void psgopher_log_picture(const Vulkan::ImageHandle &image, unsigned upscale, unsigned divisor) {
 +  static unsigned last_w, last_h, last_interlaced = 2;
 +  const unsigned w = image ? image->get_width() : 0, h = image ? image->get_height() : 0;
 +  const unsigned interlaced = (psgopher_vi_control & RDP::VI_CONTROL_SERRATE_BIT) ? 1 : 0;
@@ -615,7 +714,6 @@ index b741e0d..31004af 100644
 +  struct timespec now;
 +  clock_gettime(CLOCK_MONOTONIC, &now);
 +  const unsigned long long ms = (unsigned long long)now.tv_sec * 1000u + (unsigned long long)now.tv_nsec / 1000000u;
-+  const unsigned divisor = !ssaa && upscale > 1 ? upscale : 1;
 +  if (!w)
 +    psgopher_say("video: no picture (the screen is blank) at monotonic %llu ms", ms);
 +  else
@@ -627,17 +725,56 @@ index b741e0d..31004af 100644
  static void render_frame(Vulkan::Device &device) {
    RDP::ScanoutOptions options = {};
    options.persist_frame_on_invalid_input = true;
-@@ -767,6 +1229,9 @@ static void render_frame(Vulkan::Device &device) {
++#ifdef PSGOPHER
++  // Deinterlacing: Bob upscales the field in Y (nothing is blended in); Blend weaves the fields and blends the
++  // last frame in, except with SSAA downscaling, which deinterlaces as Bob does
++  options.blend_previous_frame = !psg_picture.bob && !gfx_info.ssaa;
++  options.upscale_deinterlacing = psg_picture.bob || gfx_info.ssaa;
++  options.downscale_steps = psgopher_downscale_steps(); // (SSAA: all the way; else Downsampling's)
++  options.vi.aa = psg_picture.vi_aa;
++  options.vi.scale = psg_picture.vi_bilinear == 1 || (psg_picture.vi_bilinear == 0 && gfx_info.upscale <= 2);
++  options.vi.dither_filter = psg_picture.dither_filter;
++  options.vi.divot_filter = psg_picture.divot_filter;
++  options.vi.gamma_dither = psg_picture.gamma_dither;
++#else
+   options.blend_previous_frame = !gfx_info.ssaa;
+   options.upscale_deinterlacing = gfx_info.ssaa;
+   if (gfx_info.ssaa) {
+@@ -754,6 +1301,7 @@ static void render_frame(Vulkan::Device &device) {
+       break;
+     }
    }
++#endif
+ 
+   if (crop_letterbox && gfx_info.widescreen) {
+     options.crop_rect.enable = true;
+@@ -765,8 +1313,25 @@ static void render_frame(Vulkan::Device &device) {
+       options.crop_rect.bottom = 30;
+     }
+   }
++#ifdef PSGOPHER
++  // Crop Overscan: the same pixels off every edge (the sides in the picture's proportion: 8/3 of the
++  // rows, as parallel-rdp's own crop does), on top of the widescreen letterbox crop when that is on
++  if (psg_picture.crop_overscan) {
++    if (options.crop_rect.enable) {
++      options.crop_rect.top += psg_picture.crop_overscan;
++      options.crop_rect.bottom += psg_picture.crop_overscan;
++      options.crop_rect.left += psg_picture.crop_overscan * 8 / 3;
++      options.crop_rect.right += psg_picture.crop_overscan * 8 / 3;
++    } else {
++      options.crop_overscan_pixels = psg_picture.crop_overscan;
++    }
++  }
++#endif
  
    Vulkan::ImageHandle image = processor->scanout(options);
 +#ifdef PSGOPHER
-+  psgopher_log_picture(image, gfx_info.upscale, gfx_info.ssaa);
++  psgopher_log_picture(image, gfx_info.upscale, psgopher_display_divisor());
 +#endif
  
    Vulkan::ResourceLayout vertex_layout = {};
    Vulkan::ResourceLayout fragment_layout = {};
-@@ -776,16 +1241,51 @@ static void render_frame(Vulkan::Device &device) {
+@@ -776,16 +1341,51 @@ static void render_frame(Vulkan::Device &device) {
      fragment_layout.push_constant_size = sizeof(Push);
  
    // This request is cached.
@@ -689,7 +826,33 @@ index b741e0d..31004af 100644
  
      cmd->set_program(program);
  
-@@ -820,6 +1320,16 @@ static void render_frame(Vulkan::Device &device) {
+@@ -800,7 +1400,11 @@ static void render_frame(Vulkan::Device &device) {
+     if (image) {
+       calculate_viewport(&vp.x, &vp.y, &vp.width, &vp.height,
+                          image->get_height() /
++#ifdef PSGOPHER
++                             psgopher_display_divisor());
++#else
+                              (gfx_info.ssaa ? 1 : gfx_info.upscale));
++#endif
+ 
+       if (gfx_info.crt) {
+         // Set shader parameters
+@@ -813,13 +1417,30 @@ static void render_frame(Vulkan::Device &device) {
+         cmd->push_constants(&push, 0, sizeof(push));
+       }
+ 
++#ifdef PSGOPHER
++      // Sharp Bilinear and Bilinear read the picture with a linear sampler (the CRT shader and Nearest do not)
++      cmd->set_texture(0, 0, image->get_view(),
++                       !gfx_info.crt && psg_picture.final_filter != 2 ? Vulkan::StockSampler::LinearClamp
++                                                                       : Vulkan::StockSampler::NearestClamp);
++#else
+       cmd->set_texture(0, 0, image->get_view(),
+                        Vulkan::StockSampler::NearestClamp);
++#endif
+       cmd->set_viewport(vp);
+       // The vertices are constants in the shader.
        // Draws fullscreen quad using oversized triangle.
        cmd->draw(3);
      }
@@ -706,7 +869,7 @@ index b741e0d..31004af 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,17 +1356,44 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,17 +1467,44 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -751,7 +914,7 @@ index b741e0d..31004af 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1407,53 @@ void rdp_update_screen() {
+@@ -870,9 +1518,53 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -805,7 +968,7 @@ index b741e0d..31004af 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1485,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1596,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -821,7 +984,7 @@ index b741e0d..31004af 100644
  }
  
  size_t rdp_state_size() {
-@@ -933,6 +1520,56 @@ void rdp_save_state(uint8_t *state) {
+@@ -933,6 +1631,56 @@ void rdp_save_state(uint8_t *state) {
           &snapshot, sizeof(snapshot));
  }
  
@@ -878,7 +1041,7 @@ index b741e0d..31004af 100644
  void rdp_load_state(GFX_INFO _gfx_info, const uint8_t *state,
                      size_t state_size) {
    gfx_info = _gfx_info;
-@@ -1076,6 +1713,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -1076,6 +1824,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
@@ -891,7 +1054,7 @@ index b741e0d..31004af 100644
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1233,8 +1876,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +1987,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -905,7 +1068,7 @@ index b741e0d..31004af 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +1911,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +2022,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  
@@ -1189,6 +1352,81 @@ index 0000000..fdb8cb9
 +    0x00000010, 0x0004003d, 0x00000012, 0x00000015, 0x00000014, 0x00050057, 0x00000007, 0x00000016,
 +    0x00000011, 0x00000015, 0x00050085, 0x00000007, 0x00000017, 0x0000000c, 0x00000016, 0x0003003e,
 +    0x00000009, 0x00000017, 0x000100fd, 0x00010038,
++};
+diff --git a/parallel-rdp/psgopher_sharp_spirv.hpp b/parallel-rdp/psgopher_sharp_spirv.hpp
+new file mode 100644
+index 0000000..3039335
+--- /dev/null
++++ b/parallel-rdp/psgopher_sharp_spirv.hpp
+@@ -0,0 +1,69 @@
++// PSGopher: ps5/shaders compiled by ps5/tools/make-shaders.sh (Glslang Version: 11:15.1.0).
++// Generated: do not edit. SPDX-License-Identifier: GPL-3.0-or-later
++#pragma once
++
++static const uint32_t psgopher_sharp_fragment_spirv[] = {
++    0x07230203, 0x00010300, 0x0008000b, 0x00000058, 0x00000000, 0x00020011, 0x00000001, 0x00020011,
++    0x00000032, 0x0006000b, 0x00000001, 0x4c534c47, 0x6474732e, 0x3035342e, 0x00000000, 0x0003000e,
++    0x00000000, 0x00000001, 0x0007000f, 0x00000004, 0x00000004, 0x6e69616d, 0x00000000, 0x00000017,
++    0x0000004e, 0x00030010, 0x00000004, 0x00000007, 0x00030003, 0x00000002, 0x000001c2, 0x00040005,
++    0x00000004, 0x6e69616d, 0x00000000, 0x00040005, 0x00000009, 0x657a6973, 0x00000000, 0x00050005,
++    0x0000000d, 0x78655475, 0x65727574, 0x00000000, 0x00040005, 0x00000015, 0x65786574, 0x0000006c,
++    0x00030005, 0x00000017, 0x00565576, 0x00040005, 0x0000001b, 0x70657473, 0x00000000, 0x00040005,
++    0x0000002b, 0x6c616373, 0x00000065, 0x00040005, 0x00000034, 0x676e6172, 0x00000065, 0x00040005,
++    0x0000003b, 0x7366666f, 0x00007465, 0x00040005, 0x00000040, 0x69736e69, 0x00006564, 0x00050005,
++    0x0000004e, 0x67617246, 0x6f6c6f43, 0x00000072, 0x00040047, 0x0000000d, 0x00000021, 0x00000000,
++    0x00040047, 0x0000000d, 0x00000022, 0x00000000, 0x00040047, 0x00000017, 0x0000001e, 0x00000000,
++    0x00040047, 0x0000004e, 0x0000001e, 0x00000000, 0x00020013, 0x00000002, 0x00030021, 0x00000003,
++    0x00000002, 0x00030016, 0x00000006, 0x00000020, 0x00040017, 0x00000007, 0x00000006, 0x00000002,
++    0x00040020, 0x00000008, 0x00000007, 0x00000007, 0x00090019, 0x0000000a, 0x00000006, 0x00000001,
++    0x00000000, 0x00000000, 0x00000000, 0x00000001, 0x00000000, 0x0003001b, 0x0000000b, 0x0000000a,
++    0x00040020, 0x0000000c, 0x00000000, 0x0000000b, 0x0004003b, 0x0000000c, 0x0000000d, 0x00000000,
++    0x00040015, 0x0000000f, 0x00000020, 0x00000001, 0x0004002b, 0x0000000f, 0x00000010, 0x00000000,
++    0x00040017, 0x00000012, 0x0000000f, 0x00000002, 0x00040020, 0x00000016, 0x00000001, 0x00000007,
++    0x0004003b, 0x00000016, 0x00000017, 0x00000001, 0x00040015, 0x0000001c, 0x00000020, 0x00000000,
++    0x0004002b, 0x0000001c, 0x0000001d, 0x00000000, 0x00040020, 0x0000001e, 0x00000001, 0x00000006,
++    0x0004002b, 0x0000001c, 0x00000022, 0x00000001, 0x0004002b, 0x00000006, 0x00000028, 0x358637bd,
++    0x0005002c, 0x00000007, 0x00000029, 0x00000028, 0x00000028, 0x0004002b, 0x00000006, 0x0000002c,
++    0x3f800000, 0x0005002c, 0x00000007, 0x00000032, 0x0000002c, 0x0000002c, 0x0004002b, 0x00000006,
++    0x00000035, 0x3f000000, 0x00040017, 0x0000004c, 0x00000006, 0x00000004, 0x00040020, 0x0000004d,
++    0x00000003, 0x0000004c, 0x0004003b, 0x0000004d, 0x0000004e, 0x00000003, 0x0004002b, 0x00000006,
++    0x00000056, 0x00000000, 0x00050036, 0x00000002, 0x00000004, 0x00000000, 0x00000003, 0x000200f8,
++    0x00000005, 0x0004003b, 0x00000008, 0x00000009, 0x00000007, 0x0004003b, 0x00000008, 0x00000015,
++    0x00000007, 0x0004003b, 0x00000008, 0x0000001b, 0x00000007, 0x0004003b, 0x00000008, 0x0000002b,
++    0x00000007, 0x0004003b, 0x00000008, 0x00000034, 0x00000007, 0x0004003b, 0x00000008, 0x0000003b,
++    0x00000007, 0x0004003b, 0x00000008, 0x00000040, 0x00000007, 0x0004003d, 0x0000000b, 0x0000000e,
++    0x0000000d, 0x00040064, 0x0000000a, 0x00000011, 0x0000000e, 0x00050067, 0x00000012, 0x00000013,
++    0x00000011, 0x00000010, 0x0004006f, 0x00000007, 0x00000014, 0x00000013, 0x0003003e, 0x00000009,
++    0x00000014, 0x0004003d, 0x00000007, 0x00000018, 0x00000017, 0x0004003d, 0x00000007, 0x00000019,
++    0x00000009, 0x00050085, 0x00000007, 0x0000001a, 0x00000018, 0x00000019, 0x0003003e, 0x00000015,
++    0x0000001a, 0x00050041, 0x0000001e, 0x0000001f, 0x00000017, 0x0000001d, 0x0004003d, 0x00000006,
++    0x00000020, 0x0000001f, 0x000400cf, 0x00000006, 0x00000021, 0x00000020, 0x00050041, 0x0000001e,
++    0x00000023, 0x00000017, 0x00000022, 0x0004003d, 0x00000006, 0x00000024, 0x00000023, 0x000400d0,
++    0x00000006, 0x00000025, 0x00000024, 0x00050050, 0x00000007, 0x00000026, 0x00000021, 0x00000025,
++    0x0006000c, 0x00000007, 0x00000027, 0x00000001, 0x00000004, 0x00000026, 0x0007000c, 0x00000007,
++    0x0000002a, 0x00000001, 0x00000028, 0x00000027, 0x00000029, 0x0003003e, 0x0000001b, 0x0000002a,
++    0x0004003d, 0x00000007, 0x0000002d, 0x00000009, 0x0004003d, 0x00000007, 0x0000002e, 0x0000001b,
++    0x00050085, 0x00000007, 0x0000002f, 0x0000002d, 0x0000002e, 0x00050050, 0x00000007, 0x00000030,
++    0x0000002c, 0x0000002c, 0x00050088, 0x00000007, 0x00000031, 0x00000030, 0x0000002f, 0x0007000c,
++    0x00000007, 0x00000033, 0x00000001, 0x00000028, 0x00000031, 0x00000032, 0x0003003e, 0x0000002b,
++    0x00000033, 0x0004003d, 0x00000007, 0x00000036, 0x0000002b, 0x00050050, 0x00000007, 0x00000037,
++    0x00000035, 0x00000035, 0x00050088, 0x00000007, 0x00000038, 0x00000037, 0x00000036, 0x00050050,
++    0x00000007, 0x00000039, 0x00000035, 0x00000035, 0x00050083, 0x00000007, 0x0000003a, 0x00000039,
++    0x00000038, 0x0003003e, 0x00000034, 0x0000003a, 0x0004003d, 0x00000007, 0x0000003c, 0x00000015,
++    0x0006000c, 0x00000007, 0x0000003d, 0x00000001, 0x0000000a, 0x0000003c, 0x00050050, 0x00000007,
++    0x0000003e, 0x00000035, 0x00000035, 0x00050083, 0x00000007, 0x0000003f, 0x0000003d, 0x0000003e,
++    0x0003003e, 0x0000003b, 0x0000003f, 0x0004003d, 0x00000007, 0x00000041, 0x0000003b, 0x0004003d,
++    0x00000007, 0x00000042, 0x0000003b, 0x0004003d, 0x00000007, 0x00000043, 0x00000034, 0x0004007f,
++    0x00000007, 0x00000044, 0x00000043, 0x0004003d, 0x00000007, 0x00000045, 0x00000034, 0x0008000c,
++    0x00000007, 0x00000046, 0x00000001, 0x0000002b, 0x00000042, 0x00000044, 0x00000045, 0x00050083,
++    0x00000007, 0x00000047, 0x00000041, 0x00000046, 0x0004003d, 0x00000007, 0x00000048, 0x0000002b,
++    0x00050085, 0x00000007, 0x00000049, 0x00000047, 0x00000048, 0x00050050, 0x00000007, 0x0000004a,
++    0x00000035, 0x00000035, 0x00050081, 0x00000007, 0x0000004b, 0x00000049, 0x0000004a, 0x0003003e,
++    0x00000040, 0x0000004b, 0x0004003d, 0x0000000b, 0x0000004f, 0x0000000d, 0x0004003d, 0x00000007,
++    0x00000050, 0x00000015, 0x0006000c, 0x00000007, 0x00000051, 0x00000001, 0x00000008, 0x00000050,
++    0x0004003d, 0x00000007, 0x00000052, 0x00000040, 0x00050081, 0x00000007, 0x00000053, 0x00000051,
++    0x00000052, 0x0004003d, 0x00000007, 0x00000054, 0x00000009, 0x00050088, 0x00000007, 0x00000055,
++    0x00000053, 0x00000054, 0x00070058, 0x0000004c, 0x00000057, 0x0000004f, 0x00000055, 0x00000002,
++    0x00000056, 0x0003003e, 0x0000004e, 0x00000057, 0x000100fd, 0x00010038,
 +};
 diff --git a/src/device/cart/rom.rs b/src/device/cart/rom.rs
 index 3994201..2260fc6 100644
