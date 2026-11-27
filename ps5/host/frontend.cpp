@@ -590,8 +590,8 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 	const Game *g = selected();
 	const board::Look look = g ? lookFor(*g) : board::Look{};
 
-	/* the views: L1/R1 (not while the probe picker is up) */
-	if (probes_open_ < 0 && !game_page_) {
+	/* the views: L1/R1 (not while the probe picker or a file or folder picker is up) */
+	if (probes_open_ < 0 && !game_page_ && picker_sel_ < 0) {
 		static const board::View order_of_views[3] = { board::View::Home, board::View::Rack, board::View::Bench };
 		int at = view_ == board::View::Rack ? 1 : view_ == board::View::Bench ? 2 : 0;
 		if (pad.pressed & PAD_R1)
@@ -1027,7 +1027,7 @@ void Frontend::home(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	strip_x_ += (target - strip_x_) * std::min(1.0f, 1.0f / 60 * 9);
 	if (n == 0) {
 		ink.text(f.mono, 18, 64, 900, kDim,
-		         library().scanning() ? "Looking for cartridges\xE2\x80\xA6" : "No cartridges yet: ROMs (.z64 .n64 .v64, .zip or .7z of one) in /data, on USB drives or network shares");
+		         library().scanning() ? "Looking for cartridges\xE2\x80\xA6" : "No cartridges yet: ROMs (.z64 .n64 .v64, .zip or .7z of one; .bps .ips .ups romhacks beside their ROM) in /data, on USB drives or network shares");
 	}
 	for (int k = std::max(0, strip_sel_ - 7); k < std::min(n, strip_sel_ + 8); k++) {
 		const Game &cg = games_[strip_[k]];
@@ -1770,12 +1770,6 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		return title_row(key, label, help, std::move(options), [key](TitleSettings &t) -> int64_t { return t.value(key); },
 		                 [key](TitleSettings &t, int64_t v) { t.assign(key, v); }, def);
 	};
-	auto info = [](const std::string &key, const std::string &label, const std::string &value, const std::string &help) {
-		Row r;
-		r.kind = Row::Info, r.key = key, r.label = label, r.help = help;
-		r.value = [value] { return value; };
-		return r;
-	};
 	auto action = [](const std::string &key, const std::string &label, std::function<std::string()> value, const std::string &help, std::function<void()> run) {
 		Row r;
 		r.kind = Row::Action, r.key = key, r.label = label, r.help = help, r.value = std::move(value), r.run = std::move(run);
@@ -1894,8 +1888,29 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		                        { { "Off", 0 }, { "On", 1 } }, 0));
 		s.rows.push_back(field_row("expansion_pak", "Expansion Pak", "Selects whether the N64 has the 8 MB it has with the Expansion Pak or its standard 4 MB. Auto turns it on, except for a game that misbehaves with it. Some games need the Expansion Pak, and a few misbehave with it.",
 		                           { { "Auto", PakAuto }, { "On", PakOn }, { "Off", PakOff } }, PakAuto));
+		{
+			/* the 64DD's IPL: Gopher64 takes the first 4 MB file in data/64dd whose region suits the disk */
+			Row r;
+			r.kind = Row::Info, r.key = "dd_ipl", r.label = "64DD IPL";
+			r.help = "Shows the 64DD IPL that starts 64DD disks: a 4 MB dump of the IPL, placed in \"/data/psgopher/data/64dd\". Disks are listed with the cartridges.";
+			r.value = [] {
+				const std::string folder = libraryRoot() + "/psgopher/data/64dd";
+				std::string found;
+				if (DIR *d = opendir(folder.c_str())) {
+					while (dirent *e = readdir(d)) {
+						struct stat st;
+						if (e->d_name[0] != '.' && stat((folder + "/" + e->d_name).c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_size == 4 * 1024 * 1024) {
+							found = e->d_name;
+							break;
+						}
+					}
+					closedir(d);
+				}
+				return found.empty() ? std::string("Not Found") : found;
+			};
+			s.rows.push_back(r);
+		}
 		s.rows.push_back(choose("emulation.rewind", "Enable Rewind", "When enabled, keeps a snapshot every second so the Rewind hotkey can go back in time. Uses additional memory.", { { "Off", 0 }, { "On", 1 } }, 0));
-		s.rows.push_back(choose("emulation.usb", "Emulate UNFLoader", "When enabled, emulates the USB link of development cartridges that homebrew uses. Not supported on PS5.", { { "Off", 0 }, { "On", 1 } }, 0));
 		sections.push_back(std::move(s));
 	}
 	/* Controllers */
@@ -2001,13 +2016,6 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		dead.get = [this] { return host_.profile_number ? host_.profile_number(bench_profile_, 0, 0, false) : 0; };
 		dead.set = [this](int64_t v) { if (host_.profile_number) host_.profile_number(bench_profile_, 0, v, true); };
 		s.rows.push_back(dead);
-		Row raw;
-		raw.key = "profile.dinput", raw.has_def = true, raw.def = 0;
-		raw.label = "Use DirectInput", raw.help = "When enabled, reads a raw joystick instead of a gamepad. The bindings are then those of a joystick, which can only be made on a PC.";
-		raw.options = { { "Off", 0 }, { "On", 1 } };
-		raw.get = [this] { return host_.profile_number ? host_.profile_number(bench_profile_, 1, 0, false) : 0; };
-		raw.set = [this](int64_t v) { if (host_.profile_number) host_.profile_number(bench_profile_, 1, v, true); };
-		s.rows.push_back(raw);
 		sections.push_back(std::move(s));
 	}
 	/* Hotkeys */
@@ -2126,15 +2134,6 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			s.rows.push_back(r);
 		}
 		s.rows.push_back(action("console.exit", "Exit to Home Screen", [] { return std::string("Exit"); }, "Closes the title and returns to the home screen of the console.", [this] { if (host_.close) host_.close(); }));
-		sections.push_back(std::move(s));
-	}
-	/* What Gopher64 has on a PC only */
-	{
-		Section s{ "PC Only", "slot", "Shows the Gopher64 settings that are not available on PS5, and why.", {} };
-		s.rows.push_back(info("video.fullscreen", "Fullscreen", "Always On", "The picture always fills the whole screen."));
-		s.rows.push_back(info("pc.keyboard", "Keyboard Bindings", "No Keyboard", "On a PC, the first binding of each input is a keyboard key. On PS5, the second binding, the controller's, is used."));
-		s.rows.push_back(info("pc.library", "Theme, ROM Folder, Recent ROMs", "The Library", "Gopher64's window holds these. The game library takes their place here."));
-		s.rows.push_back(info("pc.network", "Netplay, RetroAchievements", "Not Available", "Both need network features that are not available on PS5."));
 		sections.push_back(std::move(s));
 	}
 	if (g_settings_words_dump) {

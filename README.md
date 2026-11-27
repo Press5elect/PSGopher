@@ -26,6 +26,15 @@ storage, and on network shares. To search only some folders (a large USB drive i
 whole), choose them in BENCH > Console > Game Folders: then only they, `/data/psgopher/roms` and the
 network shares are searched.
 
+**Romhacks**: put the patch (`.bps`, `.ips` or `.ups`) beside the ROM it was made for, with the
+ROM's name (`game.z64` and `game.bps`), or anywhere for a BPS or UPS patch: PSGopher finds its ROM
+by size and checksum. The patch is listed as its own cartridge and applied when it starts; your
+ROM is not changed.
+
+**64DD disks** (`.ndd`, `.d64`) are listed with the cartridges. They need the 64DD's IPL, which is
+not included: put your 4 MB dump of it in `/data/psgopher/data/64dd` (BENCH > Emulation > 64DD IPL
+shows the one found). Disk writes are kept beside your saves; the disk image is never changed.
+
 - **HOME**: the board and the cartridge strip (recently played first). ◄ ► cartridge, ✕ power on,
   □ power on from a probe, △ the game's page (its cheats and its own settings, below). ○ asks to close PSGopher (✕ closes, ○ stays). Each cartridge shows its box art (libretro's thumbnails) and
   its region's flag, the panel three lines of its Wikipedia summary, fetched once over the network
@@ -37,11 +46,11 @@ network shares are searched.
   final filter, the video interface's smoothing, anti-aliasing and filters, gamma dither, deinterlacing,
   native-resolution texture rectangles, crop overscan, VSync, shader compiles, the graphics driver's thread), Screen & Sound (CRT shader, widescreen, integer scaling,
   the audio buffer: 33 to 133 ms, 67 by default), TV Output (59.94 Hz, 119.88 Hz or variable refresh;
-  HDR10 and its brightness), Emulation (overclock, Expansion Pak: Auto, On or Off, rewind, UNFLoader), Controllers
+  HDR10 and its brightness), Emulation (overclock, Expansion Pak: Auto, On or Off, the 64DD IPL, rewind), Controllers
   (each port: enabled, which DualSense, its input profile, its Transfer Pak with the Game Boy
   ROM and save), Profiles (every N64 button's DualSense control: ✕ then press it; the deadzone),
-  Hotkeys, Console (network shares, the sandbox, searching again, fast writes, updates, exiting) and PC Only (what
-  Gopher64 has on a PC alone, and why). ▲ ▼ setting, ◄ ► change, ✕ choose; the line below says what
+  Hotkeys and Console (network shares, the sandbox, game folders, searching again, fast writes,
+  updates, exiting). ▲ ▼ setting, ◄ ► change, ✕ choose; the line below says what
   the setting does. Gopher64's settings keep its labels. A ◆ beside a row means the chosen game has a
   setting of its own for it (below).
 - **The Expansion Pak** (the N64's extra 4 MB): PSGopher knows which games need it, which use it for more

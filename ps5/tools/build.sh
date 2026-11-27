@@ -91,6 +91,7 @@ compile -std=c++20 title_settings.o "$root/ps5/host/title_settings.cpp"
 compile -std=c++20 game_settings.o "$root/ps5/host/game_settings.cpp"
 compile -std=c++20 expansion_pak.o "$root/ps5/host/expansion_pak.cpp"
 compile -std=c++20 library.o "$root/ps5/host/library.cpp" "${list[@]}"
+compile -std=c++20 romhack.o "$root/ps5/host/romhack.cpp"
 compile -std=c++20 write_broker.o "$root/ps5/host/write_broker.cpp"
 compile -std=c++20 shares.o "$root/ps5/host/shares.cpp" "${list[@]}"
 compile -std=c++20 menu.o "$root/ps5/host/menu.cpp" "${list[@]}" -Wno-missing-field-initializers
@@ -114,7 +115,7 @@ echo "==> the PS5 code compiled"
 $compile_only && exit 0
 
 objects=()
-for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings game_settings expansion_pak library shares write_broker menu quickmenu board frontend image web update update_net \
+for object in main platform psgopher_sdl3 rust_stubs bench libc_gaps rust_abi crash videoout_hooks sandbox title_settings game_settings expansion_pak library romhack shares write_broker menu quickmenu board frontend image web update update_net \
     ps5_vfs ps5_vfs_smb ps5_vfs_nfs ps5_vfs_ftp imgui_imgui imgui_imgui_draw imgui_imgui_tables imgui_imgui_widgets \
     imgui_imgui_impl_vulkan; do
     objects+=("$work/obj/$object.o")

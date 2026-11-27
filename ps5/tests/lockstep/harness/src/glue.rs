@@ -69,7 +69,11 @@ pub fn snapshot(d: &Device, kind: Kind, vi: u64, task: u64) -> Snapshot {
         fgr: c.cop1.fgr,
         tlb: tlb.finish(),
         caches: caches.finish(),
-        events: c.events.iter().map(|e| (e.enabled, e.count)).collect(),
+        events: {
+            // Gopher64's own 16 events; the 64DD's (16-20, PSGopher's) must stay off in a cartridge game
+            assert!(c.events.iter().skip(16).all(|e| !e.enabled), "a 64DD event is on");
+            c.events.iter().take(16).map(|e| (e.enabled, e.count)).collect()
+        },
         next_event: (c.next_event_count, c.next_event),
         rsp_gpr: r.gpr,
         vpr: r.vpr.map(m),

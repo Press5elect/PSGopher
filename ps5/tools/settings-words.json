@@ -18,12 +18,6 @@
   "choices": "written",
   "default_field": "integer_scaling"
  },
- "video.fullscreen": {
-  "label": "exact",
-  "label_source": "src/ui/gui/settings_page.slint:112",
-  "choices": "written",
-  "default_field": "fullscreen"
- },
  "video.widescreen": {
   "label": "exact",
   "label_source": "src/ui/gui/settings_page.slint:120",
@@ -57,12 +51,6 @@
   "label_source": "src/ui/gui/settings_page.slint:164",
   "choices": "written",
   "default_field": "rewind"
- },
- "emulation.usb": {
-  "label": "exact",
-  "label_source": "src/ui/gui/settings_page.slint:172",
-  "choices": "written",
-  "default_field": "usb"
  },
  "input.emulate_vru": {
   "label": "exact",
@@ -109,11 +97,6 @@
  "profile.deadzone": {
   "label": "exact",
   "label_source": "src/ui/gui/input_profile.slint:39",
-  "choices": "written"
- },
- "profile.dinput": {
-  "label": "exact",
-  "label_source": "src/ui/gui/input_profile.slint:60",
   "choices": "written"
  },
  "hotkey.activator": {
@@ -245,6 +228,10 @@
   "label": "written",
   "choices": "written"
  },
+ "dd_ipl": {
+  "label": "written",
+  "choices": "written"
+ },
  "console.folders": {
   "label": "written",
   "choices": "written"
@@ -286,18 +273,6 @@
   "choices": "written"
  },
  "console.exit": {
-  "label": "written",
-  "choices": "written"
- },
- "pc.keyboard": {
-  "label": "written",
-  "choices": "written"
- },
- "pc.library": {
-  "label": "written",
-  "choices": "written"
- },
- "pc.network": {
   "label": "written",
   "choices": "written"
  }

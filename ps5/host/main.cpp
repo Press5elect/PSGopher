@@ -309,23 +309,44 @@ static std::string autostart_rom()
 
 static void log_line(const char *line) { say("%s", line); }
 
+/* why a romhack patch could not be made into a ROM (play() sets it; empty when it did) */
+static std::string play_error;
+
 /* what Gopher64 said when a game did not start or ended in error (psgopher.rs keeps it) */
 static std::string last_error()
 {
+   if (!play_error.empty())
+      return play_error;
    char text[512] = {};
    psgopher_last_error(text, sizeof(text));
    return std::string("The game ended with an error: ") + (text[0] ? text : "see the log");
 }
 
 /* Gopher64 with one ROM (and a probe's slot to start from, or -1); its status */
-static int play(const std::string &rom, int load_state = -1)
+static int play(const std::string &chosen_rom, int load_state = -1)
 {
+   /* a romhack patch is applied to its base ROM first: Gopher64 is given the patched ROM (a plain
+    * ROM's path is left as it is) */
+   play_error.clear();
+   std::string patch_error;
+   const std::string rom = psgopher::playablePath(chosen_rom, &patch_error);
+   if (rom.empty()) {
+      say("romhack: %s", patch_error.c_str());
+      play_error = patch_error;
+      return 1;
+   }
    const std::string slot = std::to_string(load_state);
-   const char *argv[] = {"psgopher", "--fullscreen", "--load-state", slot.c_str(), rom.c_str()};
-   const int argc = load_state >= 0 ? 5 : 3;
-   if (load_state < 0)
-      argv[2] = rom.c_str();
-   say("starting Gopher64 with %s%s", rom.c_str(), load_state >= 0 ? (" from probe " + slot).c_str() : "");
+   /* a 64DD disk is given with --disk: Gopher64 boots it with the IPL it finds in data/64dd */
+   const bool disk = psgopher::isDiskName(rom);
+   std::vector<const char *> args = {"psgopher", "--fullscreen"};
+   if (load_state >= 0)
+      args.insert(args.end(), {"--load-state", slot.c_str()});
+   if (disk)
+      args.push_back("--disk");
+   args.push_back(rom.c_str());
+   const char *const *argv = args.data();
+   const int argc = (int)args.size();
+   say("starting Gopher64 with %s%s%s", disk ? "the 64DD disk " : "", rom.c_str(), load_state >= 0 ? (" from probe " + slot).c_str() : "");
    /* what costs speed, beside the video line (Gopher64's config.json) */
    say("settings: upscale %lldx%s, overclock %s, rewind %s, expansion pak %s",
        (long long)psgopher_setting_get("video.upscale"), psgopher_setting_get("video.ssaa") == 1 ? " supersampled" : "",

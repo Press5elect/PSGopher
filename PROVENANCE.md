@@ -46,6 +46,10 @@ The following components hold PSGopher's own PS5 work, written for Press5elect:
   - GPU timing lines and the boot log's video lines.
 - **The Expansion Pak by game**: the table and Auto (`ps5/gamedata/expansion-pak.tsv`,
   `ps5/host/expansion_pak.*`; sources below).
+- **Romhack patches** (`ps5/host/romhack.*`: IPS, BPS and UPS, and their bases found in the
+  library) and **game folders** (`ps5/host/library.*`, the chooser in `frontend.cpp`).
+- **The 64DD in Gopher64**: its port from ares into Gopher64's Rust and its wiring into Gopher64's
+  memory map, PI, PIF, events and save states (in the patch; ares' part is credited below).
 - **The settings' words and their check** (`ps5/tools/settings-words.*`).
 - **Builds and packaging**: the build, the source check, the PGO tooling, the release ZIP and the
   home-screen pictures (`ps5/tools/`).
@@ -82,6 +86,8 @@ title folder's `licenses/`. This file claims none of it. Among it:
 - **Gopher64** (Logan McNaughton and its contributors, GPL-3.0): the emulator, its VR4300 and RSP
   interpreters, and its settings; the gopher logo (`data/icon`) used for PSGopher's icon and
   home-screen pictures.
+- **ares** (the ares team, Near et al; its 64DD by LuigiBlood; ISC): the 64DD emulation, ported to
+  Gopher64's Rust (`src/device/dd.rs`, `src/device/dd/disk.rs` in the patch).
 - **parallel-rdp** (Hans-Kristian Arntzen, MIT) and **Granite**'s Vulkan backend (Hans-Kristian
   Arntzen, MIT), in Gopher64's tree.
 - **rcheevos** (the RetroAchievements team, MIT), **volk** (Arseny Kapoulkine, MIT), and the Rust

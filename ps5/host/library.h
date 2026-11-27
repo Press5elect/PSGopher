@@ -34,6 +34,9 @@ struct Game {
 	bool rumble{ false }; // the controllers hold a Rumble Pak by default (else a Controller Pak)
 	std::string crc;    // Gopher64's key of the game ("CRC1-CRC2-C:country": its cheats, by storage::get_game_crc)
 	int revision{ -1 }; // the header's version byte (0x3F); -1 not read (a list of an earlier version)
+	/* a romhack patch (.ips .bps .ups) listed as a cartridge: the ROM it is applied to (a raw ROM's path), and
+	 * the facts above are the patched ROM's; "" for a plain ROM */
+	std::string base;
 };
 
 /* The key a game's own settings are kept by: the header's game code with its destination (the four letters, "NABE")
@@ -75,7 +78,11 @@ void addPlayed(const std::string &name, double seconds);
 
 /* Whether a file name is one the list shows (.z64 .n64 .v64; .zip whose first file is one; .7z
  * in a folder named for the N64 or in /data/psgopher/roms). */
+/* A 64DD disk image (.ndd, .d64): listed like a cartridge, started with the 64DD's IPL */
+bool isDiskName(const std::string &name);
 bool isRomName(const std::string &name);
+/* Whether a file name is a romhack patch (.ips .bps .ups); the list shows one only with a base ROM */
+bool isPatchName(const std::string &name);
 
 class Library {
 public:
@@ -107,5 +114,11 @@ void libraryUseRoot(const std::string &root);
 /* A share's ROM is copied to /data/psgopher/cache/play first (Gopher64 reads its ROM with std::fs);
  * a local path is given as it is. Returns the path to give Gopher64, or "" (and why). */
 std::string localCopy(const std::string &path, std::string *error);
+
+/* The path to give Gopher64 for a game's file: a plain ROM's as it is; a romhack patch's (a Game with a
+ * base) is made now: the base is read (from a share too), the patch applied, and the result written as .z64
+ * to /data/psgopher/cache/play/<patch name>.z64 (the play folder holds one file at a time, as localCopy's).
+ * Returns "" and says why (a checksum that does not fit, a damaged patch...) when it cannot. */
+std::string playablePath(const std::string &path, std::string *error);
 
 } // namespace psgopher

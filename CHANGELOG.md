@@ -10,6 +10,36 @@ Every change, the newest version first. Games are named by cartridge ID only.
   search is as before. A `.7z` in a chosen folder is listed whatever the folder's name. Kept in
   `/data/psgopher/config/folders.cfg`. Host-tested (the search and the chooser's pictures); not run
   on a console.
+- Added: **64DD disks**. Gopher64 has no 64DD; PSGopher adds one to it, ported from ares (ISC):
+  the drive's registers, sector buffers, sequencer, real-time clock and interrupt, the IPL at
+  0x06000000, `.ndd`, MAME raw and `.d64` disk images, disk writes kept beside the saves
+  (`64DD-<ID>-<hash>.ddw`; the image itself is never written), and save states with the disk. Disks
+  are listed with the cartridges and start from the 64DD's IPL, which you supply: a 4 MB dump
+  (ID NDDJ, NDDE or NDXJ) in `/data/psgopher/data/64dd` (BENCH > Emulation > 64DD IPL shows the one
+  found). The Expansion Pak is always on with a disk. Tested on a PC with a synthetic IPL and
+  synthetic disks (27 tests), and cartridge games checked unchanged by the lockstep harness; no real
+  IPL or disk, and not run on a console. A cartridge with a disk inserted is not offered by the
+  front end yet.
+- Added: **romhack patches**. A `.bps`, `.ips` or `.ups` file is listed as a cartridge of its own
+  when its base ROM is found: the ROM with the same name in its folder (for BPS and UPS only if
+  its size and CRC32 fit), else for BPS and UPS any listed ROM of the right size and CRC32, else for
+  IPS the only ROM in its folder. The patch is applied when the game starts (the result goes to
+  `cache/play`); `.v64` and `.n64` bases are matched in either order. A patch beside a base of the
+  same name is listed as "<name> (patched)". Patches that fit no ROM are left out, with the reason
+  in the boot log. Host-tested (with sanitizers and a fuzzer); not run on a console.
+- Fixed: a change to Game Folders or the shares made while a search was running was dropped: the
+  search now runs again when that one ends.
+- Fixed: a chosen game folder on a USB drive that is unplugged no longer keeps its games in the
+  list (they could not start).
+- Fixed: L1/R1 no longer leaves a file or folder picker open behind another view.
+- Removed: BENCH's PC Only section (Fullscreen, Keyboard Bindings, Theme/ROM Folder/Recent ROMs,
+  Netplay/RetroAchievements: notes about Gopher64 on a PC), and the rows that do nothing on the
+  console: Emulate UNFLoader (its link needs a network driver the console's runtime does not have)
+  and Use DirectInput (a PC's raw joystick). A profile saved with DirectInput on now reads the
+  controller as a gamepad, as the bindings made on the console expect.
+- Fixed: a ROM whose header uses the homebrew save-type field with a value it does not define, or
+  whose game ID is not text (seen in romhacks and homebrew), no longer refuses to start: the game
+  ID's save type is used, as for a ROM without that header.
 - Changed: Gopher64's pin moved to `70452ee882b8` (crate updates, among them sevenz-rust2 0.27;
   parallel-rdp at `c2d02a6c1407`); both patches apply unchanged.
 

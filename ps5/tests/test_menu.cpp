@@ -478,7 +478,7 @@ int main(int argc, char **argv)
 	for (const Step &st : std::vector<Step>{
 			{ PAD_LEFT, nullptr, 2 },                      /* Leave Game: off */
 			{ none, "6i-bench-hotkey-changed", 3 },
-			{ R2, nullptr, 2 }, { R2, "6j-bench-pc-only", 3 }, { L2, nullptr, 2 },
+			{ R2, nullptr, 2 },                            /* Console (after Hotkeys, the last section) */
 			{ none, "7-bench-console", 3 },
 			{ PAD_CROSS, "8-shares", 3 },
 			{ PAD_CROSS, "9-share-form", 3 },          /* Add a share */
@@ -542,7 +542,7 @@ int main(int argc, char **argv)
 		g_checks = 0;
 		g_script = {
 			{ none, nullptr, 6 },
-			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
+			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
 			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, /* Check for Updates (after Game Folders) */
 			{ none, "17-update-idle", 3 },
 			{ none, nullptr, 1, releaseOffered },
@@ -562,7 +562,7 @@ int main(int argc, char **argv)
 		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
 		g_script = {
 			{ none, nullptr, 6 },
-			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6, upToDateWithPrevious }, /* BENCH, Console */
+			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6, upToDateWithPrevious }, /* BENCH, Console */
 			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 },
 			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 },        /* Roll Back */
 			{ none, "23-update-rollback", 3 },
@@ -580,7 +580,7 @@ int main(int argc, char **argv)
 		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
 		g_script = {
 			{ none, nullptr, 6 },
-			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
+			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
 			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { none, "40-bench-game-folders", 3 },
 			{ PAD_CROSS, nullptr, 2 }, { none, "41-game-folders-none", 3 },
 			{ PAD_CROSS, nullptr, 2 }, { none, "42-game-folders-choose", 3 },                   /* Add a folder */

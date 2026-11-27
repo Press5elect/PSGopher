@@ -1561,10 +1561,59 @@ index 0000000..3039335
 +    0x00000056, 0x0003003e, 0x0000004e, 0x00000057, 0x000100fd, 0x00010038,
 +};
 diff --git a/src/device.rs b/src/device.rs
-index ced2472..6c65d73 100644
+index ced2472..fe7cfd6 100644
 --- a/src/device.rs
 +++ b/src/device.rs
-@@ -401,6 +401,8 @@ impl Device {
+@@ -27,6 +27,7 @@ pub mod cop1;
+ pub mod cop2;
+ pub mod cpu;
+ pub mod cpu_instructions;
++pub mod dd;
+ pub mod events;
+ pub mod exceptions;
+ pub mod fpu_instructions;
+@@ -64,6 +65,7 @@ pub fn run_game(
+     }
+ 
+     cart::rom::init(device, rom_contents); // cart needs to come before rdram
++    dd::init(device); // the 64DD, when attached: 8 MB, the IPL's CIC
+ 
+     // rdram pointer is shared with parallel-rdp and retroachievements
+     rdram::init(device);
+@@ -120,11 +122,13 @@ pub fn run_game(
+         );
+     }
+ 
++    dd::start(device);
+     cpu::run(device);
+ 
+     retroachievements::unload_game(discord_watch_tx, discord_handle);
+ 
+     ui::storage::write_saves(device);
++    dd::save(device);
+ 
+     if let Some(netplay) = &mut device.netplay {
+         netplay::close(netplay);
+@@ -284,6 +288,8 @@ pub struct Device {
+     pub vru: controller::vru::Vru,
+     pub transferpaks: [controller::transferpak::TransferPak; 4],
+     pub cheats: cheats::Cheats,
++    #[serde(skip)]
++    pub dd: dd::Dd, // its state is a save state's "dd" entry (savestates.rs)
+ }
+ 
+ pub fn zero_m128i() -> __m128i {
+@@ -311,6 +317,9 @@ impl Device {
+             dst.clone_state_from(src);
+         }
+         self.cheats.clone_from(&device.cheats);
++        if self.dd.clone_state_from(&device.dd) {
++            dd::after_restore(self);
++        }
+     }
+ 
+     pub fn new(with_ui: bool) -> Box<Device> {
+@@ -401,6 +410,8 @@ impl Device {
                  }; events::EVENT_TYPE_COUNT],
                  next_event_count: u64::MAX,
                  next_event: events::EVENT_TYPE_NONE,
@@ -1573,7 +1622,7 @@ index ced2472..6c65d73 100644
              },
              pif: pif::Pif {
                  rom: [0; 1984],
-@@ -468,6 +470,7 @@ impl Device {
+@@ -468,6 +479,7 @@ impl Device {
                          func: rsp_su_instructions::reserved,
                          opcode: 0,
                          instruction_type: rsp_cpu::InstructionType::Su,
@@ -1581,6 +1630,14 @@ index ced2472..6c65d73 100644
                      }; 0x1000 / 4],
                      last_instruction_type: rsp_cpu::InstructionType::Su,
                      instruction_type: rsp_cpu::InstructionType::Su,
+@@ -571,6 +583,7 @@ impl Device {
+                 boot: true,
+                 enabled: false,
+             },
++            dd: dd::Dd::default(),
+         })
+     }
+ }
 diff --git a/src/device/cache.rs b/src/device/cache.rs
 index f2ae41e..d176f97 100644
 --- a/src/device/cache.rs
@@ -1758,10 +1815,27 @@ index f2ae41e..d176f97 100644
      device::memory::masked_write_32(
          &mut device.memory.dcache[line_index].words[((phys_address >> 2) & 3) as usize],
 diff --git a/src/device/cart/rom.rs b/src/device/cart/rom.rs
-index 3994201..2260fc6 100644
+index 3994201..f2c5d34 100644
 --- a/src/device/cart/rom.rs
 +++ b/src/device/cart/rom.rs
-@@ -154,25 +154,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
+@@ -136,7 +136,15 @@ pub fn init(device: &mut device::Device, rom_file: &[u8]) {
+ 
+     device.ui.game_hash = calculate_hash(&device.cart.rom);
+ 
+-    device.ui.game_id = String::from_utf8(device.cart.rom[0x3B..0x3E].to_vec()).unwrap();
++    // PSGopher: a header whose game ID is not text (some romhacks' and homebrew's) still starts
++    #[cfg(psgopher)]
++    {
++        device.ui.game_id = String::from_utf8_lossy(&device.cart.rom[0x3B..0x3E]).into_owned();
++    }
++    #[cfg(not(psgopher))]
++    {
++        device.ui.game_id = String::from_utf8(device.cart.rom[0x3B..0x3E].to_vec()).unwrap();
++    }
+     if device.ui.game_id.contains('\0') {
+         device.ui.game_id = String::from("UNK");
+     }
+@@ -154,25 +162,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
      false
  }
  
@@ -2572,10 +2646,18 @@ index 1fe4cbb..b8a2b7c 100644
      device.cpu.cop1.instrs = [
          device::cop1::mfc1,           // 0
 diff --git a/src/device/cpu.rs b/src/device/cpu.rs
-index 07aedb0..dc273c4 100644
+index 07aedb0..4929c9f 100644
 --- a/src/device/cpu.rs
 +++ b/src/device/cpu.rs
-@@ -44,20 +44,32 @@ pub struct Cpu {
+@@ -41,23 +41,40 @@ pub struct Cpu {
+     pub special_instrs: [fn(&mut device::Device, u32); 64],
+     #[serde(skip, default = "savestates::default_instructions")]
+     pub regimm_instrs: [fn(&mut device::Device, u32); 32],
++    // (Gopher64's own events as before; the 64DD's go in a state's "dd" entry: events.rs)
++    #[serde(
++        serialize_with = "device::events::serialize_events",
++        deserialize_with = "device::events::deserialize_events"
++    )]
      pub events: [device::events::Event; device::events::EVENT_TYPE_COUNT],
      pub next_event_count: u64,
      pub next_event: usize,
@@ -2609,7 +2691,7 @@ index 07aedb0..dc273c4 100644
      device.cpu.instrs = [
          device::cop0::reserved,           // SPECIAL
          device::cop0::reserved,           // REGIMM
-@@ -262,59 +274,23 @@ pub fn run(device: &mut device::Device) {
+@@ -262,59 +279,23 @@ pub fn run(device: &mut device::Device) {
      device.cpu.running = true;
      while device.cpu.running {
          device.cpu.gpr[0] = 0; // gpr 0 is read only
@@ -2682,7 +2764,7 @@ index 07aedb0..dc273c4 100644
          }
          device::cop0::add_cycles(device, 1);
          if device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG] > device.cpu.next_event_count {
-@@ -322,3 +298,74 @@ pub fn run(device: &mut device::Device) {
+@@ -322,3 +303,74 @@ pub fn run(device: &mut device::Device) {
          }
      }
  }
@@ -2968,8 +3050,3312 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
+diff --git a/src/device/dd.rs b/src/device/dd.rs
+new file mode 100644
+index 0000000..db5e9ad
+--- /dev/null
++++ b/src/device/dd.rs
+@@ -0,0 +1,2086 @@
++// The Nintendo 64DD (disk drive): its ASIC registers, the C2 and data sector buffers and the
++// micro-sequencer RAM at 0x05000000, the IPL ROM at 0x06000000, the drive (seek, read, write,
++// motor), the real-time clock, and its interrupt, the cartridge line (COP0 Cause IP3).
++//
++// Ported from ares (ISC), n64/dd/*, by LuigiBlood and the ares team (dd.cpp, controller.cpp,
++// drive.cpp, io.cpp, rtc.cpp, serialization.cpp; the CIC models of n64/cic/cic.cpp).
++//
++// ----------------------------------------------------------------------
++// ares
++//
++// Copyright (c) 2004-2025 ares team, Near et al
++//
++// Permission to use, copy, modify, and/or distribute this software for any
++// purpose with or without fee is hereby granted, provided that the above
++// copyright notice and this permission notice appear in all copies.
++//
++// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++// ----------------------------------------------------------------------
++//
++// Nothing here runs unless a 64DD IPL is given (attach): without one the address ranges stay
++// unmapped (open bus) and no event is scheduled, as before.
++//
++// Timing: ares' scheduler counts two clocks per VR4300 cycle (93.75 MHz x 2); Gopher64's events
++// count VR4300 cycles, so ares' counts are halved (ares_clocks). Durations ares gives in seconds
++// (the clock's tick, the motor's standby and sleep delays) follow Gopher64's clock rate.
++
++pub mod disk;
++
++use crate::device;
++use std::collections::BTreeMap;
++
++/// The cartridge interrupt line, INT1 (n64brew: the 64DD's MECHA and BM interrupts)
++pub const COP0_CAUSE_IP3: u64 = 1 << 11;
++
++const IPL_SIZE: usize = 0x400000;
++const C2S_SIZE: usize = 0x400;
++const DS_SIZE: usize = 0x100;
++const MS_SIZE: usize = 0x40;
++const DD_PAGE: usize = 0x0500;
++const IPL_PAGE: usize = 0x0600;
++
++fn ares_clocks(clocks: u64) -> u64 {
++    clocks / 2
++}
++
++pub fn log(text: &str) {
++    #[cfg(psgopher)]
++    crate::psgopher::log_line(text);
++    #[cfg(not(psgopher))]
++    eprintln!("{text}");
++}
++
++/// The IPL's model, from its header's ID (ares: dd.cpp connect, cic.cpp)
++#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
++pub enum IplKind {
++    #[default]
++    Unknown,
++    Japan,       // NDDJ, CIC-NUS-8303
++    Usa,         // NDDE, CIC-NUS-DDUS
++    Development, // NDXJ, CIC-NUS-8401
++}
++
++impl IplKind {
++    fn from_id(id: &[u8]) -> IplKind {
++        match id {
++            b"NDDJ" => IplKind::Japan,
++            b"NDDE" => IplKind::Usa,
++            b"NDXJ" => IplKind::Development,
++            _ => IplKind::Unknown,
++        }
++    }
++    pub fn cic(self) -> &'static str {
++        match self {
++            IplKind::Japan | IplKind::Unknown => "CIC-NUS-8303",
++            IplKind::Usa => "CIC-NUS-DDUS",
++            IplKind::Development => "CIC-NUS-8401",
++        }
++    }
++    /// The seed the PIF passes to the IPL's boot code
++    pub fn seed(self) -> u8 {
++        match self {
++            IplKind::Usa => 0xDE,
++            _ => 0xDD,
++        }
++    }
++    pub fn region(self) -> &'static str {
++        match self {
++            IplKind::Japan => "NTSC-J",
++            IplKind::Usa => "NTSC-U",
++            IplKind::Development => "NTSC-DEV",
++            IplKind::Unknown => "unknown",
++        }
++    }
++    fn disk_region(self) -> Option<disk::Region> {
++        match self {
++            IplKind::Japan => Some(disk::Region::Japan),
++            IplKind::Usa => Some(disk::Region::Usa),
++            IplKind::Development => Some(disk::Region::Development),
++            IplKind::Unknown => None,
++        }
++    }
++}
++
++#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
++pub struct Ctl {
++    pub disk_type: u8,
++    pub err_self_diagnostic: bool,
++    pub err_servo_ng: bool,
++    pub err_index_gap_ng: bool,
++    pub err_timeout: bool,
++    pub err_undefined_command: bool,
++    pub err_invalid_param: bool,
++    pub err_unknown: bool,
++    pub standby_delay_disable: bool,
++    pub standby_delay: u16,
++    pub sleep_delay_disable: bool,
++    pub sleep_delay: u16,
++    pub led_on_time: u8,
++    pub led_off_time: u8,
++}
++
++#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
++pub struct Status {
++    pub request_user_sector: bool,
++    pub request_c2_sector: bool,
++    pub busy_state: bool,
++    pub reset_state: bool,
++    pub spindle_motor_stopped: bool,
++    pub head_retracted: bool,
++    pub write_protect: bool,
++    pub mecha_error: bool,
++    pub disk_changed: bool,
++    pub disk_present: bool,
++}
++
++#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
++pub struct Bm {
++    pub start: bool,
++    pub reset: bool,
++    pub error: bool,
++    pub block_transfer: bool,
++    pub c1_correct: bool,
++    pub c1_double: bool,
++    pub c1_single: bool,
++    pub c1_error: bool,
++    pub read_mode: bool,
++    pub disable_or_check: bool,
++    pub disable_c1_correction: bool,
++}
++
++#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
++pub struct ErrorFlags {
++    pub am: bool,
++    pub spindle: bool,
++    pub overrun: bool,
++    pub off_track: bool,
++    pub clock_unlock: bool,
++    pub self_stop: bool,
++    pub sector: u8,
++}
++
++/// The ASIC and drive registers: what DD::power resets
++#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
++pub struct Regs {
++    pub mecha_line: bool,
++    pub mecha_mask: bool,
++    pub bm_line: bool,
++    pub bm_mask: bool,
++    pub ctl: Ctl,
++    pub data: u16,
++    pub status: Status,
++    pub current_track: u16,
++    pub current_sector: u8,
++    pub sector_size_buf: u8,
++    pub sector_size: u8,
++    pub sector_block: u8,
++    pub id: u16,
++    pub bm: Bm,
++    pub error: ErrorFlags,
++    pub micro_enable: bool,
++    pub micro_error: bool,
++    pub seek: bool,
++    pub c2s: Vec<u8>,
++    pub ds: Vec<u8>,
++    pub ms: Vec<u8>,
++}
++
++/// Everything of the 64DD that changes as it runs (the save states' "dd" entry)
++#[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
++pub struct DdState {
++    pub regs: Regs,
++    /// the clock: BCD year, month, day, hour, minute, second
++    pub rtc: [u8; 6],
++    /// the blocks the game wrote, by physical block index (the medium's state)
++    pub overlay: BTreeMap<u32, Vec<u8>>,
++    /// the disk image this state belongs to (its SHA-256), empty without a disk
++    pub disk_hash: String,
++}
++
++/// The 64DD as configured for this run. Not attached: nothing of it exists.
++#[derive(Default)]
++pub struct Dd {
++    pub attached: bool,
++    /// no cartridge: the console boots the IPL (the PIF's ROM type bit), cartridge space is open bus
++    pub cart_absent: bool,
++    pub ipl: Vec<u8>,
++    pub ipl_kind: IplKind,
++    pub disk: Option<disk::Disk>,
++    pub writes_path: Option<std::path::PathBuf>,
++    pub dirty: bool,
++    pub state: DdState,
++}
++
++impl Dd {
++    /// A save state's copy and its restore (savestates.rs, Device::clone_state): the registers and
++    /// the medium's writes; the IPL and the image are not part of a state, like the cartridge ROM
++    /// True when the medium's writes changed (a restore): Device::clone_state then schedules
++    /// the writes file (after_restore)
++    pub fn clone_state_from(&mut self, other: &Dd) -> bool {
++        let overlay_changed = self.attached && self.state.overlay != other.state.overlay;
++        self.state.clone_from(&other.state);
++        if self.attached {
++            self.state.regs.status.disk_present = self.disk.is_some();
++            if overlay_changed {
++                self.dirty = true;
++            }
++        }
++        overlay_changed
++    }
++}
++
++/// Device::clone_state, after a restore that changed the disk's writes: the writes file follows
++/// the loaded state a second later (as after a write)
++pub fn after_restore(device: &mut device::Device) {
++    let second = device.cpu.clock_rate;
++    device::events::create_event(device, device::events::EVENT_TYPE_DD_SAVE, second);
++}
++
++fn has_disk(device: &device::Device) -> bool {
++    device.dd.disk.is_some()
++}
++
++// ---------------------------------------------------------------------------------------------
++// Setting up (lib.rs, run_game)
++
++fn identify_ipl(mut data: Vec<u8>) -> Result<(Vec<u8>, IplKind, &'static str), String> {
++    if data.len() < 0x1000 || data.len() > IPL_SIZE {
++        return Err(format!(
++            "not a 64DD IPL ROM ({} bytes; the IPL is {IPL_SIZE})",
++            data.len()
++        ));
++    }
++    data.resize(data.len().div_ceil(4) * 4, 0);
++    let id = |d: &[u8]| IplKind::from_id(&d[0x3B..0x3F]);
++    let kind = id(&data);
++    if kind != IplKind::Unknown {
++        return Ok((data, kind, "big-endian"));
++    }
++    let mut v64 = data.clone();
++    for pair in v64.chunks_exact_mut(2) {
++        pair.swap(0, 1);
++    }
++    let kind = id(&v64);
++    if kind != IplKind::Unknown {
++        return Ok((v64, kind, "byte-swapped, converted"));
++    }
++    let mut n64 = data.clone();
++    for word in n64.chunks_exact_mut(4) {
++        word.reverse();
++    }
++    let kind = id(&n64);
++    if kind != IplKind::Unknown {
++        return Ok((n64, kind, "little-endian, converted"));
++    }
++    Ok((data, IplKind::Unknown, "big-endian"))
++}
++
++/// An IPL in the search folder (every file of 4 MB there), the disk's region first
++fn find_ipl(dir: &std::path::Path, region: Option<disk::Region>) -> Option<std::path::PathBuf> {
++    let mut found: Vec<(std::path::PathBuf, IplKind)> = Vec::new();
++    let mut entries: Vec<_> = std::fs::read_dir(dir)
++        .ok()?
++        .flatten()
++        .map(|e| e.path())
++        .collect();
++    entries.sort();
++    for path in entries {
++        if std::fs::metadata(&path).map(|m| m.len()).ok() != Some(IPL_SIZE as u64) {
++            continue;
++        }
++        // (only a file whose header has a known IPL ID: NDDJ, NDDE, NDXJ)
++        if let Ok(data) = std::fs::read(&path)
++            && let Ok((_, kind, _)) = identify_ipl(data)
++            && kind != IplKind::Unknown
++        {
++            found.push((path, kind));
++        }
++    }
++    found
++        .iter()
++        .find(|(_, kind)| kind.disk_region() == region && region.is_some())
++        .or(found.first())
++        .map(|(path, _)| path.clone())
++}
++
++/// The 64DD for this run (put in Device::dd): the IPL (given, or the first 4 MB IPL in `ipl_dir`
++/// that fits the disk's region), the disk image (optional), and the disk's writes file in
++/// `saves_dir`. Not attached when neither an IPL nor a disk is given.
++pub fn attach(
++    ipl_path: Option<&std::path::Path>,
++    disk_path: Option<&std::path::Path>,
++    ipl_dir: &std::path::Path,
++    saves_dir: &std::path::Path,
++    cart_present: bool,
++) -> std::io::Result<Dd> {
++    let error = |text: String| std::io::Error::other(format!("64dd: {text}"));
++    if ipl_path.is_none() && disk_path.is_none() {
++        return Ok(Dd::default());
++    }
++    let disk = if let Some(path) = disk_path {
++        let image = std::fs::read(path)
++            .map_err(|e| error(format!("could not read the disk {}: {e}", path.display())))?;
++        Some(disk::Disk::parse(image).map_err(|e| error(format!("{}: {e}", path.display())))?)
++    } else {
++        None
++    };
++    let ipl_path = match ipl_path {
++        Some(path) => path.to_path_buf(),
++        None => find_ipl(ipl_dir, disk.as_ref().map(|d| d.region)).ok_or_else(|| {
++            error(format!(
++                "a disk needs the 64DD IPL ROM (the drive's BIOS, not included): --dd-ipl <file>, or a 4 MB IPL file (ID NDDJ, NDDE or NDXJ) in {}",
++                ipl_dir.display()
++            ))
++        })?,
++    };
++    let data = std::fs::read(&ipl_path).map_err(|e| {
++        error(format!(
++            "could not read the IPL {}: {e}",
++            ipl_path.display()
++        ))
++    })?;
++    let size = data.len();
++    let (ipl, ipl_kind, order) =
++        identify_ipl(data).map_err(|e| error(format!("{}: {e}", ipl_path.display())))?;
++
++    let mut text = format!(
++        "64dd: IPL {} ({size} bytes, {order}, {}, {})",
++        ipl_path.display(),
++        ipl_kind.region(),
++        ipl_kind.cic()
++    );
++    if ipl_kind == IplKind::Unknown {
++        log("64dd: the IPL's header has no known ID (NDDJ, NDDE, NDXJ): taken as CIC-NUS-8303");
++    }
++    let mut writes_path = None;
++    let mut state = DdState::default();
++    if let Some(disk) = &disk {
++        let path = saves_dir.join(format!("64DD-{}-{}.ddw", disk.id, disk.hash));
++        text += &format!(
++            ", disk {} ({}, {}, {}, type {}), writes kept in {}",
++            disk_path.unwrap().display(),
++            disk.format.name(),
++            disk.id,
++            disk.region.name(),
++            disk.disk_type,
++            path.display()
++        );
++        match std::fs::read(&path) {
++            Ok(data) => match disk::decode_writes(&data, &disk.hash) {
++                Ok(overlay) => {
++                    text += &format!(" ({} blocks written before)", overlay.len());
++                    state.overlay = overlay;
++                }
++                Err(e) => {
++                    let aside = path.with_extension("ddw.bad");
++                    let moved = std::fs::rename(&path, &aside).is_ok();
++                    log(&format!(
++                        "64dd: {}: {e}; {}",
++                        path.display(),
++                        if moved {
++                            format!(
++                                "kept aside as {}, the disk starts as dumped",
++                                aside.display()
++                            )
++                        } else {
++                            "the disk starts as dumped".to_string()
++                        }
++                    ));
++                }
++            },
++            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
++            Err(e) => return Err(error(format!("could not read {}: {e}", path.display()))),
++        }
++        if let Some(region) = ipl_kind.disk_region()
++            && region != disk.region
++        {
++            log(&format!(
++                "64dd: the disk is {} and the IPL {}: the IPL is likely to refuse it",
++                disk.region.name(),
++                ipl_kind.region()
++            ));
++        }
++        state.disk_hash = disk.hash.clone();
++        writes_path = Some(path);
++    } else {
++        text += ", no disk";
++    }
++    text += if cart_present {
++        ", with a cartridge (it boots)"
++    } else {
++        ", no cartridge (the IPL boots)"
++    };
++    log(&text);
++
++    Ok(Dd {
++        attached: true,
++        cart_absent: !cart_present,
++        ipl,
++        ipl_kind,
++        disk,
++        writes_path,
++        dirty: false,
++        state,
++    })
++}
++
++fn hash_prefix(hash: &str) -> [u8; 8] {
++    std::array::from_fn(|i| {
++        hash.get(i * 2..i * 2 + 2)
++            .and_then(|hex| u8::from_str_radix(hex, 16).ok())
++            .unwrap_or(0)
++    })
++}
++
++/// The header Gopher64 names a run by when there is no cartridge (the game ID, the save and
++/// state names, the cheats' key): the disk's ID and hash, or the IPL's. Only its identity is used:
++/// with no cartridge the cartridge space is open bus (start clears the ROM before the CPU runs).
++pub fn placeholder_rom(dd: &Dd) -> Vec<u8> {
++    let mut rom = vec![0u8; 0x1000];
++    rom[0..4].copy_from_slice(&0x80371240u32.to_be_bytes());
++    let (id, hash, region) = match &dd.disk {
++        Some(disk) => (disk.id.clone(), disk.hash.clone(), disk.region),
++        None => (
++            String::from_utf8_lossy(&dd.ipl[0x3B..0x3F]).into_owned(),
++            device::cart::rom::calculate_hash(&dd.ipl),
++            dd.ipl_kind.disk_region().unwrap_or(disk::Region::Japan),
++        ),
++    };
++    rom[0x10..0x18].copy_from_slice(&hash_prefix(&hash));
++    let name = format!("64DD {id}");
++    for (i, c) in name
++        .bytes()
++        .chain(std::iter::repeat(b' '))
++        .take(0x14)
++        .enumerate()
++    {
++        rom[0x20 + i] = if c.is_ascii_alphanumeric() || c == b' ' {
++            c
++        } else {
++            b'_'
++        };
++    }
++    for (i, c) in id.bytes().take(3).enumerate() {
++        rom[0x3B + i] = if c.is_ascii_alphanumeric() { c } else { b'_' };
++    }
++    rom[0x3E] = if region == disk::Region::Usa {
++        b'E'
++    } else {
++        b'J'
++    };
++    rom
++}
++
++/// run_game, after the cartridge: 8 MB of RDRAM (64DD software needs the Expansion Pak, sold with
++/// the drive), and with no cartridge the IPL's CIC seed and an NTSC console.
++pub fn init(device: &mut device::Device) {
++    if !device.dd.attached {
++        return;
++    }
++    if device.rdram.size != 0x800000 {
++        log("64dd: the Expansion Pak is on (64DD software needs 8 MB)");
++        device.rdram.size = 0x800000;
++    }
++    if device.dd.cart_absent {
++        device.cart.cic_seed = device.dd.ipl_kind.seed();
++        device.cart.pal = false;
++    }
++}
++
++/// run_game, just before the CPU starts: the drive's power-on, the clock from the run's start time
++/// (the cartridge RTC's), and with no cartridge no cartridge: its ROM and save types are dropped
++/// (the placeholder only named the run).
++pub fn start(device: &mut device::Device) {
++    if !device.dd.attached {
++        return;
++    }
++    if device.dd.cart_absent {
++        // (the placeholder header stays in cart.rom for what reads it, e.g. the VRU's region
++        // check; the CPU and PI see open bus there: map, pi_handlers)
++        device.ui.storage.save_type.clear();
++    }
++    let utc = time::OffsetDateTime::from_unix_timestamp(device.cart.rtc_timestamp)
++        .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
++    let now = utc.to_offset(time::UtcOffset::local_offset_at(utc).unwrap_or(time::UtcOffset::UTC));
++    let bcd = |n: u32| (((n % 100) / 10) << 4 | (n % 10)) as u8;
++    device.dd.state.rtc = [
++        bcd(now.year().rem_euclid(100) as u32),
++        bcd(now.month() as u32),
++        bcd(now.day() as u32),
++        bcd(now.hour() as u32),
++        bcd(now.minute() as u32),
++        bcd(now.second() as u32),
++    ];
++    power(device);
++}
++
++/// The console's reset (exceptions.rs reset_event, the NMI): the drive's power-on, as ares'
++/// System::power(reset) calls DD::power (the clock and the disk's writes are kept)
++pub fn reset(device: &mut device::Device) {
++    if device.dd.attached {
++        power(device);
++    }
++}
++
++/// The end of run_game: the writes file, if the disk was written
++pub fn save(device: &mut device::Device) {
++    flush_writes(device);
++}
++
++fn flush_writes(device: &mut device::Device) {
++    let dd = &mut device.dd;
++    if !dd.dirty {
++        return;
++    }
++    let (Some(disk), Some(path)) = (&dd.disk, &dd.writes_path) else {
++        return;
++    };
++    let data = disk::encode_writes(&disk.hash, &dd.state.overlay);
++    let temp = path.with_extension("ddw.new");
++    let result = std::fs::write(&temp, &data).and_then(|_| std::fs::rename(&temp, path));
++    match result {
++        Ok(()) => dd.dirty = false,
++        Err(e) => log(&format!("64dd: could not write {}: {e}", path.display())),
++    }
++}
++
++/// Take the disk out (ares: DD::disconnect). For a front end's eject; not called yet.
++#[allow(dead_code)]
++pub fn eject(device: &mut device::Device) {
++    if !device.dd.attached {
++        return;
++    }
++    flush_writes(device);
++    device.dd.disk = None;
++    device.dd.writes_path = None;
++    let regs = &mut device.dd.state.regs;
++    regs.status.disk_present = false;
++    if regs.status.busy_state {
++        regs.status.mecha_error = true;
++    }
++    if regs.bm.start {
++        regs.bm.start = false;
++        regs.bm.error = true;
++    }
++    motor_stop(device);
++}
++
++// ---------------------------------------------------------------------------------------------
++// Interrupts (ares: DD::raise, lower, poll)
++
++#[derive(Clone, Copy)]
++enum Irq {
++    Mecha,
++    Bm,
++}
++
++fn raise(device: &mut device::Device, irq: Irq) {
++    match irq {
++        Irq::Mecha => device.dd.state.regs.mecha_line = true,
++        Irq::Bm => device.dd.state.regs.bm_line = true,
++    }
++    poll(device);
++}
++
++fn lower(device: &mut device::Device, irq: Irq) {
++    match irq {
++        Irq::Mecha => device.dd.state.regs.mecha_line = false,
++        Irq::Bm => device.dd.state.regs.bm_line = false,
++    }
++    poll(device);
++}
++
++fn poll(device: &mut device::Device) {
++    let regs = &device.dd.state.regs;
++    let line = (regs.mecha_line && regs.mecha_mask) || (regs.bm_line && regs.bm_mask);
++    if line {
++        device.cpu.cop0.regs[device::cop0::COP0_CAUSE_REG] |= COP0_CAUSE_IP3;
++        device::exceptions::check_pending_interrupts(device);
++    } else {
++        device.cpu.cop0.regs[device::cop0::COP0_CAUSE_REG] &= !COP0_CAUSE_IP3;
++    }
++}
++
++// ---------------------------------------------------------------------------------------------
++// Power (ares: DD::power)
++
++fn power(device: &mut device::Device) {
++    let present = has_disk(device);
++    let dev = device.dd.ipl_kind == IplKind::Development;
++    let regs = &mut device.dd.state.regs;
++    *regs = Regs {
++        mecha_mask: true,
++        bm_mask: true,
++        ctl: Ctl {
++            standby_delay: 3 * 0x17,
++            sleep_delay: 0x17,
++            led_on_time: 4,
++            led_off_time: 4,
++            ..Default::default()
++        },
++        c2s: vec![0; C2S_SIZE],
++        ds: vec![0; DS_SIZE],
++        ms: vec![0; MS_SIZE],
++        ..Default::default()
++    };
++    regs.status.reset_state = true;
++    regs.status.disk_changed = true;
++    regs.status.disk_present = present;
++    regs.id = if dev { 4 } else { 3 };
++    motor_stop(device);
++    let second = device.cpu.clock_rate;
++    device::events::create_event(device, device::events::EVENT_TYPE_DD_CLOCK, second);
++    device::events::remove_event(device, device::events::EVENT_TYPE_DD_MECHA);
++    device::events::remove_event(device, device::events::EVENT_TYPE_DD_BM);
++    lower(device, Irq::Mecha);
++    lower(device, Irq::Bm);
++}
++
++// ---------------------------------------------------------------------------------------------
++// The controller (ares: controller.cpp)
++
++mod command {
++    pub const NOP: u16 = 0x0;
++    pub const READ_SEEK: u16 = 0x1;
++    pub const WRITE_SEEK: u16 = 0x2;
++    pub const RECALIBRATION: u16 = 0x3;
++    pub const SLEEP: u16 = 0x4;
++    pub const START: u16 = 0x5;
++    pub const SET_STANDBY: u16 = 0x6;
++    pub const SET_SLEEP: u16 = 0x7;
++    pub const CLEAR_CHANGE_FLAG: u16 = 0x8;
++    pub const CLEAR_RESET_FLAG: u16 = 0x9;
++    pub const READ_VERSION: u16 = 0xa;
++    pub const SET_DISK_TYPE: u16 = 0xb;
++    pub const REQUEST_STATUS: u16 = 0xc;
++    pub const STANDBY: u16 = 0xd;
++    pub const INDEX_LOCK_RETRY: u16 = 0xe;
++    pub const SET_RTC_YEAR_MONTH: u16 = 0xf;
++    pub const SET_RTC_DAY_HOUR: u16 = 0x10;
++    pub const SET_RTC_MINUTE_SECOND: u16 = 0x11;
++    pub const GET_RTC_YEAR_MONTH: u16 = 0x12;
++    pub const GET_RTC_DAY_HOUR: u16 = 0x13;
++    pub const GET_RTC_MINUTE_SECOND: u16 = 0x14;
++    pub const SET_LED_BLINK_RATE: u16 = 0x15;
++    pub const READ_PROGRAM_VERSION: u16 = 0x1b;
++}
++
++/// A seek (read, write, recalibration/start): its time, and the head moved there
++fn seek(device: &mut device::Device, target: u16, for_write: bool) -> u64 {
++    let regs = &mut device.dd.state.regs;
++    // (ares: "TODO: proper research into seek and access times")
++    let mut count: u64 = 993_000;
++    if regs.status.head_retracted || regs.status.spindle_motor_stopped {
++        count += 200_700_000;
++    }
++    count += 19300 * (target as i64 & 0xFFF).abs_diff(regs.current_track as i64 & 0xFFF);
++    regs.current_track = target | 0x6000;
++    let rom = seek_track(device);
++    if for_write {
++        device.dd.state.regs.status.write_protect = rom;
++    }
++    device::events::remove_event(device, device::events::EVENT_TYPE_DD_MOTOR);
++    let regs = &mut device.dd.state.regs;
++    regs.status.head_retracted = false;
++    regs.status.spindle_motor_stopped = false;
++    regs.seek = true;
++    count
++}
++
++fn run_command(device: &mut device::Device, command: u16) {
++    {
++        let regs = &mut device.dd.state.regs;
++        let ctl = &mut regs.ctl;
++        ctl.err_self_diagnostic = false;
++        ctl.err_servo_ng = false;
++        ctl.err_index_gap_ng = false;
++        ctl.err_timeout = false;
++        ctl.err_undefined_command = false;
++        ctl.err_invalid_param = false;
++        regs.status.mecha_error = false;
++        regs.status.write_protect = false;
++        if regs.status.busy_state {
++            return;
++        }
++        regs.status.busy_state = true;
++    }
++
++    // the simplest command's time, ReadProgramVersion's
++    let mut count: u64 = 8000;
++    let disk = has_disk(device);
++    let data = device.dd.state.regs.data;
++    match command {
++        command::NOP => {}
++        command::READ_SEEK | command::WRITE_SEEK => {
++            if disk {
++                if (data >> 12) > 1 || (data & 0xFFF) > 0x5D7 {
++                    device.dd.state.regs.ctl.err_invalid_param = true;
++                } else {
++                    count = seek(device, data, command == command::WRITE_SEEK);
++                }
++            } else {
++                device.dd.state.regs.ctl.err_self_diagnostic = true;
++            }
++        }
++        command::RECALIBRATION | command::START => {
++            if disk {
++                // to head 0, track 0
++                count = seek(device, 0, false);
++            } else {
++                device.dd.state.regs.ctl.err_self_diagnostic = true;
++            }
++        }
++        command::SLEEP => {
++            let status = &device.dd.state.regs.status;
++            if !status.head_retracted || !status.spindle_motor_stopped {
++                count = 83_000_000;
++            }
++            motor_stop(device);
++        }
++        command::SET_STANDBY => {
++            // ares tests bit 24 and takes bits 16-23 of its 16-bit data latch, which always read
++            // as 0 there, so the command disables the automatic standby. (Mupen64Plus reads the
++            // 32-bit register the other way round: bit 24 set disables.) ares' effect is kept.
++            device.dd.state.regs.ctl.standby_delay_disable = true;
++        }
++        command::SET_SLEEP => {
++            // as SET_STANDBY
++            device.dd.state.regs.ctl.sleep_delay_disable = true;
++        }
++        command::CLEAR_CHANGE_FLAG => device.dd.state.regs.status.disk_changed = false,
++        command::CLEAR_RESET_FLAG => {
++            // "that's how it works" (ares)
++            device.dd.state.regs.status.disk_changed = false;
++            device.dd.state.regs.status.reset_state = false;
++        }
++        command::READ_VERSION => {
++            device.dd.state.regs.data = if data & 1 == 0 { 0x0114 } else { 0x5300 };
++        }
++        command::SET_DISK_TYPE => device.dd.state.regs.ctl.disk_type = (data & 0xF) as u8,
++        command::REQUEST_STATUS => {
++            let regs = &mut device.dd.state.regs;
++            let ctl = &regs.ctl;
++            let flags = [
++                ctl.err_self_diagnostic,
++                ctl.err_servo_ng,
++                ctl.err_index_gap_ng,
++                ctl.err_timeout,
++                ctl.err_undefined_command,
++                ctl.err_invalid_param,
++                ctl.err_unknown,
++            ];
++            for (bit, flag) in flags.iter().enumerate() {
++                regs.data = (regs.data & !(1 << bit)) | (u16::from(*flag) << bit);
++            }
++        }
++        command::STANDBY => {
++            if !disk {
++                device.dd.state.regs.ctl.err_self_diagnostic = true;
++            } else {
++                let status = &device.dd.state.regs.status;
++                if !status.head_retracted || !status.spindle_motor_stopped {
++                    count = 64_000_000;
++                }
++                motor_standby(device);
++            }
++        }
++        command::INDEX_LOCK_RETRY => {
++            if !disk {
++                device.dd.state.regs.ctl.err_self_diagnostic = true;
++            }
++        }
++        command::SET_RTC_YEAR_MONTH
++        | command::SET_RTC_DAY_HOUR
++        | command::SET_RTC_MINUTE_SECOND => {
++            let at = ((command - command::SET_RTC_YEAR_MONTH) * 2) as usize;
++            device.dd.state.rtc[at..at + 2].copy_from_slice(&data.to_be_bytes());
++        }
++        command::GET_RTC_YEAR_MONTH
++        | command::GET_RTC_DAY_HOUR
++        | command::GET_RTC_MINUTE_SECOND => {
++            let at = ((command - command::GET_RTC_YEAR_MONTH) * 2) as usize;
++            let rtc = &device.dd.state.rtc;
++            device.dd.state.regs.data = u16::from_be_bytes([rtc[at], rtc[at + 1]]);
++        }
++        command::SET_LED_BLINK_RATE => {
++            // ares reads bits 24-31 and 16-23 of the 16-bit latch (always 0): no change
++        }
++        command::READ_PROGRAM_VERSION => device.dd.state.regs.data = 0x0003,
++        _ => device.dd.state.regs.ctl.err_undefined_command = true,
++    }
++
++    let regs = &mut device.dd.state.regs;
++    let ctl = &regs.ctl;
++    if ctl.err_self_diagnostic
++        || ctl.err_servo_ng
++        || ctl.err_index_gap_ng
++        || ctl.err_timeout
++        || ctl.err_undefined_command
++        || ctl.err_invalid_param
++        || regs.status.write_protect
++    {
++        regs.status.mecha_error = true;
++    }
++    device::events::create_event(
++        device,
++        device::events::EVENT_TYPE_DD_MECHA,
++        ares_clocks(count),
++    );
++}
++
++pub fn mecha_event(device: &mut device::Device) {
++    if device.dd.state.regs.seek {
++        device.dd.state.regs.seek = false;
++        if device.dd.state.regs.status.disk_present {
++            motor_active(device);
++        } else {
++            motor_stop(device);
++        }
++    }
++    device.dd.state.regs.status.busy_state = false;
++    raise(device, Irq::Mecha);
++}
++
++// ---------------------------------------------------------------------------------------------
++// The drive (ares: drive.cpp)
++
++/// Whether the current track is in the disk type's ROM area (write protected)
++fn seek_track(device: &device::Device) -> bool {
++    let regs = &device.dd.state.regs;
++    disk::is_rom_area(
++        regs.ctl.disk_type,
++        u32::from((regs.current_track >> 12) & 1),
++        u32::from(regs.current_track & 0xFFF),
++    )
++}
++
++/// The physical block and the offset in it of a sector of the current track (seekSector)
++fn seek_sector(device: &device::Device, sector: u8) -> Option<(usize, u32)> {
++    let regs = &device.dd.state.regs;
++    let block = u32::from(sector >= 0x5A);
++    let sector = u32::from(sector % 0x5A);
++    let track = u32::from(regs.current_track & 0xFFF);
++    let head = u32::from((regs.current_track >> 12) & 1);
++    if track >= disk::TRACKS {
++        return None; // past the last track: no data
++    }
++    Some((
++        disk::block_index(head, track, block),
++        sector * (u32::from(regs.sector_size_buf) + 1),
++    ))
++}
++
++pub fn bm_event(device: &mut device::Device) {
++    // not started: nothing
++    if !device.dd.state.regs.bm.start {
++        device::events::remove_event(device, device::events::EVENT_TYPE_DD_BM);
++        lower(device, Irq::Bm);
++        return;
++    }
++
++    let regs = &mut device.dd.state.regs;
++    regs.status.request_user_sector = false;
++    regs.status.request_c2_sector = false;
++    regs.micro_error = false;
++    regs.bm.error = false;
++    regs.bm.c1_single = false;
++    regs.bm.c1_double = false;
++    regs.error = ErrorFlags::default();
++
++    let mut block = u8::from(regs.current_sector >= 0x5A);
++    let mut sector = regs.current_sector.wrapping_sub(block * 0x5A);
++    let track = u32::from(regs.current_track & 0xFFF);
++    let head = u32::from((regs.current_track >> 12) & 1);
++    let size = u32::from(regs.sector_size_buf) + 1;
++
++    if regs.bm.read_mode {
++        let error_index = (head * disk::TRACKS * 2 + track * 2) as usize + block as usize;
++        let protected = device
++            .dd
++            .disk
++            .as_ref()
++            .and_then(|d| d.error.get(error_index))
++            .is_some_and(|e| *e != 0);
++        let regs = &mut device.dd.state.regs;
++        if protected {
++            // the copy protection (C1 errors all over; retail disks only)
++            regs.bm.c1_single = true;
++            regs.bm.c1_double = true;
++        }
++        if sector < 0x55 {
++            // a user sector
++            let place = seek_sector(device, device.dd.state.regs.current_sector);
++            let dd = &mut device.dd;
++            if let Some((index, offset)) = place
++                && let Some(disk) = &dd.disk
++            {
++                let out = &mut dd.state.regs.ds[..size as usize];
++                disk.read_into(&dd.state.overlay, index, offset, out);
++            } else {
++                dd.state.regs.ds[..size as usize].fill(0);
++            }
++            let regs = &mut device.dd.state.regs;
++            regs.status.request_user_sector = true;
++            regs.current_sector = regs.current_sector.wrapping_add(1);
++        } else if sector < 0x58 {
++            // a C2 sector
++            regs.current_sector = regs.current_sector.wrapping_add(1);
++        } else if sector == 0x58 {
++            // the last C2 sector
++            regs.status.request_c2_sector = true;
++            if regs.bm.block_transfer {
++                // on to the other block
++                regs.bm.block_transfer = false;
++                block = 1 - block;
++                regs.current_sector = block * 0x5A;
++            } else {
++                regs.bm.start = false;
++            }
++        }
++    } else {
++        // writing: the first interrupt asks for the data and writes nothing; each next one writes
++        // the sector the buffer holds and asks for the next (the drive makes C1 and C2 itself)
++        if sector <= 0x55 {
++            if sector > 0 {
++                let previous = device.dd.state.regs.current_sector.wrapping_sub(1);
++                let place = seek_sector(device, previous);
++                let dd = &mut device.dd;
++                if let Some((index, offset)) = place
++                    && let Some(disk) = &dd.disk
++                {
++                    let data = &dd.state.regs.ds[..size as usize];
++                    disk.write_from(&mut dd.state.overlay, index, offset, data);
++                    dd.dirty = true;
++                    let second = device.cpu.clock_rate;
++                    device::events::create_event(
++                        device,
++                        device::events::EVENT_TYPE_DD_SAVE,
++                        second,
++                    );
++                }
++            }
++            device.dd.state.regs.status.request_user_sector = true;
++        }
++        let regs = &mut device.dd.state.regs;
++        if sector >= 0x55 {
++            if regs.bm.block_transfer {
++                // the next sector is in the other block
++                regs.bm.block_transfer = false;
++                sector = 0;
++                block = 1 - block;
++                regs.current_sector = sector + block * 0x5A;
++            } else {
++                // the last interrupt acknowledges the write: no data asked for, and stop
++                regs.status.request_user_sector = false;
++                regs.bm.start = false;
++            }
++        }
++        regs.current_sector = regs.current_sector.wrapping_add(1);
++    }
++
++    raise(device, Irq::Bm);
++}
++
++fn motor_active(device: &mut device::Device) {
++    device::events::remove_event(device, device::events::EVENT_TYPE_DD_MOTOR);
++    let regs = &mut device.dd.state.regs;
++    regs.status.head_retracted = false;
++    regs.status.spindle_motor_stopped = false;
++    if !regs.ctl.standby_delay_disable {
++        let when = device.cpu.clock_rate / 0x17 * u64::from(regs.ctl.standby_delay);
++        device::events::create_event(device, device::events::EVENT_TYPE_DD_MOTOR, when);
++    }
++}
++
++fn motor_standby(device: &mut device::Device) {
++    device::events::remove_event(device, device::events::EVENT_TYPE_DD_MOTOR);
++    let regs = &mut device.dd.state.regs;
++    regs.status.head_retracted = true;
++    regs.status.spindle_motor_stopped = false;
++    if !regs.ctl.sleep_delay_disable {
++        let when = device.cpu.clock_rate / 0x17 * u64::from(regs.ctl.sleep_delay);
++        device::events::create_event(device, device::events::EVENT_TYPE_DD_MOTOR, when);
++    }
++}
++
++fn motor_stop(device: &mut device::Device) {
++    device::events::remove_event(device, device::events::EVENT_TYPE_DD_MOTOR);
++    let regs = &mut device.dd.state.regs;
++    regs.status.head_retracted = true;
++    regs.status.spindle_motor_stopped = true;
++}
++
++pub fn motor_event(device: &mut device::Device) {
++    let status = &device.dd.state.regs.status;
++    let (retracted, stopped) = (status.head_retracted, status.spindle_motor_stopped);
++    if retracted && !stopped {
++        // to sleep
++        motor_stop(device);
++    }
++    let status = &device.dd.state.regs.status;
++    if !status.head_retracted && !status.spindle_motor_stopped {
++        // to standby
++        motor_standby(device);
++    }
++}
++
++pub fn save_event(device: &mut device::Device) {
++    flush_writes(device);
++}
++
++// ---------------------------------------------------------------------------------------------
++// The clock (ares: rtc.cpp)
++
++fn bcd_decode(n: u8) -> u32 {
++    u32::from(n >> 4) * 10 + u32::from(n & 0xF)
++}
++
++fn days_in_month(month: u32, year: u32) -> u32 {
++    match month {
++        2 if year.is_multiple_of(4) => 29,
++        2 => 28,
++        4 | 6 | 9 | 11 => 30,
++        _ => 31,
++    }
++}
++
++fn bcd_days_in_month(rtc: &[u8; 6]) -> u8 {
++    let days = days_in_month(bcd_decode(rtc[1]), bcd_decode(rtc[0]));
++    ((days / 10) << 4 | (days % 10)) as u8
++}
++
++fn rtc_valid(rtc: &[u8; 6]) -> bool {
++    if rtc.iter().any(|b| b & 0x0F >= 0x0A) {
++        return false;
++    }
++    !(rtc[0] >= 0xA0
++        || rtc[5] >= 0x60
++        || rtc[4] >= 0x60
++        || rtc[3] >= 0x24
++        || rtc[1] > 0x12
++        || rtc[1] < 1
++        || rtc[2] < 1
++        || rtc[2] > bcd_days_in_month(rtc))
++}
++
++fn rtc_tick(rtc: &mut [u8; 6], offset: usize) {
++    let mut n = rtc[offset].wrapping_add(1);
++    if n & 0xF > 9 {
++        n = (n & 0xF0).wrapping_add(0x10);
++    }
++    if n & 0xF0 > 0x90 {
++        n = 0;
++    }
++    rtc[offset] = n;
++}
++
++fn rtc_tick_second(rtc: &mut [u8; 6]) {
++    if !rtc_valid(rtc) {
++        return;
++    }
++    rtc_tick(rtc, 5);
++    if rtc[5] < 0x60 {
++        return;
++    }
++    rtc[5] = 0;
++    rtc_tick(rtc, 4);
++    if rtc[4] < 0x60 {
++        return;
++    }
++    rtc[4] = 0;
++    rtc_tick(rtc, 3);
++    if rtc[3] < 0x24 {
++        return;
++    }
++    rtc[3] = 0;
++    rtc_tick(rtc, 2);
++    if rtc[2] <= bcd_days_in_month(rtc) {
++        return;
++    }
++    rtc[2] = 1;
++    rtc_tick(rtc, 1);
++    if rtc[1] <= 0x12 {
++        return;
++    }
++    rtc[1] = 1;
++    rtc_tick(rtc, 0);
++}
++
++pub fn clock_event(device: &mut device::Device) {
++    rtc_tick_second(&mut device.dd.state.rtc);
++    let second = device.cpu.clock_rate;
++    device::events::create_event(device, device::events::EVENT_TYPE_DD_CLOCK, second);
++}
++
++// ---------------------------------------------------------------------------------------------
++// The ASIC's registers (ares: io.cpp; each 32-bit register is two halves, the high one first)
++
++fn read_asic_half(device: &mut device::Device, address: u32) -> u16 {
++    let regs = &device.dd.state.regs;
++    let b = |flag: bool, bit: u32| u16::from(flag) << bit;
++    match (address & 0x7F) >> 1 {
++        0 => regs.data,
++        4 => {
++            // ASIC_STATUS
++            let s = &regs.status;
++            let data = b(s.disk_changed, 0)
++                | b(s.mecha_error, 1)
++                | b(s.write_protect, 2)
++                | b(s.head_retracted, 3)
++                | b(s.spindle_motor_stopped, 4)
++                | b(s.reset_state, 6)
++                | b(s.busy_state, 7)
++                | b(s.disk_present, 8)
++                | b(regs.mecha_line, 9)
++                | b(regs.bm_line, 10)
++                | b(regs.bm.error, 11)
++                | b(s.request_c2_sector, 12)
++                | b(s.request_user_sector, 14);
++            // reading the status acknowledges the BM interrupt (tested on hardware, ares)
++            if regs.bm_line {
++                let track = u64::from(regs.current_track & 0xFFF);
++                device::events::create_event(
++                    device,
++                    device::events::EVENT_TYPE_DD_BM,
++                    ares_clocks(38_000 + track / 15),
++                );
++                lower(device, Irq::Bm);
++            }
++            data
++        }
++        6 => regs.current_track,
++        8 => {
++            // ASIC_BM_STATUS
++            let bm = &regs.bm;
++            b(bm.c1_error, 0)
++                | b(bm.c1_single, 5)
++                | b(bm.c1_double, 6)
++                | b(bm.c1_correct, 7)
++                | b(bm.block_transfer, 8)
++                | b(regs.micro_error, 9)
++                | b(bm.error, 10)
++                | b(bm.start, 15)
++        }
++        10 => {
++            // ASIC_ERR_SECTOR
++            let e = &regs.error;
++            u16::from(e.sector)
++                | b(e.self_stop, 8)
++                | b(e.clock_unlock, 9)
++                | b(!regs.status.disk_present, 10)
++                | b(e.off_track, 11)
++                | b(e.overrun, 12)
++                | b(e.spindle, 13)
++                | b(regs.micro_error, 14)
++                | b(e.am, 15)
++        }
++        14 => (u16::from(regs.current_sector) << 8) | 0xC3, // ASIC_CUR_SECTOR
++        20 => u16::from(regs.sector_size_buf),              // ASIC_HOST_SECBYTE
++        24 => u16::from(regs.sector_size) | (u16::from(regs.sector_block) << 8), // ASIC_SEC_BYTE
++        32 => regs.id,                                      // ASIC_ID_REG
++        _ => 0,
++    }
++}
++
++fn write_asic_half(device: &mut device::Device, address: u32, data: u16) {
++    let bit = |n: u32| data & (1 << n) != 0;
++    match (address & 0x7F) >> 1 {
++        0 => device.dd.state.regs.data = data,
++        4 => run_command(device, data),
++        8 => {
++            // ASIC_BM_CTL
++            let regs = &mut device.dd.state.regs;
++            regs.bm.reset |= bit(12);
++            regs.bm.read_mode = bit(14);
++            regs.bm.disable_or_check = bit(11);
++            regs.bm.disable_c1_correction = bit(10);
++            regs.bm.block_transfer = bit(9);
++            if bit(8) {
++                lower(device, Irq::Mecha);
++            }
++            let regs = &mut device.dd.state.regs;
++            regs.current_sector = data as u8;
++            if !bit(12) && regs.bm.reset {
++                regs.bm.start = false;
++                regs.bm.error = false;
++                regs.status.request_user_sector = false;
++                regs.status.request_c2_sector = false;
++                regs.bm.reset = false;
++                lower(device, Irq::Bm);
++            }
++            if bit(15) && has_disk(device) {
++                device.dd.state.regs.bm.start = true;
++                let track = u64::from(device.dd.state.regs.current_track & 0xFFF);
++                device::events::create_event(
++                    device,
++                    device::events::EVENT_TYPE_DD_BM,
++                    ares_clocks(50_000 + track / 15),
++                );
++            }
++        }
++        12 => device.dd.state.regs.micro_enable = bit(14), // ASIC_SEQ_CTL
++        16 => {
++            // ASIC_HARD_RESET
++            if data == 0xAAAA {
++                power(device);
++            }
++        }
++        20 => device.dd.state.regs.sector_size_buf = data as u8, // ASIC_HOST_SECBYTE
++        22 => {
++            // ASIC_C1_S2 (ares: the sector size and block size)
++            device.dd.state.regs.sector_size = data as u8;
++            device.dd.state.regs.sector_block = (data >> 8) as u8;
++        }
++        _ => {}
++    }
++}
++
++// ---------------------------------------------------------------------------------------------
++// The bus: CPU reads and writes, PI DMA
++
++fn buffer_half(buffer: &[u8], offset: usize) -> u16 {
++    u16::from_be_bytes([
++        *buffer.get(offset).unwrap_or(&0),
++        *buffer.get(offset + 1).unwrap_or(&0),
++    ])
++}
++
++fn set_buffer_half(buffer: &mut [u8], offset: usize, value: u16) {
++    if offset + 1 < buffer.len() {
++        buffer[offset..offset + 2].copy_from_slice(&value.to_be_bytes());
++    }
++}
++
++/// A halfword of the 64DD's registers for a CPU read (0 where no device answers: read_regs
++/// answers those addresses with open bus before)
++fn read_half(device: &mut device::Device, address: u32) -> u16 {
++    let (view, offset) = view_at(address);
++    view_read(device, view, offset).unwrap_or(0)
++}
++
++fn in_dd_registers(address: u64) -> bool {
++    (address as u32 & 0xFFFF) < 0x05C0
++}
++
++pub fn read_regs(
++    device: &mut device::Device,
++    address: u64,
++    access_size: device::memory::AccessSize,
++) -> u32 {
++    let cycles = device::pi::calculate_cycles(device, 2, 4);
++    device::cop0::add_cycles(device, cycles);
++    if !in_dd_registers(address) {
++        return device::unmapped::read_mem_fast(device, address, access_size);
++    }
++    let address = address as u32 & !3;
++    let high = read_half(device, address);
++    let low = read_half(device, address + 2);
++    (u32::from(high) << 16) | u32::from(low)
++}
++
++pub fn write_regs(device: &mut device::Device, address: u64, value: u32, mask: u32) {
++    // (a PI write: the CPU waits for it, no PI interrupt follows, as ares' PI_BUS_Write)
++    let cycles = device::pi::calculate_cycles(device, 2, 4);
++    device::cop0::add_cycles(device, cycles);
++    if !in_dd_registers(address) {
++        return;
++    }
++    let address = address as u32 & !3;
++    let regs = &mut device.dd.state.regs;
++    if address < 0x0500_0500 || address >= 0x0500_0580 {
++        // the buffers: a masked write of the word
++        let buffer = match address {
++            0x0500_0000..=0x0500_03FF => &mut regs.c2s,
++            0x0500_0400..=0x0500_04FF => &mut regs.ds,
++            _ => &mut regs.ms,
++        };
++        let offset = (address as usize) & (buffer.len() - 1);
++        if offset + 4 <= buffer.len() {
++            let mut word = u32::from_be_bytes(buffer[offset..offset + 4].try_into().unwrap());
++            device::memory::masked_write_32(&mut word, value, mask);
++            buffer[offset..offset + 4].copy_from_slice(&word.to_be_bytes());
++        }
++        return;
++    }
++    if mask & 0xFFFF_0000 != 0 {
++        write_asic_half(device, address, (value >> 16) as u16);
++    }
++    if mask & 0x0000_FFFF != 0 {
++        write_asic_half(device, address + 2, value as u16);
++    }
++}
++
++fn ipl_word(device: &device::Device, address: u64) -> u32 {
++    let offset = (address as usize) & (IPL_SIZE - 1) & !3;
++    match device.dd.ipl.get(offset..offset + 4) {
++        Some(word) => u32::from_be_bytes(word.try_into().unwrap()),
++        None => 0,
++    }
++}
++
++pub fn read_ipl_fast(
++    device: &device::Device,
++    address: u64,
++    _access_size: device::memory::AccessSize,
++) -> u32 {
++    ipl_word(device, address)
++}
++
++pub fn read_ipl(
++    device: &mut device::Device,
++    address: u64,
++    _access_size: device::memory::AccessSize,
++) -> u32 {
++    let cycles = device::pi::calculate_cycles(device, 1, 4);
++    device::cop0::add_cycles(device, cycles);
++    ipl_word(device, address)
++}
++
++pub fn write_ipl(device: &mut device::Device, _address: u64, _value: u32, _mask: u32) {
++    let cycles = device::pi::calculate_cycles(device, 1, 4);
++    device::cop0::add_cycles(device, cycles);
++}
++
++fn domain(address: u32) -> i32 {
++    if address >> 24 == 0x05 { 2 } else { 1 }
++}
++
++/// What a PI DMA reaches, fixed at its start address (ares: DD::piAddress): a buffer or the IPL
++/// (to its end, then nothing: the bus keeps its last value), the ASIC's registers (the offset
++/// wraps in them, as ares' readAsicHalf/writeAsicHalf mask it), or no device
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++enum View {
++    C2s,
++    Ds,
++    Asic,
++    Ms,
++    Ipl,
++    None,
++}
++
++fn view_at(address: u32) -> (View, usize) {
++    let address = address & !1;
++    match address {
++        0x0500_0000..=0x0500_03FF => (View::C2s, (address & 0x3FF) as usize),
++        0x0500_0400..=0x0500_04FF => (View::Ds, (address & 0xFF) as usize),
++        0x0500_0500..=0x0500_057F => (View::Asic, (address & 0x7F) as usize),
++        0x0500_0580..=0x0500_05BF => (View::Ms, (address & 0x3F) as usize),
++        0x0600_0000..=0x063F_FFFF => (View::Ipl, (address - 0x0600_0000) as usize),
++        _ => (View::None, 0),
++    }
++}
++
++fn view_buffer(dd: &mut Dd, view: View) -> Option<&mut Vec<u8>> {
++    match view {
++        View::C2s => Some(&mut dd.state.regs.c2s),
++        View::Ds => Some(&mut dd.state.regs.ds),
++        View::Ms => Some(&mut dd.state.regs.ms),
++        View::Ipl => Some(&mut dd.ipl),
++        View::Asic | View::None => None,
++    }
++}
++
++/// The next halfword of a DMA's view at `offset`; None past its end (or no device)
++fn view_read(device: &mut device::Device, view: View, offset: usize) -> Option<u16> {
++    if view == View::Asic {
++        return Some(read_asic_half(device, 0x0500_0500 | (offset & 0x7F) as u32));
++    }
++    let buffer = view_buffer(&mut device.dd, view)?;
++    (offset + 1 < buffer.len()).then(|| buffer_half(buffer, offset))
++}
++
++fn view_write(device: &mut device::Device, view: View, offset: usize, value: u16) {
++    match view {
++        View::Asic => write_asic_half(device, 0x0500_0500 | (offset & 0x7F) as u32, value),
++        View::Ipl | View::None => {} // a ROM; no device
++        _ => {
++            if let Some(buffer) = view_buffer(&mut device.dd, view) {
++                set_buffer_half(buffer, offset, value);
++            }
++        }
++    }
++}
++
++/// PI DMA from RDRAM to the 64DD (PI_RD_LEN)
++pub fn dma_read(device: &mut device::Device, cart_addr: u32, dram_addr: u32, length: u32) -> u64 {
++    let dram_addr = dram_addr & device::rdram::RDRAM_MASK as u32;
++    let byte = |device: &device::Device, i: u32| {
++        *device
++            .rdram
++            .mem
++            .get((dram_addr + i) as usize ^ device.byte_swap)
++            .unwrap_or(&0)
++    };
++    let (view, start) = view_at(cart_addr);
++    for i in (0..length).step_by(2) {
++        let value = u16::from_be_bytes([byte(device, i), byte(device, i + 1)]);
++        view_write(device, view, start + i as usize, value);
++    }
++    device::pi::calculate_cycles(device, domain(cart_addr), length)
++}
++
++/// PI DMA from the 64DD to RDRAM (PI_WR_LEN)
++pub fn dma_write(device: &mut device::Device, cart_addr: u32, dram_addr: u32, length: u32) -> u64 {
++    let dram_addr = dram_addr & device::rdram::RDRAM_MASK as u32;
++    let (view, start) = view_at(cart_addr);
++    // the bus latch: the address at the start (ares: PI::busAddress), then the last data read
++    let mut latch = cart_addr as u16 & !1;
++    for i in (0..length).step_by(2) {
++        if let Some(value) = view_read(device, view, start + i as usize) {
++            latch = value;
++        }
++        let [high, low] = latch.to_be_bytes();
++        for (j, value) in [(i, high), (i + 1, low)] {
++            if j < length
++                && let Some(target) = device
++                    .rdram
++                    .mem
++                    .get_mut((dram_addr + j) as usize ^ device.byte_swap)
++            {
++                *target = value;
++            }
++        }
++    }
++    device::pi::calculate_cycles(device, domain(cart_addr), length)
++}
++
++pub type PiDma = fn(&mut device::Device, u32, u32, u32) -> u64;
++
++/// pi.rs get_handler: the 64DD's DMA ranges, and with no cartridge the cartridge's (open bus, as
++/// an unknown address). None: Gopher64's own handler.
++pub fn pi_handlers(device: &device::Device, address: u32) -> Option<(PiDma, PiDma)> {
++    if !device.dd.attached {
++        return None;
++    }
++    match address {
++        0x0500_0000..=0x0500_05FF | 0x0600_0000..=0x063F_FFFF => Some((dma_read, dma_write)),
++        _ if device.dd.cart_absent
++            && ((device::memory::MM_DOM2_ADDR2 as u32..device::memory::MM_PIF_MEM as u32)
++                .contains(&address)
++                || address >= device::memory::MM_SC64_BUFFER as u32) =>
++        {
++            Some((device::pi::unknown_dma_read, device::pi::unknown_dma_write))
++        }
++        _ => None,
++    }
++}
++
++/// memory.rs init, at its end: the 64DD's pages, and with no cartridge the cartridge's pages
++/// (SRAM/FlashRAM, ROM, IS-Viewer, SC64) back to open bus
++pub fn map(device: &mut device::Device) {
++    if !device.dd.attached {
++        return;
++    }
++    let memory = &mut device.memory;
++    if device.dd.cart_absent {
++        let pif = device::memory::MM_PIF_MEM >> 16;
++        let pages = (device::memory::MM_DOM2_ADDR2 >> 16..pif)
++            .chain(device::memory::MM_SC64_BUFFER >> 16..0x2000);
++        for i in pages {
++            memory.fast_read[i] = device::unmapped::read_mem_fast;
++            memory.memory_map_read[i] = device::unmapped::read_mem;
++            memory.memory_map_write[i] = device::unmapped::write_mem;
++        }
++    }
++    memory.memory_map_read[DD_PAGE] = read_regs;
++    memory.memory_map_write[DD_PAGE] = write_regs;
++    for i in IPL_PAGE..IPL_PAGE + (IPL_SIZE >> 16) {
++        memory.fast_read[i] = read_ipl_fast;
++        memory.memory_map_read[i] = read_ipl;
++        memory.memory_map_write[i] = write_ipl;
++    }
++}
++
++// ---------------------------------------------------------------------------------------------
++// Save states: the "dd" entry of a state file (the CPU's events past Gopher64's own are kept in
++// it, so that Gopher64's own entries stay as they were: events.rs serialize_events)
++
++#[derive(serde::Serialize, serde::Deserialize)]
++struct StateEntry {
++    state: DdState,
++    events: Vec<device::events::Event>,
++}
++
++/// The entry for `snapshot`, a state of the running device whose 64DD is `live` (None without
++/// one: nothing is added to the file)
++pub fn state_entry(live: &Dd, snapshot: &device::Device) -> Option<Vec<u8>> {
++    if !live.attached {
++        return None;
++    }
++    let entry = StateEntry {
++        state: snapshot.dd.state.clone(),
++        events: snapshot.cpu.events[device::events::EVENT_TYPE_SAVED_COUNT..].to_vec(),
++    };
++    postcard::to_stdvec(&entry).ok()
++}
++
++/// A state file's entries, and the 64DD's after them when there is one
++pub fn with_entry<'a>(
++    entries: &[(&'a [u8], &'a str)],
++    dd: Option<&'a [u8]>,
++) -> Vec<(&'a [u8], &'a str)> {
++    let mut all = entries.to_vec();
++    if let Some(dd) = dd {
++        all.push((dd, "dd"));
++    }
++    all
++}
++
++/// Put a state file's entry into the loaded `state`. With a 64DD the entry must be there and be for
++/// the same disk; without one the state is taken as it is.
++pub fn restore_entry(
++    current: &Dd,
++    mut state: Box<device::Device>,
++    entry: Option<Vec<u8>>,
++) -> Option<Box<device::Device>> {
++    if !current.attached {
++        if entry.is_some() {
++            // its next event or Cause IP3 may be the 64DD's
++            log("64dd: the state was made with the 64DD, this run has none: not loaded");
++            return None;
++        }
++        return Some(state);
++    }
++    let Some(entry) = entry else {
++        log("64dd: the state was made without the 64DD: not loaded");
++        return None;
++    };
++    let Ok(entry) = postcard::from_bytes::<StateEntry>(&entry) else {
++        log("64dd: the state's 64DD entry is unreadable: not loaded");
++        return None;
++    };
++    if entry.state.disk_hash != current.state.disk_hash {
++        log("64dd: the state is for another disk (or none): not loaded");
++        return None;
++    }
++    let regs = &entry.state.regs;
++    let valid = regs.c2s.len() == C2S_SIZE
++        && regs.ds.len() == DS_SIZE
++        && regs.ms.len() == MS_SIZE
++        && entry.state.overlay.iter().all(|(index, block)| {
++            (*index as usize) < disk::BLOCKS
++                && block.len() == disk::block_size_of_index(*index as usize) as usize
++        });
++    let extra = &mut state.cpu.events[device::events::EVENT_TYPE_SAVED_COUNT..];
++    if !valid || entry.events.len() != extra.len() {
++        log("64dd: the state's 64DD entry is malformed: not loaded");
++        return None;
++    }
++    extra.copy_from_slice(&entry.events);
++    state.dd.state = entry.state;
++    Some(state)
++}
++
++#[cfg(test)]
++mod tests {
++    use super::*;
++    use device::events::*;
++
++    const ASIC_DATA: u64 = 0x0500_0500;
++    const ASIC_CMD_STATUS: u64 = 0x0500_0508;
++    const ASIC_BM_CTL: u64 = 0x0500_0510;
++    const ASIC_HOST_SECBYTE: u64 = 0x0500_0528;
++    const ASIC_ID: u64 = 0x0500_0540;
++    const DS: u64 = 0x0500_0400;
++    const STATUS_BUSY: u32 = 1 << 7;
++    const STATUS_DISK_PRESENT: u32 = 1 << 8;
++    const STATUS_MECHA_INT: u32 = 1 << 9;
++    const STATUS_BM_INT: u32 = 1 << 10;
++
++    fn attached(
++        disk: Option<disk::Disk>,
++        writes_path: Option<std::path::PathBuf>,
++    ) -> Box<device::Device> {
++        let mut device = device::Device::new(false);
++        device.cpu.clock_rate = 93_750_000;
++        device.cart.rtc_timestamp = 1_700_000_000;
++        let mut ipl = vec![0u8; IPL_SIZE];
++        ipl[0x3B..0x3F].copy_from_slice(b"NDDJ");
++        ipl[0x40..0x44].copy_from_slice(&0x1234_5678u32.to_be_bytes());
++        let (ipl, ipl_kind, _) = identify_ipl(ipl).unwrap();
++        let disk_hash = disk.as_ref().map(|d| d.hash.clone()).unwrap_or_default();
++        device.dd = Dd {
++            attached: true,
++            cart_absent: true,
++            ipl,
++            ipl_kind,
++            disk,
++            writes_path,
++            dirty: false,
++            state: DdState {
++                disk_hash,
++                ..Default::default()
++            },
++        };
++        device::memory::init(&mut device);
++        start(&mut device);
++        device
++    }
++
++    fn with_disk() -> Box<device::Device> {
++        let image = disk::test_images::synthetic_ndd(0, b"TSTJ");
++        attached(Some(disk::Disk::parse(image).unwrap()), None)
++    }
++
++    fn read(device: &mut device::Device, address: u64) -> u32 {
++        let page = (address >> 16) as usize;
++        device.memory.memory_map_read[page](device, address, device::memory::AccessSize::Word)
++    }
++
++    fn write(device: &mut device::Device, address: u64, value: u32) {
++        let page = (address >> 16) as usize;
++        device.memory.memory_map_write[page](device, address, value, 0xFFFF_FFFF)
++    }
++
++    fn status(device: &mut device::Device) -> u32 {
++        read(device, ASIC_CMD_STATUS) >> 16
++    }
++
++    /// Run a pending 64DD event's handler (what the CPU loop does when its count comes)
++    fn run_event(device: &mut device::Device, event: usize) {
++        assert!(device.cpu.events[event].enabled, "event {event} pending");
++        device.cpu.events[event].enabled = false;
++        match event {
++            EVENT_TYPE_DD_MECHA => mecha_event(device),
++            EVENT_TYPE_DD_BM => bm_event(device),
++            EVENT_TYPE_DD_MOTOR => motor_event(device),
++            EVENT_TYPE_DD_CLOCK => clock_event(device),
++            EVENT_TYPE_DD_SAVE => save_event(device),
++            _ => unreachable!(),
++        }
++    }
++
++    fn command(device: &mut device::Device, command: u16, data: u16) {
++        write(device, ASIC_DATA, u32::from(data) << 16);
++        write(device, ASIC_CMD_STATUS, u32::from(command) << 16);
++        assert_ne!(status(device) & STATUS_BUSY, 0);
++        run_event(device, EVENT_TYPE_DD_MECHA);
++        assert_eq!(status(device) & STATUS_BUSY, 0);
++        assert_ne!(status(device) & STATUS_MECHA_INT, 0);
++        // the MECHA interrupt reset (BM_CTL bit 8)
++        write(device, ASIC_BM_CTL, 1 << 24);
++        assert_eq!(status(device) & STATUS_MECHA_INT, 0);
++    }
++
++    #[test]
++    fn not_attached_changes_nothing() {
++        let mut device = device::Device::new(false);
++        device::memory::init(&mut device);
++        type Read = fn(&mut device::Device, u64, device::memory::AccessSize) -> u32;
++        let unmapped: Read = device::unmapped::read_mem;
++        for page in [0x0500, 0x0600, 0x063F] {
++            assert!(std::ptr::fn_addr_eq(
++                device.memory.memory_map_read[page],
++                unmapped
++            ));
++        }
++        assert!(pi_handlers(&device, 0x0500_0000).is_none());
++        init(&mut device);
++        start(&mut device);
++        assert!(!device.cpu.events[EVENT_TYPE_DD_CLOCK].enabled);
++        assert!(state_entry(&device.dd, &device).is_none());
++    }
++
++    #[test]
++    fn power_on_registers_and_ipl() {
++        let mut device = with_disk();
++        let s = status(&mut device);
++        assert_ne!(s & STATUS_DISK_PRESENT, 0);
++        assert_ne!(s & 1, 0, "disk changed");
++        assert_ne!(s & (1 << 6), 0, "reset state");
++        assert_eq!(read(&mut device, ASIC_ID) >> 16, 3);
++        // the IPL at 0x06000000, open bus past the registers, cartridge space open bus
++        assert_eq!(read(&mut device, 0x0600_0040), 0x1234_5678);
++        assert_eq!(read(&mut device, 0x0500_1234), 0x1234_1234);
++        assert_eq!(read(&mut device, 0x1000_0040), 0x0040_0040);
++        assert!(device.cpu.events[EVENT_TYPE_DD_CLOCK].enabled);
++        // no disk: present clear, seek refused
++        let mut empty = attached(None, None);
++        assert_eq!(status(&mut empty) & STATUS_DISK_PRESENT, 0);
++        write(
++            &mut empty,
++            ASIC_CMD_STATUS,
++            u32::from(command::READ_SEEK) << 16,
++        );
++        run_event(&mut empty, EVENT_TYPE_DD_MECHA);
++        assert_ne!(status(&mut empty) & 2, 0, "mecha error");
++    }
++
++    #[test]
++    fn interrupt_is_the_cartridge_line() {
++        let mut device = with_disk();
++        assert_eq!(
++            device.cpu.cop0.regs[device::cop0::COP0_CAUSE_REG] & COP0_CAUSE_IP3,
++            0
++        );
++        write(
++            &mut device,
++            ASIC_CMD_STATUS,
++            u32::from(command::CLEAR_RESET_FLAG) << 16,
++        );
++        run_event(&mut device, EVENT_TYPE_DD_MECHA);
++        assert_ne!(
++            device.cpu.cop0.regs[device::cop0::COP0_CAUSE_REG] & COP0_CAUSE_IP3,
++            0
++        );
++        write(&mut device, ASIC_BM_CTL, 1 << 24);
++        assert_eq!(
++            device.cpu.cop0.regs[device::cop0::COP0_CAUSE_REG] & COP0_CAUSE_IP3,
++            0
++        );
++        assert_eq!(
++            status(&mut device) & 0x41,
++            0,
++            "reset and change flags cleared"
++        );
++    }
++
++    #[test]
++    fn seek_and_read_a_sector() {
++        let mut device = with_disk();
++        command(&mut device, command::READ_SEEK, 20); // head 0, track 20: LBA 40 and 41
++        assert_eq!(read(&mut device, 0x0500_050C) >> 16, 0x6000 | 20);
++        write(&mut device, ASIC_HOST_SECBYTE, (0xE8 - 1) << 16);
++        // BM: start, read, sector 0 of block 0
++        write(&mut device, ASIC_BM_CTL, (1 << 31) | (1 << 30));
++        run_event(&mut device, EVENT_TYPE_DD_BM);
++        let s = status(&mut device); // acknowledges, and asks for the next sector
++        assert_ne!(s & STATUS_BM_INT, 0);
++        assert_ne!(s & (1 << 14), 0, "user sector ready");
++        assert_eq!(read(&mut device, DS), 40);
++        assert_eq!(read(&mut device, DS + 4), 0xA5A5_A5A5);
++        assert!(device.cpu.events[EVENT_TYPE_DD_BM].enabled);
++        assert_eq!(status(&mut device) & STATUS_BM_INT, 0);
++        run_event(&mut device, EVENT_TYPE_DD_BM);
++        assert_eq!(read(&mut device, DS), 0xA5A5_A5A5, "sector 1");
++        // PI DMA of the sector buffer
++        let (_, to_rdram) = pi_handlers(&device, 0x0500_0400).unwrap();
++        device.rdram.mem = vec![0; 0x800000];
++        to_rdram(&mut device, 0x0500_0400, 0x100, 8);
++        let byte = |d: &device::Device, i: usize| d.rdram.mem[i ^ d.byte_swap];
++        assert_eq!(
++            (0..4).map(|i| byte(&device, 0x100 + i)).collect::<Vec<_>>(),
++            vec![0xA5; 4]
++        );
++        // the retail copy protection: block 12 (track 6) reads with C1 errors
++        command(&mut device, command::READ_SEEK, 6);
++        write(&mut device, ASIC_BM_CTL, (1 << 31) | (1 << 30));
++        run_event(&mut device, EVENT_TYPE_DD_BM);
++        assert_ne!(read(&mut device, ASIC_BM_CTL) >> 16 & (1 << 6), 0);
++    }
++
++    #[test]
++    fn writes_go_to_the_overlay_and_the_writes_file() {
++        let dir = std::env::temp_dir().join(format!("gopher64-dd-test-{}", std::process::id()));
++        std::fs::create_dir_all(&dir).unwrap();
++        let path = dir.join("test.ddw");
++        let _ = std::fs::remove_file(&path);
++        let image = disk::test_images::synthetic_ndd(0, b"TSTJ");
++        let mut device = attached(Some(disk::Disk::parse(image).unwrap()), Some(path.clone()));
++
++        // a ROM-area track: write protected
++        write(&mut device, ASIC_DATA, 20 << 16);
++        write(
++            &mut device,
++            ASIC_CMD_STATUS,
++            u32::from(command::WRITE_SEEK) << 16,
++        );
++        run_event(&mut device, EVENT_TYPE_DD_MECHA);
++        assert_ne!(
++            status(&mut device) & 0b110,
++            0,
++            "write protect and mecha error"
++        );
++        write(&mut device, ASIC_BM_CTL, 1 << 24);
++
++        // a RAM-area track (type 0: zone 3 on), head 0 track 0x1D1
++        command(&mut device, command::WRITE_SEEK, 0x1D1);
++        write(&mut device, ASIC_HOST_SECBYTE, (0xC0 - 1) << 16);
++        write(&mut device, ASIC_BM_CTL, 1 << 31); // start, write mode, sector 0
++        run_event(&mut device, EVENT_TYPE_DD_BM); // asks for sector 0's data
++        assert!(device.dd.state.overlay.is_empty());
++        write(&mut device, DS, 0xDEAD_BEEF);
++        let _ = status(&mut device);
++        run_event(&mut device, EVENT_TYPE_DD_BM); // writes sector 0
++        let index = disk::block_index(0, 0x1D1, 0);
++        let disk = device.dd.disk.as_ref().unwrap();
++        let first: Vec<u8> = (0..4)
++            .map(|i| disk.read(&device.dd.state.overlay, index, i))
++            .collect();
++        assert_eq!(first, vec![0xDE, 0xAD, 0xBE, 0xEF]);
++        assert!(device.dd.dirty);
++        run_event(&mut device, EVENT_TYPE_DD_SAVE);
++        assert!(!device.dd.dirty);
++        let file = std::fs::read(&path).unwrap();
++        let overlay = disk::decode_writes(&file, &device.dd.disk.as_ref().unwrap().hash).unwrap();
++        assert_eq!(overlay, device.dd.state.overlay);
++        // the image itself is untouched
++        assert_eq!(
++            disk::test_images::synthetic_ndd(0, b"TSTJ").len(),
++            disk::NDD_SIZE
++        );
++        let _ = std::fs::remove_dir_all(&dir);
++    }
++
++    #[test]
++    fn clock_commands_and_ticks() {
++        let mut device = with_disk();
++        command(&mut device, command::SET_RTC_YEAR_MONTH, 0x9912);
++        command(&mut device, command::SET_RTC_DAY_HOUR, 0x3123);
++        command(&mut device, command::SET_RTC_MINUTE_SECOND, 0x5959);
++        run_event(&mut device, EVENT_TYPE_DD_CLOCK);
++        assert!(
++            device.cpu.events[EVENT_TYPE_DD_CLOCK].enabled,
++            "ticks every second"
++        );
++        command(&mut device, command::GET_RTC_MINUTE_SECOND, 0);
++        assert_eq!(read(&mut device, ASIC_DATA) >> 16, 0x0000);
++        command(&mut device, command::GET_RTC_DAY_HOUR, 0);
++        assert_eq!(read(&mut device, ASIC_DATA) >> 16, 0x0100);
++        command(&mut device, command::GET_RTC_YEAR_MONTH, 0);
++        assert_eq!(read(&mut device, ASIC_DATA) >> 16, 0x0001);
++        // leap years (two-digit), and an invalid time stops the clock
++        let mut rtc = [0x24, 0x02, 0x28, 0x23, 0x59, 0x59];
++        rtc_tick_second(&mut rtc);
++        assert_eq!(rtc, [0x24, 0x02, 0x29, 0, 0, 0]);
++        let mut rtc = [0x23, 0x02, 0x28, 0x23, 0x59, 0x59];
++        rtc_tick_second(&mut rtc);
++        assert_eq!(rtc, [0x23, 0x03, 0x01, 0, 0, 0]);
++        let mut rtc = [0x23, 0x13, 0x01, 0, 0, 0];
++        rtc_tick_second(&mut rtc);
++        assert_eq!(rtc, [0x23, 0x13, 0x01, 0, 0, 0]);
++    }
++
++    #[test]
++    fn state_entry_round_trip() {
++        // (a Device is deserialized on the stack in a debug build: a thread with room for it)
++        std::thread::Builder::new()
++            .stack_size(256 << 20)
++            .spawn(state_entry_round_trip_body)
++            .unwrap()
++            .join()
++            .unwrap();
++    }
++
++    fn state_entry_round_trip_body() {
++        let mut device = with_disk();
++        command(&mut device, command::READ_SEEK, 33);
++        let mut snapshot = device::Device::new(false);
++        snapshot.clone_state(&device);
++        let entry = state_entry(&device.dd, &snapshot).unwrap();
++        let device_bytes = postcard::to_stdvec(&snapshot).unwrap();
++        let mut loaded = postcard::from_bytes::<Box<device::Device>>(&device_bytes).unwrap();
++        assert!(!loaded.cpu.events[EVENT_TYPE_DD_CLOCK].enabled);
++        loaded = restore_entry(&device.dd, loaded, Some(entry.clone())).unwrap();
++        assert!(loaded.cpu.events[EVENT_TYPE_DD_CLOCK] == device.cpu.events[EVENT_TYPE_DD_CLOCK]);
++        assert_eq!(loaded.dd.state.regs.current_track, 0x6000 | 33);
++        // a state without the entry, or for another disk, is refused with a 64DD
++        assert!(restore_entry(&device.dd, loaded, None).is_none());
++        let other = attached(None, None);
++        let loaded = postcard::from_bytes::<Box<device::Device>>(&device_bytes).unwrap();
++        assert!(restore_entry(&other.dd, loaded, Some(entry)).is_none());
++    }
++
++    #[test]
++    fn events_keep_gopher64s_state_format() {
++        // the device entry's events are the 16 Gopher64 had, element for element
++        let mut events = [Event {
++            enabled: false,
++            count: u64::MAX,
++        }; EVENT_TYPE_COUNT];
++        events[3] = Event {
++            enabled: true,
++            count: 77,
++        };
++        events[EVENT_TYPE_DD_BM].enabled = true;
++        #[derive(serde::Serialize)]
++        struct New<'a>(#[serde(serialize_with = "serialize_events")] &'a [Event; EVENT_TYPE_COUNT]);
++        let old: [Event; EVENT_TYPE_SAVED_COUNT] = events[..16].try_into().unwrap();
++        assert_eq!(
++            postcard::to_stdvec(&New(&events)).unwrap(),
++            postcard::to_stdvec(&old).unwrap()
++        );
++    }
++
++    #[test]
++    fn placeholder_names_the_run_by_the_disk() {
++        let device = with_disk();
++        let rom = placeholder_rom(&device.dd);
++        assert_eq!(&rom[0x3B..0x3F], b"TSTJ");
++        assert_eq!(device::cart::rom::ipl3_model(&rom), 0);
++        assert!(!device::cart::rom::is_system_pal(&rom));
++        assert_eq!(
++            device.cart.cic_seed, 0,
++            "init sets the seed; start does not"
++        );
++        let mut device = device::Device::new(false);
++        device.dd = attached(None, None).dd;
++        init(&mut device);
++        assert_eq!(device.cart.cic_seed, 0xDD);
++        assert_eq!(device.rdram.size, 0x800000);
++    }
++
++    #[test]
++    fn review_no_cartridge_keeps_the_placeholder_header() {
++        let mut device = device::Device::new(false);
++        device.dd = attached(None, None).dd;
++        device.cart.rom = placeholder_rom(&device.dd);
++        device::memory::init(&mut device);
++        start(&mut device);
++        assert_eq!(
++            device.cart.rom.len(),
++            0x1000,
++            "kept for its readers (the VRU's region check)"
++        );
++        assert_eq!(device.cart.rom[0x3E], b'J');
++        // the CPU and PI still see open bus there
++        assert_eq!(read(&mut device, 0x1000_0040), 0x0040_0040);
++        assert!(pi_handlers(&device, 0x1000_0000).is_some());
++    }
++
++    #[test]
++    fn review_dma_stays_in_the_buffer_it_started_in() {
++        let mut device = with_disk();
++        device.rdram.mem = vec![0; 0x800000];
++        for i in 0..DS_SIZE {
++            device.dd.state.regs.ds[i] = i as u8;
++        }
++        device.dd.state.regs.ms[0] = 0x99;
++        // from DS 0xF8, 16 bytes: 8 from DS, then the bus keeps its last halfword (not MS's bytes)
++        let (_, to_rdram) = pi_handlers(&device, 0x0500_04F8).unwrap();
++        to_rdram(&mut device, 0x0500_04F8, 0x200, 16);
++        let got: Vec<u8> = (0..16)
++            .map(|i| device.rdram.mem[(0x200 + i) ^ device.byte_swap])
++            .collect();
++        assert_eq!(&got[..8], &[0xF8, 0xF9, 0xFA, 0xFB, 0xFC, 0xFD, 0xFE, 0xFF]);
++        assert_eq!(&got[8..], &[0xFE, 0xFF, 0xFE, 0xFF, 0xFE, 0xFF, 0xFE, 0xFF]);
++        // to C2S from 0x3FC, 8 bytes: the last 4 of C2S only, DS untouched
++        for i in 0..8 {
++            device.rdram.mem[(0x300 + i) ^ device.byte_swap] = 0x55;
++        }
++        let (from_rdram, _) = pi_handlers(&device, 0x0500_03FC).unwrap();
++        from_rdram(&mut device, 0x0500_03FC, 0x300, 8);
++        assert_eq!(&device.dd.state.regs.c2s[0x3FC..], &[0x55; 4]);
++        assert_eq!(&device.dd.state.regs.ds[..4], &[0, 1, 2, 3]);
++        // from no device: the start address's low half, as ares' bus latch
++        let (_, to_rdram) = pi_handlers(&device, 0x0500_05C0).unwrap();
++        to_rdram(&mut device, 0x0500_05C0, 0x400, 4);
++        let got: Vec<u8> = (0..4)
++            .map(|i| device.rdram.mem[(0x400 + i) ^ device.byte_swap])
++            .collect();
++        assert_eq!(got, vec![0x05, 0xC0, 0x05, 0xC0]);
++    }
++
++    #[test]
++    fn review_reset_powers_the_drive_again() {
++        let mut device = with_disk();
++        command(&mut device, command::CLEAR_RESET_FLAG, 0);
++        command(&mut device, command::READ_SEEK, 40);
++        assert_eq!(status(&mut device) & (1 << 6), 0);
++        device.dd.state.rtc = [0x12, 0x01, 0x02, 0x03, 0x04, 0x05];
++        reset(&mut device);
++        assert_ne!(status(&mut device) & (1 << 6), 0, "reset state again");
++        assert_eq!(device.dd.state.regs.current_track, 0);
++        assert_eq!(
++            device.dd.state.rtc,
++            [0x12, 0x01, 0x02, 0x03, 0x04, 0x05],
++            "clock kept"
++        );
++        // and nothing without a 64DD
++        let mut plain = device::Device::new(false);
++        reset(&mut plain);
++        assert!(!plain.cpu.events[EVENT_TYPE_DD_CLOCK].enabled);
++    }
++
++    #[test]
++    fn review_states_are_checked() {
++        std::thread::Builder::new()
++            .stack_size(256 << 20)
++            .spawn(review_states_are_checked_body)
++            .unwrap()
++            .join()
++            .unwrap();
++    }
++
++    fn review_states_are_checked_body() {
++        let device = with_disk();
++        let mut snapshot = device::Device::new(false);
++        snapshot.clone_state(&device);
++        let device_bytes = postcard::to_stdvec(&snapshot).unwrap();
++        let load = || postcard::from_bytes::<Box<device::Device>>(&device_bytes).unwrap();
++        // a 64DD state into a run without one
++        let entry = state_entry(&device.dd, &snapshot).unwrap();
++        assert!(restore_entry(&Dd::default(), load(), Some(entry.clone())).is_none());
++        assert!(restore_entry(&Dd::default(), load(), None).is_some());
++        // malformed buffers and overlay blocks
++        let mut bad = snapshot.dd.state.clone();
++        bad.regs.ds.pop();
++        let entry_of = |state: DdState| {
++            postcard::to_stdvec(&StateEntry {
++                state,
++                events: snapshot.cpu.events[EVENT_TYPE_SAVED_COUNT..].to_vec(),
++            })
++            .unwrap()
++        };
++        assert!(restore_entry(&device.dd, load(), Some(entry_of(bad))).is_none());
++        let mut bad = snapshot.dd.state.clone();
++        bad.overlay.insert(0, vec![0; 10]);
++        assert!(restore_entry(&device.dd, load(), Some(entry_of(bad))).is_none());
++        let mut bad = snapshot.dd.state.clone();
++        bad.overlay.insert(disk::BLOCKS as u32, vec![0; 0x4D08]);
++        assert!(restore_entry(&device.dd, load(), Some(entry_of(bad))).is_none());
++        let mut good = snapshot.dd.state.clone();
++        good.overlay.insert(0, vec![0; 0x4D08]);
++        assert!(restore_entry(&device.dd, load(), Some(entry_of(good))).is_some());
++        assert!(restore_entry(&device.dd, load(), Some(vec![1, 2, 3])).is_none());
++    }
++
++    #[test]
++    fn review_restored_writes_are_saved() {
++        let mut device = with_disk();
++        let mut snapshot = device::Device::new(false);
++        snapshot.clone_state(&device);
++        assert!(!device.cpu.events[EVENT_TYPE_DD_SAVE].enabled);
++        // the same writes: nothing to save
++        device.clone_state(&snapshot);
++        assert!(!device.cpu.events[EVENT_TYPE_DD_SAVE].enabled);
++        snapshot.dd.state.overlay.insert(0, vec![0; 0x4D08]);
++        device.clone_state(&snapshot);
++        assert!(device.dd.dirty);
++        assert!(
++            device.cpu.events[EVENT_TYPE_DD_SAVE].enabled,
++            "the writes file follows"
++        );
++    }
++
++    #[test]
++    fn review_only_known_ipls_are_found() {
++        let dir = std::env::temp_dir().join(format!("gopher64-dd-ipl-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(&dir).unwrap();
++        std::fs::write(dir.join("a-unknown.bin"), vec![0u8; IPL_SIZE]).unwrap();
++        assert!(find_ipl(&dir, Some(disk::Region::Japan)).is_none());
++        let mut us = vec![0u8; IPL_SIZE];
++        us[0x3B..0x3F].copy_from_slice(b"NDDE");
++        std::fs::write(dir.join("b-us.bin"), &us).unwrap();
++        let mut jp = us.clone();
++        jp[0x3B..0x3F].copy_from_slice(b"NDDJ");
++        std::fs::write(dir.join("c-jp.bin"), &jp).unwrap();
++        assert_eq!(
++            find_ipl(&dir, Some(disk::Region::Japan)),
++            Some(dir.join("c-jp.bin"))
++        );
++        assert_eq!(
++            find_ipl(&dir, Some(disk::Region::Usa)),
++            Some(dir.join("b-us.bin"))
++        );
++        assert_eq!(find_ipl(&dir, None), Some(dir.join("b-us.bin")));
++        let _ = std::fs::remove_dir_all(&dir);
++    }
++}
+diff --git a/src/device/dd/disk.rs b/src/device/dd/disk.rs
+new file mode 100644
+index 0000000..0ac0e0f
+--- /dev/null
++++ b/src/device/dd/disk.rs
+@@ -0,0 +1,1114 @@
++// 64DD disk images: format detection, the system area check, the map from the drive's physical
++// blocks (head, track, block) to the bytes of the user's image, and the writes kept beside it.
++//
++// Ported from ares (ISC), n64/dd/*, by LuigiBlood and the ares team (the geometry of
++// n64/dd/drive.cpp, the format handling of mia/medium/nintendo-64dd.cpp).
++//
++// ----------------------------------------------------------------------
++// ares
++//
++// Copyright (c) 2004-2025 ares team, Near et al
++//
++// Permission to use, copy, modify, and/or distribute this software for any
++// purpose with or without fee is hereby granted, provided that the above
++// copyright notice and this permission notice appear in all copies.
++//
++// THE SOFTWARE IS PROVIDED "AS IS" AND THE AUTHOR DISCLAIMS ALL WARRANTIES
++// WITH REGARD TO THIS SOFTWARE INCLUDING ALL IMPLIED WARRANTIES OF
++// MERCHANTABILITY AND FITNESS. IN NO EVENT SHALL THE AUTHOR BE LIABLE FOR
++// ANY SPECIAL, DIRECT, INDIRECT, OR CONSEQUENTIAL DAMAGES OR ANY DAMAGES
++// WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER IN AN
++// ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF
++// OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
++// ----------------------------------------------------------------------
++//
++// Differences from ares, all in how the medium is held, none in what the drive reads:
++// - ares converts every image to its physical layout (0x435B0C0 bytes, the "MAME" layout) and
++//   writes the whole converted image back. Here the user's image is kept as it is and never
++//   written: a table maps each physical block to its bytes in the image (or to the system and ID
++//   blocks made for a .d64), and the blocks the game writes are kept in an overlay, saved in a
++//   file of its own (encode_writes / decode_writes).
++// - ares stamps the disk ID's manufacture line and time with the current time and a random byte
++//   each time an image is loaded (to tell copies apart when swapping). Not done here: the disk
++//   reads as dumped, every time, so a run is reproducible.
++
++use std::collections::BTreeMap;
++
++/// The retail dump format (Mupen64Plus, ares, converted MAME dumps): the 0x10DC logical blocks in
++/// LBA order.
++pub const NDD_SIZE: usize = 0x3DEC800;
++/// The physical layout (MAME's raw format, ares' own): every track of both heads in order.
++pub const PHYSICAL_SIZE: usize = 0x435B0C0;
++/// The development format (.d64): a 0x200 header, then the ROM and RAM areas' blocks.
++const D64_MIN: usize = 0x4F08;
++const D64_END: usize = 0x3D79140;
++
++pub const TRACKS: u32 = 1175; // per head
++/// Physical blocks: 2 heads x 1175 tracks x 2 blocks; the index of ares' error table
++pub const BLOCKS: usize = 2 * TRACKS as usize * 2;
++pub const LBAS: u32 = 0x10DC;
++const SYSTEM_BLOCKS: [usize; 4] = [0, 1, 8, 9];
++const DISK_ID_BLOCKS: [usize; 2] = [14, 15];
++const SECTORS_PER_BLOCK: usize = 85;
++
++const BLOCK_SIZE: [u32; 9] = [
++    0x4D08, 0x47B8, 0x4510, 0x3FC0, 0x3A70, 0x3520, 0x2FD0, 0x2A80, 0x2530,
++];
++/// Block size per physical zone (head 0: zones 0-7, head 1: zones 8-15), drive.cpp's table
++const ZONE_BLOCK_SIZE: [u32; 16] = [
++    0x4D08, 0x47B8, 0x4510, 0x3FC0, 0x3A70, 0x3520, 0x2FD0, 0x2A80, 0x47B8, 0x4510, 0x3FC0, 0x3A70,
++    0x3520, 0x2FD0, 0x2A80, 0x2530,
++];
++/// Where each physical zone starts in the physical layout
++const ZONE_START: [u32; 16] = [
++    0x0, 0x5F15E0, 0xB79D00, 0x10801A0, 0x1523720, 0x1963D80, 0x1D414C0, 0x20BBCE0, 0x23196E0,
++    0x28A1E00, 0x2DF5DC0, 0x3299340, 0x36D99A0, 0x3AB70E0, 0x3E31900, 0x4149200,
++];
++/// The first track of each zone (both heads), and for zones 8-15 the track a head-1 zone's
++/// logical blocks start from (head 1 is read from its outer track inwards)
++const TRACK_PHYSICAL: [u32; 16] = [
++    0x000, 0x09E, 0x13C, 0x1D1, 0x266, 0x2FB, 0x390, 0x425, 0x091, 0x12F, 0x1C4, 0x259, 0x2EE,
++    0x383, 0x418, 0x48A,
++];
++const VZONE_LBA: [[u16; 16]; 7] = [
++    [
++        0x0124, 0x0248, 0x035A, 0x047E, 0x05A2, 0x06B4, 0x07C6, 0x08D8, 0x09EA, 0x0AB6, 0x0B82,
++        0x0C94, 0x0DA6, 0x0EB8, 0x0FCA, 0x10DC,
++    ],
++    [
++        0x0124, 0x0248, 0x035A, 0x046C, 0x057E, 0x06A2, 0x07C6, 0x08D8, 0x09EA, 0x0AFC, 0x0BC8,
++        0x0C94, 0x0DA6, 0x0EB8, 0x0FCA, 0x10DC,
++    ],
++    [
++        0x0124, 0x0248, 0x035A, 0x046C, 0x057E, 0x0690, 0x07A2, 0x08C6, 0x09EA, 0x0AFC, 0x0C0E,
++        0x0CDA, 0x0DA6, 0x0EB8, 0x0FCA, 0x10DC,
++    ],
++    [
++        0x0124, 0x0248, 0x035A, 0x046C, 0x057E, 0x0690, 0x07A2, 0x08B4, 0x09C6, 0x0AEA, 0x0C0E,
++        0x0D20, 0x0DEC, 0x0EB8, 0x0FCA, 0x10DC,
++    ],
++    [
++        0x0124, 0x0248, 0x035A, 0x046C, 0x057E, 0x0690, 0x07A2, 0x08B4, 0x09C6, 0x0AD8, 0x0BEA,
++        0x0D0E, 0x0E32, 0x0EFE, 0x0FCA, 0x10DC,
++    ],
++    [
++        0x0124, 0x0248, 0x035A, 0x046C, 0x057E, 0x0690, 0x07A2, 0x086E, 0x0980, 0x0A92, 0x0BA4,
++        0x0CB6, 0x0DC8, 0x0EEC, 0x1010, 0x10DC,
++    ],
++    [
++        0x0124, 0x0248, 0x035A, 0x046C, 0x057E, 0x0690, 0x07A2, 0x086E, 0x093A, 0x0A4C, 0x0B5E,
++        0x0C70, 0x0D82, 0x0E94, 0x0FB8, 0x10DC,
++    ],
++];
++const VZONE_TO_PZONE: [[u8; 16]; 7] = [
++    [
++        0x0, 0x1, 0x2, 0x9, 0x8, 0x3, 0x4, 0x5, 0x6, 0x7, 0xF, 0xE, 0xD, 0xC, 0xB, 0xA,
++    ],
++    [
++        0x0, 0x1, 0x2, 0x3, 0xA, 0x9, 0x8, 0x4, 0x5, 0x6, 0x7, 0xF, 0xE, 0xD, 0xC, 0xB,
++    ],
++    [
++        0x0, 0x1, 0x2, 0x3, 0x4, 0xB, 0xA, 0x9, 0x8, 0x5, 0x6, 0x7, 0xF, 0xE, 0xD, 0xC,
++    ],
++    [
++        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0xC, 0xB, 0xA, 0x9, 0x8, 0x6, 0x7, 0xF, 0xE, 0xD,
++    ],
++    [
++        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0xD, 0xC, 0xB, 0xA, 0x9, 0x8, 0x7, 0xF, 0xE,
++    ],
++    [
++        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0xE, 0xD, 0xC, 0xB, 0xA, 0x9, 0x8, 0xF,
++    ],
++    [
++        0x0, 0x1, 0x2, 0x3, 0x4, 0x5, 0x6, 0x7, 0xF, 0xE, 0xD, 0xC, 0xB, 0xA, 0x9, 0x8,
++    ],
++];
++
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub enum Format {
++    Ndd,
++    Physical,
++    D64,
++}
++
++impl Format {
++    pub fn name(self) -> &'static str {
++        match self {
++            Format::Ndd => "NDD",
++            Format::Physical => "physical (MAME raw)",
++            Format::D64 => "D64",
++        }
++    }
++}
++
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++pub enum Region {
++    Japan,
++    Usa,
++    Development,
++}
++
++impl Region {
++    pub fn name(self) -> &'static str {
++        match self {
++            Region::Japan => "NTSC-J",
++            Region::Usa => "NTSC-U",
++            Region::Development => "NTSC-DEV",
++        }
++    }
++}
++
++/// Where a physical block's bytes are
++#[derive(Clone, Copy, PartialEq, Eq, Debug)]
++enum Source {
++    None, // not on the medium: reads as zeros, as in ares' converted image
++    Image(u32),
++    Synth(u32),
++}
++
++/// The physical zone (0-7 head 0, 8-15 head 1) of a track (drive.cpp seekSector)
++pub fn physical_zone(head: u32, track: u32) -> usize {
++    let mut zone = 0;
++    for start in &TRACK_PHYSICAL[1..8] {
++        if track >= *start {
++            zone += 1;
++        }
++    }
++    zone + if head != 0 { 8 } else { 0 }
++}
++
++/// The size of the blocks of a track, in bytes (85 user sectors)
++pub fn block_size(head: u32, track: u32) -> u32 {
++    ZONE_BLOCK_SIZE[physical_zone(head, track)]
++}
++
++/// Where a block is in the physical layout (drive.cpp seekSector, without the sector)
++pub fn physical_offset(head: u32, track: u32, block: u32) -> u32 {
++    let zone = physical_zone(head, track);
++    let size = ZONE_BLOCK_SIZE[zone];
++    ZONE_START[zone] + size * 2 * (track - TRACK_PHYSICAL[zone % 8]) + size * block
++}
++
++/// A physical block's index (ares' error table index: head * 2350 + track * 2 + block)
++pub fn block_index(head: u32, track: u32, block: u32) -> usize {
++    (head * TRACKS * 2 + track * 2 + block) as usize
++}
++
++pub fn block_from_index(index: usize) -> (u32, u32, u32) {
++    let index = index as u32;
++    (index / (TRACKS * 2), (index % (TRACKS * 2)) / 2, index & 1)
++}
++
++pub fn block_size_of_index(index: usize) -> u32 {
++    let (head, track, _) = block_from_index(index);
++    block_size(head, track)
++}
++
++/// Whether a track is in the disk type's ROM (read-only) area (drive.cpp seekTrack)
++pub fn is_rom_area(disk_type: u8, head: u32, track: u32) -> bool {
++    let mut zone: u32 = 0;
++    for start in &TRACK_PHYSICAL[1..8] {
++        if track >= *start {
++            zone += 1;
++        }
++    }
++    zone += head;
++    zone <= disk_type as u32 + 2
++}
++
++/// Where a logical block is on the disk: (head, track, block), for a disk type (0-6) and the
++/// system area's format data (its zone defect counts at 0x08 and defect tracks at 0x20).
++/// The conversion loop of ares' Nintendo64DD::transform.
++pub fn lba_to_physical(disk_type: usize, lba: u32, format: &[u8]) -> (u32, u32, u32) {
++    let table = &VZONE_LBA[disk_type];
++    let vzone = table.iter().filter(|start| lba >= **start as u32).count();
++    let pzone = VZONE_TO_PZONE[disk_type][vzone] as usize;
++    let head = u32::from(pzone > 7);
++    let lba_vzone = if vzone > 0 {
++        lba - table[vzone - 1] as u32
++    } else {
++        lba
++    };
++    let track_start = TRACK_PHYSICAL[if head != 0 { pzone - 8 } else { pzone }];
++    let mut track = TRACK_PHYSICAL[pzone];
++    if head != 0 {
++        track -= lba_vzone >> 1;
++    } else {
++        track += lba_vzone >> 1;
++    }
++    let byte = |i: usize| u32::from(format.get(i).copied().unwrap_or(0));
++    let mut defect_offset = if pzone > 0 { byte(8 + pzone - 1) } else { 0 };
++    // (ares subtracts unsigned; a malformed table that would wrap is taken as no defects)
++    let mut defect_amount = byte(8 + pzone).saturating_sub(defect_offset);
++    while defect_amount != 0 {
++        let Some(defect) = format.get(0x20 + defect_offset as usize) else {
++            break;
++        };
++        if u32::from(*defect) + track_start > track {
++            break;
++        }
++        track += 1;
++        defect_offset += 1;
++        defect_amount -= 1;
++    }
++    let block = if lba & 3 == 0 || lba & 3 == 3 { 0 } else { 1 };
++    (head, track, block)
++}
++
++fn lba_size(disk_type: usize, lba: u32) -> u32 {
++    let table = &VZONE_LBA[disk_type];
++    let vzone = table.iter().filter(|start| lba >= **start as u32).count();
++    let pzone = VZONE_TO_PZONE[disk_type][vzone] as usize;
++    BLOCK_SIZE[if pzone > 7 { pzone - 7 } else { pzone }]
++}
++
++fn repeat_check(input: &[u8], repeat: usize, size: usize) -> bool {
++    (0..size).all(|i| (0..repeat).all(|j| input.get(i) == input.get(j * size + i)))
++}
++
++fn detect_format(size: usize) -> Option<Format> {
++    if size == NDD_SIZE {
++        Some(Format::Ndd)
++    } else if size == PHYSICAL_SIZE {
++        Some(Format::Physical)
++    } else if (D64_MIN..D64_END).contains(&size) {
++        Some(Format::D64)
++    } else {
++        None
++    }
++}
++
++/// The ROM and RAM areas' LBAs a .d64 holds (absolute, the system area's 24 included)
++fn d64_ranges(input: &[u8]) -> Option<(u32, u32, u32, u32)> {
++    let rom_start = 24;
++    let rom_end = ((input[0xE0] as u32) << 8) + input[0xE1] as u32 + 24;
++    let mut ram_start = ((input[0xE2] as u32) << 8) + input[0xE3] as u32;
++    let mut ram_end = ((input[0xE4] as u32) << 8) + input[0xE5] as u32;
++    if (ram_start == 0xFFFF) != (ram_end == 0xFFFF) {
++        return None;
++    }
++    if ram_start != 0xFFFF {
++        ram_start += 24;
++        ram_end += 24;
++    }
++    Some((rom_start, rom_end, ram_start, ram_end))
++}
++
++fn d64_copied(lba: u32, (rom_start, rom_end, ram_start, ram_end): (u32, u32, u32, u32)) -> bool {
++    !(lba < rom_start || (lba > rom_end && lba < ram_start) || lba > ram_end)
++}
++
++/// ares' sizeCheck for a .d64: the header's areas must account for the file exactly
++fn d64_size_check(input: &[u8]) -> bool {
++    let disk_type = input[0x05] as usize;
++    if disk_type >= 7 {
++        return false;
++    }
++    let Some(ranges) = d64_ranges(input) else {
++        return false;
++    };
++    let mut size: usize = 0x200;
++    for lba in 0..LBAS {
++        if d64_copied(lba, ranges) {
++            size += lba_size(disk_type, lba) as usize;
++        }
++    }
++    input.len() == size
++}
++
++/// ares' createErrorTable: which physical blocks read with errors. The system area's copies that
++/// fail the check are marked; a retail disk also has block 12 marked (its copy protection: the
++/// IPL expects that read to fail). Empty for an image that is not a 64DD disk.
++fn error_table(input: &[u8], format: Format) -> Option<Vec<u8>> {
++    let mut output = vec![0u8; BLOCKS];
++    let block0 = BLOCK_SIZE[0] as usize;
++    output[12] = 0;
++    if format == Format::Ndd || format == Format::Physical {
++        for &block in &SYSTEM_BLOCKS {
++            let offset = block * block0;
++            output[block] = 1;
++            let b = &input[offset..offset + block0];
++            if b[0] != 0xE8 && b[0] != 0x22 {
++                continue;
++            }
++            if b[1] != 0x48 && b[1] != 0x63 {
++                continue;
++            }
++            if b[2] != 0xD3 && b[2] != 0xEE {
++                continue;
++            }
++            if b[3] != 0x16 && b[3] != 0x56 {
++                continue;
++            }
++            if b[4] != 0x10 || b[5] < 0x10 || b[5] >= 0x17 {
++                continue;
++            }
++            if b[0x18..0x1C] != [0xFF; 4] || b[0x1C] != 0x80 {
++                continue;
++            }
++            if !repeat_check(&b[..0xE8 * 0x55], 0x55, 0xE8) {
++                continue;
++            }
++            output[block] = 0;
++            // confirmed retail: block 12 reads with an error
++            output[12] = 1;
++        }
++        if output[12] == 0 {
++            // not retail: a development disk?
++            for &block in &SYSTEM_BLOCKS {
++                let source = if format == Format::Ndd {
++                    (block + 2) ^ 1
++                } else {
++                    block + 2
++                };
++                let offset = source * block0;
++                output[block + 2] = 1;
++                let b = &input[offset..offset + block0];
++                if b[0..4] != [0; 4] {
++                    continue;
++                }
++                if b[4] != 0x10 || b[5] < 0x10 || b[5] >= 0x17 {
++                    continue;
++                }
++                if b[0x18..0x1C] != [0xFF; 4] || b[0x1C] != 0x80 {
++                    continue;
++                }
++                if !repeat_check(&b[..0xC0 * 0x55], 0x55, 0xC0) {
++                    continue;
++                }
++                output[block + 2] = 0;
++            }
++        }
++    } else {
++        // a .d64 is taken as a development disk
++        output[12] = 0;
++        for &block in &SYSTEM_BLOCKS {
++            output[block] = 1;
++            output[block + 2] = 0;
++        }
++        for (n, byte) in input[..0x200].iter().enumerate() {
++            let skipped = matches!(n, 0x005..=0x007 | 0x01C..=0x01F | 0x0E0..=0x0E5 | 0x1E8)
++                || (0x100..0x120).contains(&n);
++            if !skipped && *byte != 0 {
++                return None;
++            }
++        }
++        if input[0x005] >= 0x07
++            || input[0x006] >= 0x02
++            || input[0x01C] != 0x80
++            || input[0x01D] >= 0x80
++            || input[0x0E0] > 0x10
++            || (input[0x0E2] > 0x10 && input[0x0E2] < 0xFF)
++            || (input[0x0E4] > 0x10 && input[0x0E4] < 0xFF)
++        {
++            return None;
++        }
++    }
++
++    for &block in &DISK_ID_BLOCKS {
++        if format == Format::D64 {
++            output[block] = 0;
++        } else {
++            let offset = block * block0;
++            output[block] = u8::from(!repeat_check(
++                &input[offset..offset + 0xE8 * 0x55],
++                0x55,
++                0xE8,
++            ));
++        }
++    }
++    Some(output)
++}
++
++/// A 64DD disk: the user's image (never written) and how the drive sees it
++pub struct Disk {
++    pub format: Format,
++    pub region: Region,
++    /// the disk ID's game code (4 characters, as in the disk ID block; unprintable bytes as '_')
++    pub id: String,
++    /// the system area's disk type (0-6)
++    pub disk_type: u8,
++    /// SHA-256 of the image file, upper-case hex (names the writes file, checks a state)
++    pub hash: String,
++    image: Vec<u8>,
++    synth: Vec<u8>,
++    map: Vec<Source>,
++    /// per physical block: nonzero when it reads with C1 errors (ares' error table)
++    pub error: Vec<u8>,
++}
++
++impl Disk {
++    /// Recognise and map an image (NDD, physical or D64, by size, then by content)
++    pub fn parse(image: Vec<u8>) -> Result<Disk, String> {
++        let Some(format) = detect_format(image.len()) else {
++            return Err(format!(
++                "not a 64DD disk image ({} bytes; NDD is {NDD_SIZE}, the physical layout {PHYSICAL_SIZE}, D64 between {D64_MIN} and {D64_END})",
++                image.len()
++            ));
++        };
++        if format == Format::D64 && !d64_size_check(&image) {
++            return Err(
++                "not a 64DD disk image (a .d64 whose header does not match its size)".into(),
++            );
++        }
++        let Some(error) = error_table(&image, format) else {
++            return Err("not a 64DD disk image (a .d64 with an invalid header)".into());
++        };
++        let dev = error[12] == 0;
++        let block0 = BLOCK_SIZE[0] as usize;
++
++        // the system data used for the conversion (transform)
++        let mut system_offset = None;
++        match format {
++            Format::Ndd => {
++                for &block in [9usize, 8, 1, 0].iter() {
++                    if dev {
++                        if error[block + 2] == 0 {
++                            system_offset = Some(((block + 2) ^ 1) * block0);
++                        }
++                    } else if error[block] == 0 {
++                        system_offset = Some(block * block0);
++                    }
++                }
++                if system_offset.is_none() {
++                    return Err("not a usable 64DD disk image (no valid system area)".into());
++                }
++            }
++            Format::Physical => {
++                // copied as it is; the system data is only read for the log
++                for &block in [9usize, 8, 1, 0].iter() {
++                    let block = if dev { block + 2 } else { block };
++                    if error[block] == 0 {
++                        system_offset = Some(block * block0);
++                    }
++                }
++            }
++            Format::D64 => system_offset = Some(0),
++        }
++        let format_data: Vec<u8> = system_offset
++            .map(|offset| image[offset..offset + 0xE8].to_vec())
++            .unwrap_or_else(|| vec![0; 0xE8]);
++        let disk_type = format_data[5] & 0xF;
++        if format != Format::Physical && disk_type >= 7 {
++            return Err(format!(
++                "not a usable 64DD disk image (disk type {disk_type})"
++            ));
++        }
++
++        let mut map = vec![Source::None; BLOCKS];
++        let mut synth = Vec::new();
++        match format {
++            Format::Physical => {
++                for (index, source) in map.iter_mut().enumerate() {
++                    let (head, track, block) = block_from_index(index);
++                    *source = Source::Image(physical_offset(head, track, block));
++                }
++            }
++            Format::Ndd => {
++                let mut position: u32 = 0;
++                for lba in 0..LBAS {
++                    let (head, track, block) =
++                        lba_to_physical(disk_type as usize, lba, &format_data);
++                    if track < TRACKS {
++                        map[block_index(head, track, block)] = Source::Image(position);
++                    }
++                    position += lba_size(disk_type as usize, lba);
++                }
++            }
++            Format::D64 => {
++                // the system area and the disk ID, as ares makes them
++                let copy = if dev { 0xC0 } else { 0xE8 };
++                for &block in &SYSTEM_BLOCKS {
++                    let mut sector = format_data[..copy].to_vec();
++                    sector[0x004] = 0x10;
++                    sector[0x005] = sector[0x005].wrapping_add(0x10);
++                    let start = synth.len() as u32;
++                    for _ in 0..SECTORS_PER_BLOCK {
++                        synth.extend_from_slice(&sector);
++                    }
++                    synth.resize(start as usize + block0, 0);
++                    map[block + if dev { 2 } else { 0 }] = Source::Synth(start);
++                }
++                for &block in &DISK_ID_BLOCKS {
++                    let start = synth.len() as u32;
++                    let sector = &image[0x100..0x100 + block0 / SECTORS_PER_BLOCK];
++                    for _ in 0..SECTORS_PER_BLOCK {
++                        synth.extend_from_slice(sector);
++                    }
++                    map[block] = Source::Synth(start);
++                }
++                let ranges = d64_ranges(&image).expect("checked by d64_size_check");
++                let mut position: u32 = 0x200;
++                for lba in 0..LBAS {
++                    if !d64_copied(lba, ranges) {
++                        continue;
++                    }
++                    let (head, track, block) =
++                        lba_to_physical(disk_type as usize, lba, &format_data);
++                    if track < TRACKS {
++                        map[block_index(head, track, block)] = Source::Image(position);
++                    }
++                    position += lba_size(disk_type as usize, lba);
++                }
++            }
++        }
++
++        // analyze: the region and the disk ID
++        let mut region = Region::Japan;
++        for &block in &SYSTEM_BLOCKS {
++            if dev {
++                if error[block + 2] != 0 {
++                    continue;
++                }
++                region = Region::Development;
++            } else {
++                if error[block] != 0 {
++                    continue;
++                }
++                region = if image[block * block0] == 0xE8 {
++                    Region::Japan
++                } else {
++                    Region::Usa
++                };
++            }
++            break;
++        }
++        let mut id = String::new();
++        for &block in &DISK_ID_BLOCKS {
++            if error[block] != 0 {
++                continue;
++            }
++            let offset = if format == Format::D64 {
++                0x100
++            } else {
++                block * block0
++            };
++            id = image[offset..offset + 4]
++                .iter()
++                .map(|&c| {
++                    if c.is_ascii_alphanumeric() {
++                        c as char
++                    } else {
++                        '_'
++                    }
++                })
++                .collect();
++            break;
++        }
++        if id.is_empty() {
++            id = String::from("____");
++        }
++
++        let hash = crate::device::cart::rom::calculate_hash(&image);
++        Ok(Disk {
++            format,
++            region,
++            id,
++            disk_type,
++            hash,
++            image,
++            synth,
++            map,
++            error,
++        })
++    }
++
++    #[cfg(test)]
++    fn base(&self, index: usize, offset: u32) -> u8 {
++        let at = |data: &[u8], start: u32| *data.get((start + offset) as usize).unwrap_or(&0);
++        match self.map[index] {
++            Source::None => 0,
++            Source::Image(start) => at(&self.image, start),
++            Source::Synth(start) => at(&self.synth, start),
++        }
++    }
++
++    /// A byte of a physical block, the game's writes first
++    #[cfg(test)]
++    pub fn read(&self, overlay: &BTreeMap<u32, Vec<u8>>, index: usize, offset: u32) -> u8 {
++        if index >= BLOCKS || offset >= block_size_of_index(index) {
++            return 0;
++        }
++        if let Some(block) = overlay.get(&(index as u32)) {
++            return block[offset as usize];
++        }
++        self.base(index, offset)
++    }
++
++    /// Bytes of a physical block from `offset` on, into `out` (a sector; zeros past the block)
++    pub fn read_into(
++        &self,
++        overlay: &BTreeMap<u32, Vec<u8>>,
++        index: usize,
++        offset: u32,
++        out: &mut [u8],
++    ) {
++        out.fill(0);
++        if index >= BLOCKS {
++            return;
++        }
++        let size = block_size_of_index(index) as usize;
++        let start = (offset as usize).min(size);
++        let end = (start + out.len()).min(size);
++        let n = end - start;
++        if let Some(block) = overlay.get(&(index as u32)) {
++            out[..n].copy_from_slice(&block[start..end]);
++            return;
++        }
++        let (data, base) = match self.map[index] {
++            Source::None => return,
++            Source::Image(base) => (&self.image, base as usize),
++            Source::Synth(base) => (&self.synth, base as usize),
++        };
++        let from = (base + start).min(data.len());
++        let to = (base + end).min(data.len());
++        out[..to - from].copy_from_slice(&data[from..to]);
++    }
++
++    /// Write bytes of a physical block from `offset` on (a sector; what passes the block's end is
++    /// dropped): into the overlay, the image stays as it is
++    pub fn write_from(
++        &self,
++        overlay: &mut BTreeMap<u32, Vec<u8>>,
++        index: usize,
++        offset: u32,
++        data: &[u8],
++    ) {
++        if index >= BLOCKS {
++            return;
++        }
++        let size = block_size_of_index(index) as usize;
++        let start = (offset as usize).min(size);
++        let end = (start + data.len()).min(size);
++        if start == end {
++            return;
++        }
++        let block = overlay.entry(index as u32).or_insert_with(|| {
++            let mut block = vec![0; size];
++            self.read_into(&BTreeMap::new(), index, 0, &mut block);
++            block
++        });
++        block[start..end].copy_from_slice(&data[..end - start]);
++    }
++
++    /// Write a byte of a physical block: into the overlay, the image stays as it is
++    #[cfg(test)]
++    pub fn write(
++        &self,
++        overlay: &mut BTreeMap<u32, Vec<u8>>,
++        index: usize,
++        offset: u32,
++        value: u8,
++    ) {
++        if index >= BLOCKS || offset >= block_size_of_index(index) {
++            return;
++        }
++        let block = overlay.entry(index as u32).or_insert_with(|| {
++            (0..block_size_of_index(index))
++                .map(|i| self.base(index, i))
++                .collect()
++        });
++        block[offset as usize] = value;
++    }
++}
++
++/// The writes file (the blocks the game wrote; the image is never changed), little-endian:
++///
++/// | offset | size | contents |
++/// | --- | --- | --- |
++/// | 0 | 8 | `PSG64DDW` |
++/// | 8 | 4 | version, 1 |
++/// | 12 | 4 | number of blocks N |
++/// | 16 | 32 | SHA-256 of the disk image the writes belong to |
++/// | 48 | ... | N records: block index (u32: head * 2350 + track * 2 + block), length (u32, the block's size), the block's bytes |
++///
++/// A block's record is the whole block as the game left it; on start it replaces that block of
++/// the image.
++pub const WRITES_MAGIC: &[u8; 8] = b"PSG64DDW";
++const WRITES_VERSION: u32 = 1;
++
++fn hash_bytes(hash: &str) -> [u8; 32] {
++    let mut bytes = [0u8; 32];
++    for (i, byte) in bytes.iter_mut().enumerate() {
++        *byte = hash
++            .get(i * 2..i * 2 + 2)
++            .and_then(|hex| u8::from_str_radix(hex, 16).ok())
++            .unwrap_or(0);
++    }
++    bytes
++}
++
++pub fn encode_writes(hash: &str, overlay: &BTreeMap<u32, Vec<u8>>) -> Vec<u8> {
++    let mut out = Vec::with_capacity(48 + overlay.values().map(|b| b.len() + 8).sum::<usize>());
++    out.extend_from_slice(WRITES_MAGIC);
++    out.extend_from_slice(&WRITES_VERSION.to_le_bytes());
++    out.extend_from_slice(&(overlay.len() as u32).to_le_bytes());
++    out.extend_from_slice(&hash_bytes(hash));
++    for (index, block) in overlay {
++        out.extend_from_slice(&index.to_le_bytes());
++        out.extend_from_slice(&(block.len() as u32).to_le_bytes());
++        out.extend_from_slice(block);
++    }
++    out
++}
++
++pub fn decode_writes(data: &[u8], hash: &str) -> Result<BTreeMap<u32, Vec<u8>>, String> {
++    let word = |at: usize| -> Result<u32, String> {
++        data.get(at..at + 4)
++            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
++            .ok_or_else(|| "truncated".to_string())
++    };
++    if data.len() < 48 || &data[..8] != WRITES_MAGIC {
++        return Err("not a 64DD writes file".into());
++    }
++    let version = word(8)?;
++    if version != WRITES_VERSION {
++        return Err(format!(
++            "writes file version {version}, not {WRITES_VERSION}"
++        ));
++    }
++    if data[16..48] != hash_bytes(hash) {
++        return Err("the writes file belongs to another disk image".into());
++    }
++    let count = word(12)? as usize;
++    let mut overlay = BTreeMap::new();
++    let mut at = 48;
++    for _ in 0..count {
++        let index = word(at)?;
++        let length = word(at + 4)? as usize;
++        at += 8;
++        let Some(block) = data.get(at..at + length) else {
++            return Err("truncated".into());
++        };
++        at += length;
++        if (index as usize) < BLOCKS && length == block_size_of_index(index as usize) as usize {
++            overlay.insert(index, block.to_vec());
++        } else {
++            return Err(format!("a record for block {index} of {length} bytes"));
++        }
++    }
++    Ok(overlay)
++}
++
++/// Synthetic images for the tests (no real disk is used anywhere)
++#[cfg(test)]
++pub(crate) mod test_images {
++    use super::*;
++
++    pub(crate) const RETAIL_MAGIC: [u8; 4] = [0xE8, 0x48, 0xD3, 0x16];
++
++    pub(crate) fn system_sector(magic: [u8; 4], disk_type: u8, size: usize) -> Vec<u8> {
++        let mut s = vec![0u8; size];
++        s[0..4].copy_from_slice(&magic);
++        s[4] = 0x10;
++        s[5] = 0x10 + disk_type;
++        s[0x18..0x1C].copy_from_slice(&[0xFF; 4]);
++        s[0x1C] = 0x80;
++        // zone defect counts (0x08..0x18) and tracks (0x20..): none
++        s
++    }
++
++    pub(crate) fn fill_block(image: &mut [u8], offset: usize, sector: &[u8]) {
++        for n in 0..SECTORS_PER_BLOCK {
++            image[offset + n * sector.len()..offset + (n + 1) * sector.len()]
++                .copy_from_slice(sector);
++        }
++    }
++
++    /// A retail NDD: valid system area at LBA 0, 1, 8, 9, disk ID at 14, 15, and every other
++    /// logical block starting with its LBA (big-endian) followed by 0xA5
++    pub(crate) fn synthetic_ndd(disk_type: u8, id: &[u8; 4]) -> Vec<u8> {
++        let mut image = vec![0u8; NDD_SIZE];
++        let mut position = 0usize;
++        for lba in 0..LBAS {
++            let size = lba_size(disk_type as usize, lba) as usize;
++            image[position..position + 4].copy_from_slice(&lba.to_be_bytes());
++            image[position + 4..position + size].fill(0xA5);
++            position += size;
++        }
++        assert_eq!(position, NDD_SIZE);
++        let block0 = BLOCK_SIZE[0] as usize;
++        let system = system_sector(RETAIL_MAGIC, disk_type, 0xE8);
++        for &lba in &SYSTEM_BLOCKS {
++            fill_block(&mut image, lba * block0, &system);
++        }
++        let mut id_sector = vec![0u8; 0xE8];
++        id_sector[..4].copy_from_slice(id);
++        for &lba in &DISK_ID_BLOCKS {
++            fill_block(&mut image, lba * block0, &id_sector);
++        }
++        image
++    }
++}
++
++#[cfg(test)]
++mod tests {
++    use super::test_images::*;
++    use super::*;
++
++    fn read4(disk: &Disk, index: usize) -> [u8; 4] {
++        let empty = BTreeMap::new();
++        std::array::from_fn(|i| disk.read(&empty, index, i as u32))
++    }
++
++    #[test]
++    fn physical_layout_tiles_the_physical_image() {
++        let mut blocks: Vec<(u32, u32)> = (0..BLOCKS)
++            .map(|i| {
++                let (h, t, b) = block_from_index(i);
++                (physical_offset(h, t, b), block_size(h, t))
++            })
++            .collect();
++        blocks.sort();
++        let mut end = 0;
++        for (start, size) in blocks {
++            assert_eq!(start, end, "blocks are contiguous and do not overlap");
++            end = start + size;
++        }
++        assert_eq!(end as usize, PHYSICAL_SIZE);
++    }
++
++    #[test]
++    fn block_index_round_trip() {
++        for i in 0..BLOCKS {
++            let (h, t, b) = block_from_index(i);
++            assert!(h < 2 && t < TRACKS && b < 2);
++            assert_eq!(block_index(h, t, b), i);
++        }
++    }
++
++    #[test]
++    fn lba_mapping_covers_the_ndd_size_and_is_one_to_one() {
++        let format = vec![0u8; 0xE8];
++        for disk_type in 0..7 {
++            let mut seen = vec![false; BLOCKS];
++            let mut total = 0usize;
++            for lba in 0..LBAS {
++                let (h, t, b) = lba_to_physical(disk_type, lba, &format);
++                assert!(t < TRACKS, "type {disk_type} LBA {lba}: track {t}");
++                let index = block_index(h, t, b);
++                assert!(!seen[index], "type {disk_type}: block {index} mapped twice");
++                seen[index] = true;
++                assert_eq!(
++                    block_size(h, t),
++                    lba_size(disk_type, lba),
++                    "type {disk_type} LBA {lba}"
++                );
++                total += lba_size(disk_type, lba) as usize;
++            }
++            assert_eq!(total, NDD_SIZE, "type {disk_type}");
++        }
++    }
++
++    #[test]
++    fn lba_mapping_known_points() {
++        let format = vec![0u8; 0xE8];
++        // the system area: LBA 0-3 on track 0 and 1 of head 0, in the 0 1 1 0 block order
++        assert_eq!(lba_to_physical(0, 0, &format), (0, 0, 0));
++        assert_eq!(lba_to_physical(0, 1, &format), (0, 0, 1));
++        assert_eq!(lba_to_physical(0, 2, &format), (0, 1, 1));
++        assert_eq!(lba_to_physical(0, 3, &format), (0, 1, 0));
++        assert_eq!(lba_to_physical(0, 12, &format), (0, 6, 0));
++        // type 0's fourth zone is head 1's second (pzone 9), read from track 0x12F inwards
++        assert_eq!(lba_to_physical(0, 0x035A, &format), (1, 0x12F, 1));
++        assert_eq!(lba_to_physical(0, 0x035C, &format), (1, 0x12E, 0));
++    }
++
++    #[test]
++    fn defect_tracks_are_skipped() {
++        let mut format = vec![0u8; 0xE8];
++        // one defect in zone 0, at track 2 (cumulative counts per zone at 0x08..)
++        for z in 0..16 {
++            format[8 + z] = 1;
++        }
++        format[0x20] = 2;
++        assert_eq!(lba_to_physical(0, 3, &format), (0, 1, 0));
++        assert_eq!(lba_to_physical(0, 4, &format), (0, 3, 0));
++        assert_eq!(lba_to_physical(0, 6, &format), (0, 4, 1));
++    }
++
++    #[test]
++    fn retail_ndd_is_recognised_and_read_by_physical_block() {
++        let disk = Disk::parse(synthetic_ndd(0, b"TSTJ")).unwrap();
++        assert_eq!(disk.format, Format::Ndd);
++        assert_eq!(disk.region, Region::Japan);
++        assert_eq!(disk.id, "TSTJ");
++        assert_eq!(disk.disk_type, 0);
++        assert_eq!(disk.error[12], 1, "retail copy protection on block 12");
++        for &b in &SYSTEM_BLOCKS {
++            assert_eq!(disk.error[b], 0);
++        }
++        let format = vec![0u8; 0xE8];
++        for lba in (24..LBAS).step_by(7) {
++            let (h, t, b) = lba_to_physical(0, lba, &format);
++            assert_eq!(
++                read4(&disk, block_index(h, t, b)),
++                lba.to_be_bytes(),
++                "LBA {lba}"
++            );
++        }
++        // the system area reads back through the map
++        assert_eq!(read4(&disk, 0), RETAIL_MAGIC);
++        assert_eq!(read4(&disk, 9), RETAIL_MAGIC);
++    }
++
++    #[test]
++    fn us_and_development_system_areas() {
++        let mut image = synthetic_ndd(2, b"TSTE");
++        let block0 = BLOCK_SIZE[0] as usize;
++        let us = system_sector([0x22, 0x63, 0xEE, 0x56], 2, 0xE8);
++        for &lba in &SYSTEM_BLOCKS {
++            fill_block(&mut image, lba * block0, &us);
++        }
++        let disk = Disk::parse(image).unwrap();
++        assert_eq!(disk.region, Region::Usa);
++        assert_eq!(disk.disk_type, 2);
++
++        let mut image = synthetic_ndd(1, b"TSTD");
++        for &lba in &SYSTEM_BLOCKS {
++            image[lba * block0..(lba + 1) * block0].fill(0);
++        }
++        let dev = system_sector([0; 4], 1, 0xC0);
++        for &block in &SYSTEM_BLOCKS {
++            fill_block(&mut image, ((block + 2) ^ 1) * block0, &dev);
++        }
++        let disk = Disk::parse(image).unwrap();
++        assert_eq!(disk.region, Region::Development);
++        assert_eq!(
++            disk.error[12], 0,
++            "no copy protection on a development disk"
++        );
++        assert_eq!(disk.disk_type, 1);
++    }
++
++    #[test]
++    fn invalid_images_are_refused() {
++        assert!(Disk::parse(vec![0; 1234]).is_err());
++        assert!(Disk::parse(vec![0; NDD_SIZE]).is_err(), "no system area");
++    }
++
++    #[test]
++    fn physical_layout_reads_like_the_ndd_it_came_from() {
++        let ndd = Disk::parse(synthetic_ndd(3, b"TSTJ")).unwrap();
++        let mut physical = vec![0u8; PHYSICAL_SIZE];
++        let empty = BTreeMap::new();
++        for index in 0..BLOCKS {
++            let (h, t, b) = block_from_index(index);
++            let start = physical_offset(h, t, b) as usize;
++            for i in 0..block_size(h, t) {
++                physical[start + i as usize] = ndd.read(&empty, index, i);
++            }
++        }
++        let phys = Disk::parse(physical).unwrap();
++        assert_eq!(phys.format, Format::Physical);
++        assert_eq!(phys.id, "TSTJ");
++        assert_eq!(phys.region, Region::Japan);
++        assert_eq!(phys.error, ndd.error);
++        for index in (0..BLOCKS).step_by(13) {
++            assert_eq!(read4(&phys, index), read4(&ndd, index), "block {index}");
++        }
++    }
++
++    #[test]
++    fn d64_development_image() {
++        let disk_type = 0usize;
++        let rom_blocks = 3u32; // ROM area: LBA 24..=27
++        let mut header = vec![0u8; 0x200];
++        header[0x05] = disk_type as u8;
++        header[0x1C] = 0x80;
++        header[0xE0] = 0;
++        header[0xE1] = rom_blocks as u8;
++        header[0xE2..0xE6].copy_from_slice(&[0xFF; 4]);
++        header[0x100..0x104].copy_from_slice(b"TSTD");
++        let mut image = header;
++        for lba in 24..=24 + rom_blocks {
++            let start = image.len();
++            image.resize(start + lba_size(disk_type, lba) as usize, 0x5A);
++            image[start..start + 4].copy_from_slice(&lba.to_be_bytes());
++        }
++        let disk = Disk::parse(image).unwrap();
++        assert_eq!(disk.format, Format::D64);
++        assert_eq!(disk.region, Region::Development);
++        assert_eq!(disk.id, "TSTD");
++        let format = vec![0u8; 0xE8];
++        for lba in 24..=24 + rom_blocks {
++            let (h, t, b) = lba_to_physical(disk_type, lba, &format);
++            assert_eq!(read4(&disk, block_index(h, t, b)), lba.to_be_bytes());
++        }
++        // the system area made for it: a development copy (block 2), format type 0x10, disk type 0x10
++        let empty = BTreeMap::new();
++        assert_eq!(disk.read(&empty, 2, 4), 0x10);
++        assert_eq!(disk.read(&empty, 2, 5), 0x10);
++        assert_eq!(disk.read(&empty, 2, 0x1C), 0x80);
++        assert_eq!(read4(&disk, 14), *b"TSTD");
++        // a d64 whose size does not match its header
++        let mut bad = vec![0u8; 0x200 + 0x4D08];
++        bad[0x1C] = 0x80;
++        bad[0xE2..0xE6].copy_from_slice(&[0xFF; 4]);
++        bad.push(0);
++        assert!(Disk::parse(bad).is_err());
++    }
++
++    #[test]
++    fn rom_and_ram_areas() {
++        // type 0: zones 0-2 of head 0 are ROM, the rest RAM
++        assert!(is_rom_area(0, 0, 0));
++        assert!(is_rom_area(0, 0, 0x13C));
++        assert!(!is_rom_area(0, 0, 0x1D1));
++        assert!(is_rom_area(0, 1, 0x9E)); // head 1 zone 1 counts as 2
++        assert!(!is_rom_area(0, 1, 0x13C));
++        assert!(is_rom_area(6, 1, TRACKS - 1));
++    }
++
++    #[test]
++    fn writes_overlay_round_trip() {
++        let disk = Disk::parse(synthetic_ndd(0, b"TSTJ")).unwrap();
++        let mut overlay = BTreeMap::new();
++        let (h, t, b) = lba_to_physical(0, 0x0600, &vec![0u8; 0xE8]);
++        let index = block_index(h, t, b);
++        assert_eq!(read4(&disk, index), 0x0600u32.to_be_bytes());
++        disk.write(&mut overlay, index, 1, 0x77);
++        disk.write(&mut overlay, 7, 0, 0x11);
++        assert_eq!(disk.read(&overlay, index, 0), 0x00);
++        assert_eq!(disk.read(&overlay, index, 1), 0x77);
++        assert_eq!(
++            disk.read(&overlay, index, 4),
++            0xA5,
++            "the rest of the block is the image's"
++        );
++        // out of the block: ignored
++        disk.write(&mut overlay, index, block_size_of_index(index), 1);
++
++        // the sector-wide accessors agree with the byte ones
++        let mut sector = [0u8; 0xE8];
++        disk.read_into(&overlay, index, 0, &mut sector);
++        assert_eq!(sector[1], 0x77);
++        assert!((0..0xE8).all(|i| sector[i] == disk.read(&overlay, index, i as u32)));
++        let last = block_size_of_index(index) - 2;
++        disk.read_into(&overlay, index, last, &mut sector);
++        assert_eq!(&sector[..2], &[0xA5, 0xA5]);
++        assert!(sector[2..].iter().all(|b| *b == 0), "zeros past the block");
++        let mut copy = BTreeMap::new();
++        disk.write_from(&mut copy, index, 1, &[0x77]);
++        disk.write_from(&mut copy, 7, 0, &[0x11]);
++        disk.write_from(&mut copy, index, last, &[1, 2, 3, 4]);
++        disk.write(&mut overlay, index, last, 1);
++        disk.write(&mut overlay, index, last + 1, 2);
++        assert_eq!(copy, overlay);
++
++        let file = encode_writes(&disk.hash, &overlay);
++        assert_eq!(&file[..8], WRITES_MAGIC);
++        let back = decode_writes(&file, &disk.hash).unwrap();
++        assert_eq!(back, overlay);
++        assert_eq!(disk.read(&back, index, 1), 0x77);
++        assert!(
++            decode_writes(&file, &"0".repeat(64)).is_err(),
++            "another image's writes"
++        );
++        assert!(
++            decode_writes(&file[..file.len() - 1], &disk.hash).is_err(),
++            "truncated"
++        );
++        assert!(decode_writes(b"nonsense", &disk.hash).is_err());
++    }
++}
+diff --git a/src/device/events.rs b/src/device/events.rs
+index 5aba34e..8fbba13 100644
+--- a/src/device/events.rs
++++ b/src/device/events.rs
+@@ -17,7 +17,15 @@ pub const EVENT_TYPE_SAVE: usize = 12;
+ pub const EVENT_TYPE_NMI: usize = 13;
+ pub const EVENT_TYPE_VI_INTERRUPT: usize = 14;
+ pub const EVENT_TYPE_UPDATE_SCREEN: usize = 15;
+-pub const EVENT_TYPE_COUNT: usize = 16;
++// The 64DD's (device/dd.rs). They come after Gopher64's own, which are all a save state's
++// "device" entry holds (serialize_events); a state keeps these in its "dd" entry.
++pub const EVENT_TYPE_SAVED_COUNT: usize = 16;
++pub const EVENT_TYPE_DD_MECHA: usize = 16;
++pub const EVENT_TYPE_DD_BM: usize = 17;
++pub const EVENT_TYPE_DD_MOTOR: usize = 18;
++pub const EVENT_TYPE_DD_CLOCK: usize = 19;
++pub const EVENT_TYPE_DD_SAVE: usize = 20;
++pub const EVENT_TYPE_COUNT: usize = 21;
+ 
+ #[derive(PartialEq, Copy, Clone, serde::Serialize, serde::Deserialize)]
+ pub struct Event {
+@@ -70,6 +78,11 @@ fn get_event_handler(name: usize) -> fn(&mut device::Device) {
+         EVENT_TYPE_NMI => device::exceptions::reset_event,
+         EVENT_TYPE_VI_INTERRUPT => device::vi::vertical_interrupt_event,
+         EVENT_TYPE_UPDATE_SCREEN => device::vi::update_screen,
++        EVENT_TYPE_DD_MECHA => device::dd::mecha_event,
++        EVENT_TYPE_DD_BM => device::dd::bm_event,
++        EVENT_TYPE_DD_MOTOR => device::dd::motor_event,
++        EVENT_TYPE_DD_CLOCK => device::dd::clock_event,
++        EVENT_TYPE_DD_SAVE => device::dd::save_event,
+         _ => dummy_event,
+     }
+ }
+@@ -107,3 +120,46 @@ pub fn translate_events(device: &mut device::Device, old_count: u64, new_count:
+ pub fn dummy_event(_device: &mut device::Device) {
+     panic!("dummy event")
+ }
++
++/// The CPU's events in a save state's "device" entry: Gopher64's own (the first
++/// EVENT_TYPE_SAVED_COUNT), serialized as the array they were, so states stay as they were; the
++/// 64DD's are kept in the state's "dd" entry and read back as off here.
++pub fn serialize_events<S: serde::Serializer>(
++    events: &[Event; EVENT_TYPE_COUNT],
++    serializer: S,
++) -> Result<S::Ok, S::Error> {
++    use serde::ser::SerializeTuple;
++    let mut tuple = serializer.serialize_tuple(EVENT_TYPE_SAVED_COUNT)?;
++    for event in &events[..EVENT_TYPE_SAVED_COUNT] {
++        tuple.serialize_element(event)?;
++    }
++    tuple.end()
++}
++
++pub fn deserialize_events<'de, D: serde::Deserializer<'de>>(
++    deserializer: D,
++) -> Result<[Event; EVENT_TYPE_COUNT], D::Error> {
++    struct Events;
++    impl<'de> serde::de::Visitor<'de> for Events {
++        type Value = [Event; EVENT_TYPE_COUNT];
++        fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
++            write!(formatter, "{EVENT_TYPE_SAVED_COUNT} events")
++        }
++        fn visit_seq<A: serde::de::SeqAccess<'de>>(
++            self,
++            mut seq: A,
++        ) -> Result<Self::Value, A::Error> {
++            let mut events = [Event {
++                enabled: false,
++                count: u64::MAX,
++            }; EVENT_TYPE_COUNT];
++            for (i, event) in events[..EVENT_TYPE_SAVED_COUNT].iter_mut().enumerate() {
++                *event = seq
++                    .next_element()?
++                    .ok_or_else(|| serde::de::Error::invalid_length(i, &self))?;
++            }
++            Ok(events)
++        }
++    }
++    deserializer.deserialize_tuple(EVENT_TYPE_SAVED_COUNT, Events)
++}
+diff --git a/src/device/exceptions.rs b/src/device/exceptions.rs
+index e510345..292e17c 100644
+--- a/src/device/exceptions.rs
++++ b/src/device/exceptions.rs
+@@ -168,6 +168,7 @@ pub fn reset_event(device: &mut device::Device) {
+     device.cpu.branch_state.state = device::cpu::State::Step;
+ 
+     device::pif::reset_pif(device, true);
++    device::dd::reset(device); // the 64DD, when attached
+ 
+     ui::video::onscreen_message("Game reset", ui::video::MESSAGE_LENGTH_MESSAGE_SHORT);
+ }
 diff --git a/src/device/memory.rs b/src/device/memory.rs
-index 7e6498a..85a3811 100644
+index 7e6498a..f213401 100644
 --- a/src/device/memory.rs
 +++ b/src/device/memory.rs
 @@ -83,6 +83,70 @@ pub fn translate_address(
@@ -3059,10 +6445,26 @@ index 7e6498a..85a3811 100644
  pub fn data_write(
      device: &mut device::Device,
      phys_address: u64,
+@@ -196,4 +262,6 @@ pub fn init(device: &mut device::Device) {
+             device.memory.memory_map_write[i] = device::cart::sc64::write_regs;
+         }
+     }
++    // the 64DD's pages, when it is attached (as before otherwise)
++    device::dd::map(device);
+ }
 diff --git a/src/device/pi.rs b/src/device/pi.rs
-index dea4bf3..88abe58 100644
+index dea4bf3..cc783e1 100644
 --- a/src/device/pi.rs
 +++ b/src/device/pi.rs
+@@ -54,7 +54,7 @@ pub fn read_regs(
+ }
+ 
+ fn dma_read(device: &mut device::Device) {
+-    let handler = get_handler(device.pi.regs[PI_CART_ADDR_REG]);
++    let handler = get_handler(device, device.pi.regs[PI_CART_ADDR_REG]);
+ 
+     let cart_addr = device.pi.regs[PI_CART_ADDR_REG] & !1;
+     let dram_addr = device.pi.regs[PI_DRAM_ADDR_REG] & 0xFFFFFE;
 @@ -68,7 +68,11 @@ fn dma_read(device: &mut device::Device) {
      // check RDP before PI reads from RDRAM
      ui::video::check_rdram_read(dram_addr, length);
@@ -3075,6 +6477,15 @@ index dea4bf3..88abe58 100644
  
      device::events::create_event(device, device::events::EVENT_TYPE_PI, cycles);
  
+@@ -80,7 +84,7 @@ fn dma_read(device: &mut device::Device) {
+ }
+ 
+ fn dma_write(device: &mut device::Device) {
+-    let handler = get_handler(device.pi.regs[PI_CART_ADDR_REG]);
++    let handler = get_handler(device, device.pi.regs[PI_CART_ADDR_REG]);
+ 
+     let cart_addr = device.pi.regs[PI_CART_ADDR_REG] & !1;
+     let dram_addr = device.pi.regs[PI_DRAM_ADDR_REG] & 0xFFFFFE;
 @@ -97,7 +101,11 @@ fn dma_write(device: &mut device::Device) {
      // check RDP before PI writes to RDRAM
      ui::video::check_rdram_write(dram_addr, length);
@@ -3087,6 +6498,64 @@ index dea4bf3..88abe58 100644
  
      device::events::create_event(device, device::events::EVENT_TYPE_PI, cycles);
  
+@@ -108,7 +116,11 @@ fn dma_write(device: &mut device::Device) {
+     device.pi.regs[PI_STATUS_REG] |= PI_STATUS_DMA_BUSY
+ }
+ 
+-fn get_handler(address: u32) -> PiHandler {
++fn get_handler(device: &device::Device, address: u32) -> PiHandler {
++    // the 64DD's ranges, when it is attached (device/dd.rs)
++    if let Some((read, write)) = device::dd::pi_handlers(device, address) {
++        return PiHandler { read, write };
++    }
+     let mut handler = PiHandler {
+         read: device::cart::rom::dma_read,
+         write: device::cart::rom::dma_write,
+@@ -206,7 +218,7 @@ pub fn dma_event(device: &mut device::Device) {
+     device::mi::set_rcp_interrupt(device, device::mi::MI_INTR_PI)
+ }
+ 
+-fn unknown_dma_read(
++pub fn unknown_dma_read(
+     device: &mut device::Device,
+     mut _cart_addr: u32,
+     mut _dram_addr: u32,
+@@ -215,7 +227,7 @@ fn unknown_dma_read(
+     device::pi::calculate_cycles(device, 1, length)
+ }
+ 
+-fn unknown_dma_write(
++pub fn unknown_dma_write(
+     device: &mut device::Device,
+     mut _cart_addr: u32,
+     mut dram_addr: u32,
+diff --git a/src/device/pif.rs b/src/device/pif.rs
+index e4da5cf..911c4cf 100644
+--- a/src/device/pif.rs
++++ b/src/device/pif.rs
+@@ -257,7 +257,10 @@ pub fn connect_pif_channels(device: &mut device::Device) {
+     if vru_enabled(device) {
+         device.pif.channels[3].process = Some(device::controller::vru::process);
+     }
+-    device.pif.channels[4].process = Some(device::cart::process)
++    // (with the 64DD and no cartridge, nothing answers on the cartridge's channel)
++    if !(device.dd.attached && device.dd.cart_absent) {
++        device.pif.channels[4].process = Some(device::cart::process)
++    }
+ }
+ 
+ pub fn reset_pif(device: &mut device::Device, is_nmi_reset: bool) {
+@@ -268,7 +271,9 @@ pub fn reset_pif(device: &mut device::Device, is_nmi_reset: bool) {
+     }
+ 
+     let reset_type = u32::from(is_nmi_reset);
+-    let rom_type = 0u32;
++    // the ROM type: 1 boots the 64DD's IPL at 0x06000000 instead of the cartridge (the PIF's
++    // boot code reads it from here; ares: the CIC reports DD64 for the IPL's CIC)
++    let rom_type = u32::from(device.dd.attached && device.dd.cart_absent);
+     let s7 = 0u32;
+     let cic = u32::from(device.cart.cic_seed);
+     let word = (rom_type << 19) | (s7 << 18) | (reset_type << 17) | (cic << 8) | 0x3f;
 diff --git a/src/device/rdram.rs b/src/device/rdram.rs
 index e8f6740..47c513d 100644
 --- a/src/device/rdram.rs
@@ -3892,7 +7361,7 @@ index 593659b..3c0c51f 100644
  
      if !in_rollback {
 diff --git a/src/lib.rs b/src/lib.rs
-index 4e51a1b..b97e584 100644
+index 4e51a1b..c02c337 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -3,6 +3,12 @@
@@ -3908,7 +7377,26 @@ index 4e51a1b..b97e584 100644
  mod retroachievements;
  mod savestates;
  mod ui;
-@@ -127,6 +133,11 @@ pub fn create_runtime() -> (tokio::sync::oneshot::Sender<()>, tokio::runtime::Ha
+@@ -19,6 +25,18 @@ use ui::android;
+ #[command(author, version=env!("GIT_DESCRIBE"), about, long_about = None, arg_required_else_help = if cfg!(feature = "gui") { false } else { true })]
+ pub struct Args {
+     pub game: Option<String>,
++    #[arg(
++        long,
++        value_name = "DISK_IMAGE",
++        help = "A 64DD disk image (.ndd, .d64 or the physical layout, by size); without a game, the 64DD IPL boots it"
++    )]
++    pub disk: Option<String>,
++    #[arg(
++        long,
++        value_name = "IPL_ROM",
++        help = "The 64DD IPL ROM (the drive's BIOS, 4 MB); without it, a disk takes the first IPL in the data folder's 64dd directory"
++    )]
++    pub dd_ipl: Option<String>,
+     #[arg(short, long)]
+     pub fullscreen: bool,
+     #[arg(long)]
+@@ -127,6 +145,11 @@ pub fn create_runtime() -> (tokio::sync::oneshot::Sender<()>, tokio::runtime::Ha
      let (close_tx, close_rx) = tokio::sync::oneshot::channel::<()>();
  
      std::thread::spawn(move || {
@@ -3920,7 +7408,67 @@ index 4e51a1b..b97e584 100644
          let rt = tokio::runtime::Runtime::new().expect("Failed to build runtime");
          tx.send(rt.handle().clone()).unwrap();
          rt.block_on(close_rx).unwrap();
-@@ -227,7 +238,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+@@ -145,14 +168,34 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+ 
+     ui::sdl_hints();
+ 
+-    if let Some(game) = args.game {
+-        let file_path = std::path::Path::new(&game).to_path_buf();
+-        let Some(rom_contents) = device::get_rom_contents(&file_path) else {
+-            return Err(Error::other(format!(
+-                "Could not read ROM file: {}",
+-                file_path.display()
+-            )));
+-        };
++    if args.game.is_some() || args.disk.is_some() || args.dd_ipl.is_some() {
++        let game = args.game;
++        let mut rom_contents = Vec::new();
++        if let Some(game) = &game {
++            let file_path = std::path::Path::new(game).to_path_buf();
++            let Some(contents) = device::get_rom_contents(&file_path) else {
++                return Err(Error::other(format!(
++                    "Could not read ROM file: {}",
++                    file_path.display()
++                )));
++            };
++            rom_contents = contents;
++        }
++        // the 64DD (an IPL and/or a disk); with no game the IPL boots, and the run is named by
++        // the disk (device/dd.rs placeholder_rom)
++        let dd = device::dd::attach(
++            args.dd_ipl.as_deref().map(std::path::Path::new),
++            args.disk.as_deref().map(std::path::Path::new),
++            &dirs.data_dir.join("64dd"),
++            &dirs.data_dir.join("saves"),
++            game.is_some(),
++        )?;
++        if dd.attached && args.netplay_server_addr.is_some() {
++            return Err(Error::other("64dd: netplay is not supported with the 64DD"));
++        }
++        if game.is_none() {
++            rom_contents = device::dd::placeholder_rom(&dd);
++        }
+ 
+         let cheats = if let Some(cheats_file) = args.cheats {
+             if let Ok(data) = std::fs::read(cheats_file)
+@@ -184,10 +227,13 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+             .transpose()?;
+         let mut device = device::Device::new(true);
+         device.bk2_playback = playback;
++        device.dd = dd;
+ 
+-        device.ui.config.ui.recent_roms.retain(|x| *x != game);
+-        device.ui.config.ui.recent_roms.insert(0, game);
+-        device.ui.config.ui.recent_roms.truncate(5);
++        if let Some(game) = game {
++            device.ui.config.ui.recent_roms.retain(|x| *x != game);
++            device.ui.config.ui.recent_roms.insert(0, game);
++            device.ui.config.ui.recent_roms.truncate(5);
++        }
+ 
+         if args.fullscreen {
+             device.ui.video.fullscreen = true;
+@@ -227,7 +273,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
                  }
              }
  
@@ -5969,7 +9517,7 @@ index 5186b28..4ad325b 100644
  }
  
 diff --git a/src/savestates.rs b/src/savestates.rs
-index e061f62..f62bff5 100644
+index e061f62..f573a76 100644
 --- a/src/savestates.rs
 +++ b/src/savestates.rs
 @@ -122,6 +122,8 @@ impl SavestateData {
@@ -5981,7 +9529,7 @@ index e061f62..f62bff5 100644
      let save_rewind = if device.netplay.is_none()
          && device.ui.config.emulation.rewind
          && device.vi.elapsed_time - device.ui.savestate.last_rewind_saved > 1.0
-@@ -180,6 +182,9 @@ pub fn create_savestate(device: &mut device::Device, rewind: bool, rewind_frame:
+@@ -180,17 +182,25 @@ pub fn create_savestate(device: &mut device::Device, rewind: bool, rewind_frame:
      }
  
      let save_path = device.ui.storage.paths.savestate_file_path.clone();
@@ -5989,8 +9537,42 @@ index e061f62..f62bff5 100644
 +    #[cfg(psgopher)]
 +    ui::video::probe_picture(&save_path);
      let save_state_slot = device.ui.storage.save_state_slot;
++    // the 64DD's entry, with one attached (none otherwise: the file is as before)
++    let dd_entry = device::dd::state_entry(&device.dd, &state.device);
  
      tokio::spawn(async move {
+         let compressed_file = if let Ok(device_data) = postcard::to_stdvec(&state.device)
+             && let Ok(saves_data) = postcard::to_stdvec(&state.saves)
+-            && let Ok(compressed_file) = ui::storage::compress_file(&[
+-                (&device_data, "device"),
+-                (&saves_data, "saves"),
+-                (&state.rdp_state, "rdp_state"),
+-                (&state.ra_state, "ra_state"),
+-            ]) {
++            && let Ok(compressed_file) = ui::storage::compress_file(&device::dd::with_entry(
++                &[
++                    (&device_data, "device"),
++                    (&saves_data, "saves"),
++                    (&state.rdp_state, "rdp_state"),
++                    (&state.ra_state, "ra_state"),
++                ],
++                dd_entry.as_deref(),
++            )) {
+             Some(compressed_file)
+         } else {
+             None
+@@ -256,6 +266,11 @@ pub fn load_savestate(device: &mut device::Device, rewind: bool, rewind_frame: O
+             && let Ok(ra_state) = ui::storage::decompress_file(&savestate, "ra_state")
+             && let Ok(state) = postcard::from_bytes::<Box<device::Device>>(&device_data)
+             && let Ok(saves) = postcard::from_bytes(&saves_data)
++            && let Some(state) = device::dd::restore_entry(
++                &device.dd,
++                state,
++                ui::storage::decompress_file(&savestate, "dd").ok(),
++            )
+         {
+             Some(SavestateData {
+                 device: state,
 diff --git a/src/ui.rs b/src/ui.rs
 index d23f148..e51f562 100644
 --- a/src/ui.rs
@@ -6116,10 +9698,21 @@ index ccced72..a9950e5 100644
          eprintln!("Error writing config: {}", e);
      }
 diff --git a/src/ui/input.rs b/src/ui/input.rs
-index 34c6d92..2311b8c 100644
+index 34c6d92..c0c5f11 100644
 --- a/src/ui/input.rs
 +++ b/src/ui/input.rs
-@@ -348,6 +348,13 @@ fn handle_joystick_events(ui: &mut ui::Ui) {
+@@ -307,7 +307,9 @@ fn handle_joystick_events(ui: &mut ui::Ui) {
+                     .input_profiles
+                     .get(&ui.config.input.input_profile_binding[i])
+                 {
+-                    if profile.dinput {
++                    // PSGopher (PS5): the DualSense is always a gamepad; a profile's DirectInput
++                    // switch (a PC's raw joystick) is not offered there and is ignored
++                    if profile.dinput && !cfg!(psgopher) {
+                         if controller.joystick.is_null()
+                             && controller.guid
+                                 == unsafe {
+@@ -348,6 +350,13 @@ fn handle_joystick_events(ui: &mut ui::Ui) {
      }
  }
  
@@ -6133,7 +9726,7 @@ index 34c6d92..2311b8c 100644
  fn handle_hotkeys(keys: u32, last_key_state: u32) {
      let mut event: sdl3_sys::events::SDL_Event = Default::default();
      event.user.r#type = u32::from(sdl3_sys::events::SDL_EVENT_USER);
-@@ -438,11 +445,19 @@ pub fn get(ui: &mut ui::Ui, channel: usize) -> InputData {
+@@ -438,11 +447,19 @@ pub fn get(ui: &mut ui::Ui, channel: usize) -> InputData {
      let last_key_state = ui.input.controllers[channel].last_key_state;
      ui.input.controllers[channel].last_key_state = keys;
  
@@ -6155,8 +9748,17 @@ index 34c6d92..2311b8c 100644
          }
      } else {
          let mut pak_change_pressed = false;
+@@ -570,7 +587,7 @@ pub fn init(device: &mut device::Device, _netplay: bool) {
+                     .input_profiles
+                     .get(&ui.config.input.input_profile_binding[i])
+             {
+-                if !profile.dinput {
++                if !profile.dinput || cfg!(psgopher) {
+                     let gamepad = unsafe { sdl3_sys::gamepad::SDL_OpenGamepad(joystick_id) };
+                     if gamepad.is_null() {
+                         eprintln!("could not connect gamepad: {}", u32::from(joystick_id))
 diff --git a/src/ui/storage.rs b/src/ui/storage.rs
-index 0fe2469..a1d9dfc 100644
+index 0fe2469..11be6c6 100644
 --- a/src/ui/storage.rs
 +++ b/src/ui/storage.rs
 @@ -98,7 +98,7 @@ impl Saves {
@@ -6168,7 +9770,19 @@ index 0fe2469..a1d9dfc 100644
      if let Ok(header_type) = std::str::from_utf8(rom[0x3C..0x3E].try_into().unwrap())
          && header_type == "ED"
      {
-@@ -256,6 +256,9 @@ pub fn init(ui: &mut ui::Ui, rom: &[u8]) {
+@@ -111,6 +111,11 @@ fn get_save_type(rom: &[u8], game_id: &str) -> Vec<SaveTypes> {
+             4 => return vec![SaveTypes::Sram768k],
+             5 => return vec![SaveTypes::Flash],
+             6 => return vec![SaveTypes::Sram1m],
++            // PSGopher: a value the homebrew header does not define (a romhack's header) is no
++            // reason to refuse the game: the game ID's save type is used, as without the header
++            #[cfg(psgopher)]
++            _ => {}
++            #[cfg(not(psgopher))]
+             _ => panic!("Unknown save type: {save_type}"),
+         }
+     }
+@@ -256,6 +261,9 @@ pub fn init(ui: &mut ui::Ui, rom: &[u8]) {
          "{}-{}.state{}",
          prefix, ui.game_hash, ui.storage.save_state_slot
      ));
@@ -6178,7 +9792,7 @@ index 0fe2469..a1d9dfc 100644
  }
  
  pub fn load_saves(ui: &mut ui::Ui, netplay: &mut Option<netplay::Netplay>, cic_seed: u8) {
-@@ -476,6 +479,8 @@ pub fn write_saves(device: &mut device::Device) {
+@@ -476,6 +484,8 @@ pub fn write_saves(device: &mut device::Device) {
  }
  
  pub fn save_event(device: &mut device::Device) {

@@ -14,6 +14,8 @@
 #include "title_settings.h"
 #include "write_broker.h"
 #include "../broker/server.hpp"
+#include "romhack.h"
+#include "romhack_encode.h"
 
 #include <cerrno>
 #include <chrono>
@@ -356,6 +358,188 @@ static void copyThroughHelper(const std::string &data)
 	psgopher::helperReset();
 }
 
+
+/* ---------------------------------------------------------------- romhack patches in the list */
+
+static void waitScan()
+{
+	for (int i = 0; i < 1000 && psgopher::library().scanning(); i++)
+		std::this_thread::sleep_for(std::chrono::milliseconds(10));
+	CHECK(!psgopher::library().scanning());
+}
+
+static const psgopher::Game *findPatch(const std::vector<psgopher::Game> &games, const std::string &name, bool patch = true)
+{
+	for (const auto &g : games)
+		if (g.name == name && g.base.empty() != patch)
+			return &g;
+	return nullptr;
+}
+
+/* a BPS making `to` of `from`, which differ in the header's 0x20..0x3F */
+static std::string headerPatch(const std::string &from, const std::string &to)
+{
+	encode::Bps b(from);
+	b.sourceRead(0x20);
+	b.targetRead(to.substr(0x20, 0x20));
+	b.sourceRead(from.size() - 0x40);
+	return b.finish();
+}
+
+static void romhackLibrary(const std::string &base)
+{
+	const std::string data = base + "/data-hack";
+	folders(data + "/psgopher/cache");
+	folders(data + "/psgopher/config");
+	folders(data + "/hacks/same");
+	folders(data + "/hacks/crc");
+	folders(data + "/hacks/other");
+	folders(data + "/hacks/ips1");
+	folders(data + "/hacks/ips2");
+	folders(data + "/hacks/ups");
+	folders(data + "/hacks/lonely");
+
+	/* (the facts stand-in reads 'C' at 0x3C for CIC 6102) */
+	const std::string vanilla = romImage("COMET KART", "NCKE", "z64", 0x2000, 0);
+	const std::string hack = romImage("COMET HACK", "NCHE", "z64", 0x2000, 3);
+	/* a folder with the ROM and the patch of the same stem */
+	write(data + "/hacks/same/base.z64", vanilla);
+	write(data + "/hacks/same/base.bps", headerPatch(vanilla, hack));
+	/* a BPS whose base is found by size and CRC32, in another folder and another byte order; a decoy of the same size
+	 * and one of another size in the patch's own folder */
+	const std::string moss = romImage("MOSS TEMPLE", "NMTP", "z64", 0x2000, 2);
+	const std::string moss_hack = romImage("MOSS REMIX", "NMRP", "z64", 0x2000, 5);
+	write(data + "/hacks/other/vanilla-copy.v64", romImage("MOSS TEMPLE", "NMTP", "v64", 0x2000, 2));
+	write(data + "/hacks/crc/decoy.z64", romImage("DECOY", "NDCY", "z64", 0x2000, 0));
+	write(data + "/hacks/crc/smaller.z64", romImage("SMALL", "NSMP", "z64", 0x1800, 0));
+	write(data + "/hacks/crc/remix.bps", headerPatch(moss, moss_hack));
+	/* an IPS with no base: two ROMs in its folder and none of its name */
+	encode::Ips ips;
+	ips.record(0x20, "FIXED NAME");
+	write(data + "/hacks/ips2/a.z64", vanilla);
+	write(data + "/hacks/ips2/b.z64", romImage("OTHER GAME", "NOGP", "z64", 0x2000, 0));
+	write(data + "/hacks/ips2/fix.ips", ips.finish());
+	/* an IPS with one ROM in its folder: that one */
+	write(data + "/hacks/ips1/solo.v64", romImage("SOLO RUN", "NSOP", "v64", 0x2000, 1));
+	write(data + "/hacks/ips1/tweak.ips", ips.finish());
+	/* a UPS found by CRC32, its base .n64 */
+	write(data + "/hacks/ups/orig.n64", romImage("COMET KART", "NCKE", "n64", 0x2000, 0));
+	write(data + "/hacks/ups/ups-hack.ups", encode::ups(vanilla, hack));
+	/* a same-stem ROM that is not the patch's source is passed over: the right ROM beside it is found by CRC32 */
+	folders(data + "/hacks/stem");
+	write(data + "/hacks/stem/fall.z64", romImage("NOT IT", "NNIP", "z64", 0x2000, 0));
+	write(data + "/hacks/stem/real.z64", vanilla);
+	write(data + "/hacks/stem/fall.bps", headerPatch(vanilla, hack));
+	/* a BPS with no ROM that fits, and a damaged patch */
+	write(data + "/hacks/lonely/nobase.bps", headerPatch(romImage("GHOST", "NGHE", "z64", 0x2000, 0), hack));
+	write(data + "/hacks/lonely/junk.bps", "this is not a patch at all");
+
+	g_log.clear();
+	psgopher::libraryUseRoot(data);
+	auto &lib = psgopher::library();
+	lib.load();
+	CHECK(lib.games().empty());
+	const int calls_before = g_facts_calls;
+	lib.rescan();
+	waitScan();
+	const auto games = lib.games();
+	for (const auto &g : games)
+		std::printf("  found %-14s %-8s base=%s %s\n", g.name.c_str(), psgopher::tabName(g.tab), g.base.c_str(), g.path.c_str());
+
+	CHECK(psgopher::isPatchName("x.IPS") && psgopher::isPatchName("/a/b.bps") && psgopher::isPatchName("c.Ups") && !psgopher::isPatchName("c.z64"));
+	/* same stem */
+	const psgopher::Game *same = findPatch(games, "base (patched)");
+	CHECK(same && same->base == data + "/hacks/same/base.z64" && same->path == data + "/hacks/same/base.bps");
+	CHECK(same && same->facts && same->header == "COMET HACK" && same->id == "NCHE" && same->revision == 3);
+	CHECK(findPatch(games, "base", false) && findPatch(games, "base", false)->header == "COMET KART"); /* the ROM itself too */
+	CHECK(same && psgopher::gameKey(*same) == "NCHE-03");
+	CHECK(same && same->tab == psgopher::TabInternal && same->size > 0);
+	const psgopher::Game *fall = findPatch(games, "fall");
+	CHECK(fall && fall->base == data + "/hacks/stem/real.z64" && fall->header == "COMET HACK");
+	/* by size and CRC32, through the byte order, the same folder's decoy passed over */
+	const psgopher::Game *remix = findPatch(games, "remix");
+	CHECK(remix && remix->base == data + "/hacks/other/vanilla-copy.v64" && remix->header == "MOSS REMIX" && remix->id == "NMRP");
+	/* an IPS with one ROM beside it */
+	const psgopher::Game *tweak = findPatch(games, "tweak");
+	CHECK(tweak && tweak->base == data + "/hacks/ips1/solo.v64" && tweak->header == "FIXED NAME");
+	/* a UPS by CRC32 (the base is a .n64) */
+	const psgopher::Game *upsg = findPatch(games, "ups-hack");
+	CHECK(upsg && upsg->base == data + "/hacks/ups/orig.n64" && upsg->header == "COMET HACK" && upsg->id == "NCHE");
+	/* not listed: an IPS in a folder of two ROMs, a BPS no ROM fits, a file that is no patch */
+	CHECK(!findPatch(games, "fix") && !findPatch(games, "nobase") && !findPatch(games, "junk"));
+	CHECK(said("romhack: " + data + "/hacks/ips2/fix.ips is not listed: no base ROM was found (the folder needs the ROM with the patch's name, or only one ROM)"));
+	CHECK(said("romhack: " + data + "/hacks/lonely/nobase.bps is not listed: no ROM of its source size and CRC32 was found"));
+	bool junk_said = false;
+	for (const std::string &l : g_log)
+		junk_said |= l.rfind("romhack: " + data + "/hacks/lonely/junk.bps is not listed: ", 0) == 0;
+	CHECK(junk_said);
+	/* the patched headers are what the facts were read from: 4 ROMs' and 4 patches' headers (+ the decoys) */
+	CHECK(g_facts_calls > calls_before);
+
+	/* the list is kept: v5 with the base, and read back */
+	const std::string tsv = data + "/psgopher/cache/library.tsv", kept = slurp(tsv);
+	CHECK(kept.rfind("#psgopher-library 5\n", 0) == 0);
+	CHECK(kept.find("\t" + data + "/hacks/same/base.z64\t" + data + "/hacks/same/base.bps\n") != std::string::npos);
+	CHECK(kept.find("\t-\t" + data + "/hacks/same/base.z64\n") != std::string::npos); /* a plain ROM's base is "-" */
+	lib.load();
+	{
+		const auto back = lib.games();
+		CHECK(back.size() == games.size());
+		const psgopher::Game *s = findPatch(back, "base (patched)");
+		CHECK(s && s->base == data + "/hacks/same/base.z64" && s->header == "COMET HACK" && s->revision == 3 && s->facts);
+		CHECK(findPatch(back, "base", false) && findPatch(back, "base", false)->base.empty());
+		CHECK(findPatch(back, "ups-hack") && findPatch(back, "ups-hack")->base == data + "/hacks/ups/orig.n64");
+	}
+	/* a second search reads nothing it knows: no header, no patch applied again */
+	const int calls = g_facts_calls;
+	g_log.clear();
+	lib.rescan();
+	waitScan();
+	CHECK(g_facts_calls == calls);
+	CHECK(lib.games().size() == games.size() && findPatch(lib.games(), "remix") && findPatch(lib.games(), "remix")->header == "MOSS REMIX");
+	/* a list of version 4 (no base) is read as it was */
+	{
+		const psgopher::Game *plain = findPatch(games, "base", false);
+		write(tsv, "#psgopher-library 4\n0\t" + std::to_string(plain->size) + "\t1\t6102\t1\t0\tNCKE\tCOMET KART\t11223344-55667788-C:45\t0\t" + plain->path + "\n");
+		lib.load();
+		const auto old = lib.games();
+		CHECK(old.size() == 1 && old[0].base.empty() && old[0].revision == 0 && old[0].header == "COMET KART" && old[0].path == plain->path);
+		write(tsv, kept);
+		lib.load();
+		CHECK(lib.games().size() == games.size());
+	}
+
+	/* playing: the patch applied to its base, written as .z64 to the play folder */
+	std::string error;
+	CHECK(psgopher::playablePath(data + "/hacks/same/base.z64", &error) == data + "/hacks/same/base.z64"); /* a plain ROM as it is */
+	g_log.clear();
+	const std::string played = psgopher::playablePath(data + "/hacks/same/base.bps", &error);
+	CHECK(played == data + "/psgopher/cache/play/base.z64" && slurp(played) == hack);
+	CHECK(!g_log.empty() && g_log.back().rfind("romhack: " + data + "/hacks/same/base.bps applied to " + data + "/hacks/same/base.z64 (BPS, 8 KiB)", 0) == 0);
+	const std::string played2 = psgopher::playablePath(data + "/hacks/crc/remix.bps", &error); /* a .v64 base, a .z64 result */
+	CHECK(played2 == data + "/psgopher/cache/play/remix.z64" && slurp(played2) == moss_hack);
+	CHECK(access(played.c_str(), F_OK) != 0); /* one at a time */
+	const std::string played3 = psgopher::playablePath(data + "/hacks/ups/ups-hack.ups", &error); /* a UPS on a .n64 base */
+	CHECK(played3 == data + "/psgopher/cache/play/ups-hack.z64" && slurp(played3) == hack);
+	const std::string played4 = psgopher::playablePath(data + "/hacks/ips1/tweak.ips", &error);
+	{
+		std::string want = romImage("SOLO RUN", "NSOP", "z64", 0x2000, 1);
+		want.replace(0x20, 10, "FIXED NAME");
+		CHECK(played4 == data + "/psgopher/cache/play/tweak.z64" && slurp(played4) == want);
+	}
+	/* a patch the list does not know, and a base that changed since the list: errors, not crashes */
+	CHECK(psgopher::playablePath(data + "/hacks/ips2/fix.ips", &error).empty() && !error.empty());
+	std::string changed = vanilla;
+	changed[0x500] ^= 0xff;
+	write(data + "/hacks/same/base.z64", changed);
+	error.clear();
+	CHECK(psgopher::playablePath(data + "/hacks/same/base.bps", &error).empty() && error.find("CRC32") != std::string::npos);
+	write(data + "/hacks/same/base.bps", "damaged");
+	CHECK(psgopher::playablePath(data + "/hacks/same/base.bps", &error).empty() && !error.empty());
+	std::remove((data + "/hacks/same/base.z64").c_str());
+	CHECK(psgopher::playablePath(data + "/hacks/same/base.bps", &error).empty() && error.find("could not be read") != std::string::npos);
+}
+
 int main(int argc, char **argv)
 {
 	const std::string base = argc > 1 ? argv[1] : "/tmp/psgopher-host-tests";
@@ -378,6 +562,8 @@ int main(int argc, char **argv)
 	write(data + "/games/n64/deep/er/gamma.n64", romImage("HARBOR NIGHTS", "NHNJ", "n64", 0x2000, 11));
 	write(data + "/games/random.7z", "7z");           /* not in an N64 folder */
 	write(data + "/games/eboot.bin", "b");            /* .bin is never listed */
+	write(data + "/games/n64/Disk Game.ndd", std::string(0x100000, 'd')); /* a 64DD disk */
+	write(data + "/games/c64.d64", std::string(174848, 'c'));              /* a small .d64: a C64 disk */
 	write(data + "/other/a/b/c/d/e/f/g/toodeep.z64", "x");
 	write(data + "/psgopher/cache/cached.z64", "x");   /* the title's own cache is skipped */
 	write(data + "/psgopher/roms/.hidden.z64", "x");
@@ -412,6 +598,9 @@ int main(int argc, char **argv)
 	CHECK(find(games, "gamma"));
 	CHECK(!find(games, "random"));
 	CHECK(!find(games, "eboot"));
+	CHECK(find(games, "Disk Game") && !find(games, "Disk Game")->facts);
+	CHECK(!find(games, "c64"));
+	CHECK(psgopher::isDiskName("x.NDD") && psgopher::isDiskName("x.d64") && psgopher::isRomName("x.ndd"));
 	CHECK(!find(games, "toodeep"));
 	CHECK(!find(games, "cached"));
 	CHECK(!find(games, ".hidden"));
@@ -883,6 +1072,8 @@ int main(int argc, char **argv)
 	CHECK(psgopher::shareMountName("NAS games", { "/smb/" + first }) != first);
 	psgopher::Share m = back.shares[0];
 	CHECK(psgopher::mountShare(m, back, {}, &error) && m.mount.rfind("/smb/", 0) == 0);
+
+	romhackLibrary(base);
 
 	if (failures) {
 		std::fprintf(stderr, "test_library: %d check(s) failed\n", failures);

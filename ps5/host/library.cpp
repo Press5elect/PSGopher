@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <map>
 #include <mutex>
 #include <thread>
 
@@ -23,6 +24,7 @@
 #include <unistd.h>
 
 #include "ps5_vfs.h"
+#include "romhack.h"
 #include "write_broker.h"
 
 extern "C" void say(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -166,15 +168,9 @@ bool readHeader(const std::string &path, uint8_t *head)
 	return true;
 }
 
-/* The game's facts from its ROM's header (left as they are for a .zip or .7z, or an unreadable one) */
-void readFacts(Game &g)
+/* The game's facts from a ROM's first 4 KiB in Gopher64's byte order (.z64) */
+void factsFromHeader(Game &g, const uint8_t *head)
 {
-	const std::string l = lower(g.path);
-	if (!rawRom(l))
-		return;
-	uint8_t head[0x1000];
-	if (!readHeader(g.path, head))
-		return;
 	g.header.assign((const char *)head + 0x20, 20);
 	g.header = g.header.substr(0, g.header.find('\0'));
 	while (!g.header.empty() && g.header.back() == ' ')
@@ -188,12 +184,24 @@ void readFacts(Game &g)
 	g.crc = crc;
 	g.revision = head[0x3F];
 	PsgopherRomFacts f = {};
-	if (psgopher_rom_facts && psgopher_rom_facts(head, sizeof(head), &f)) {
+	if (psgopher_rom_facts && psgopher_rom_facts(head, 0x1000, &f)) {
 		g.cic = f.cic;
 		g.save = f.save;
 		g.rumble = f.rumble != 0;
 	}
 	g.facts = true;
+}
+
+/* The game's facts from its ROM's header (left as they are for a .zip or .7z, or an unreadable one) */
+void readFacts(Game &g)
+{
+	const std::string l = lower(g.path);
+	if (!rawRom(l))
+		return;
+	uint8_t head[0x1000];
+	if (!readHeader(g.path, head))
+		return;
+	factsFromHeader(g, head);
 }
 
 /* Folders not worth a look: the title's own (but its roms), systems' and other programs' data. */
@@ -274,6 +282,7 @@ struct State {
 	unsigned version{ 1 };
 	std::string status;
 	std::atomic<bool> scanning{ false };
+	std::atomic<bool> again{ false }; // a search asked for while one ran: it runs when that one ends
 };
 State &state()
 {
@@ -292,15 +301,17 @@ void sortGames(std::vector<Game> &games)
 void save(const std::vector<Game> &games)
 {
 	std::string text;
-	/* v4: tab, size, facts, cic, save, rumble, id, header, crc, revision, path (the path last: it may hold
-	 * anything but a newline; the header's name has no tab). v3 has no revision (-1: read when asked) */
-	text += "#psgopher-library 4\n";
+	/* v5: tab, size, facts, cic, save, rumble, id, header, crc, revision, base, path (the path last: it may
+	 * hold anything but a newline; the header's name has no tab; the base, a romhack patch's ROM, is "-"
+	 * for a plain ROM and holds no tab). v4 has no base; v3 no revision (-1: read when asked) */
+	text += "#psgopher-library 5\n";
 	for (const Game &g : games) {
 		std::string header = g.header;
 		std::replace(header.begin(), header.end(), '\t', ' ');
 		text += std::to_string(g.tab) + "\t" + std::to_string(g.size) + "\t" + (g.facts ? "1" : "0") + "\t" +
 			std::to_string(g.cic) + "\t" + std::to_string(g.save) + "\t" + (g.rumble ? "1" : "0") + "\t" +
-			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + (g.crc.empty() ? "-" : g.crc) + "\t" + std::to_string(g.revision) + "\t" + g.path + "\n";
+			(g.id.empty() ? "-" : g.id) + "\t" + header + "\t" + (g.crc.empty() ? "-" : g.crc) + "\t" + std::to_string(g.revision) + "\t" +
+			(g.base.empty() ? "-" : g.base) + "\t" + g.path + "\n";
 	}
 	const std::string file = listFile(), temporary = file + ".new";
 	if (FILE *f = fopen(temporary.c_str(), "wb")) {
@@ -314,7 +325,7 @@ void save(const std::vector<Game> &games)
 }
 
 /* false when the place itself could not be listed (its games are then the last list's) */
-bool search(const Place &place, std::vector<Game> &found, std::vector<std::string> &seen)
+bool search(const Place &place, std::vector<Game> &found, std::vector<Game> &patches, std::vector<std::string> &seen)
 {
 	bool listed = false;
 	const bool share = place.tab == TabNetwork;
@@ -357,6 +368,16 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 				continue;
 			}
 			const std::string l = lower(e.name);
+			if (romhack::formatOfName(e.name) != romhack::Format::None) {
+				/* a romhack patch is a cartridge of its own once a base ROM is found for it (resolvePatches) */
+				Game g;
+				g.name = stem(e.name);
+				g.path = full;
+				g.size = e.size;
+				g.tab = place.tab;
+				patches.push_back(g);
+				continue;
+			}
 			bool rom = rawRom(l);
 			/* a raw file too small for a ROM's header and boot code is no game: the console's
 			 * PIF (BIOS) image, 2 KiB as a .v64, was listed and failed to start (boot log
@@ -367,6 +388,9 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 				rom = zipHoldsRom(full);
 			if (!rom && endsWith(l, ".7z"))
 				rom = n64Folder || place.chosen;
+			/* a 64DD disk image: Gopher64 starts it with the 64DD's IPL (--disk) */
+			if (!rom && isDiskName(l))
+				rom = e.size == 0 || e.size >= 0x100000;
 			if (rom) {
 				Game g;
 				g.name = stem(e.name);
@@ -381,6 +405,271 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 		say("library: %s: searched as far as its budget goes (%u entries)", place.path.c_str(),
 			share ? kShareBudget : kLocalBudget);
 	return listed;
+}
+
+/* A file read whole, through ps5vfs for a share (a patch is at most 64 MiB, a ROM 256 MiB). `hint` is the
+ * size the listing gave (0 unknown): the buffer is made that size at once and read into, so the file is
+ * in memory once; with no hint it grows as it is read. */
+bool readWhole(const std::string &path, size_t cap, std::vector<uint8_t> &data, std::string *error, uint64_t hint = 0)
+{
+	data.clear();
+	const bool share = ps5vfs_is_virtual(path.c_str());
+	FILE *f = share ? ps5vfs_fopen(path.c_str(), "rb") : fopen(path.c_str(), "rb");
+	if (!f) {
+		if (error)
+			*error = std::string(share ? "the share did not open it: " : "it did not open: ") + strerror(errno);
+		return false;
+	}
+	uint8_t block[1 << 16];
+	bool too_large = false;
+	size_t have = 0;
+	if (hint > 0 && hint <= cap) {
+		data.resize((size_t)hint);
+		while (have < data.size()) {
+			const size_t want = data.size() - have;
+			const size_t n = share ? ps5vfs_fread(data.data() + have, 1, want, f) : fread(data.data() + have, 1, want, f);
+			if (n == 0)
+				break;
+			have += n;
+		}
+		data.resize(have);
+	}
+	for (;;) {
+		const size_t n = share ? ps5vfs_fread(block, 1, sizeof(block), f) : fread(block, 1, sizeof(block), f);
+		if (n == 0)
+			break;
+		if (data.size() + n > cap) {
+			too_large = true;
+			break;
+		}
+		data.insert(data.end(), block, block + n);
+	}
+	const bool failed = (share ? ps5vfs_ferror(f) : ferror(f)) != 0;
+	if (share)
+		ps5vfs_fclose(f);
+	else
+		fclose(f);
+	if (failed || too_large || data.empty()) {
+		data.clear();
+		if (error)
+			*error = failed ? "it could not be read to its end" : too_large ? "the file is too large" : "the file is empty";
+		return false;
+	}
+	return true;
+}
+
+/* A ROM file's CRC32 as stored and in .z64 order, read in blocks (no more than one block in memory) */
+bool crcsOfRom(const std::string &path, uint32_t *raw, uint32_t *z64)
+{
+	const bool share = ps5vfs_is_virtual(path.c_str());
+	FILE *f = share ? ps5vfs_fopen(path.c_str(), "rb") : fopen(path.c_str(), "rb");
+	if (!f)
+		return false;
+	uint8_t block[1 << 16]; /* (a multiple of 4: a word is never split between blocks) */
+	uint32_t a = 0, b = 0;
+	int order = -2;
+	for (;;) {
+		const size_t n = share ? ps5vfs_fread(block, 1, sizeof(block), f) : fread(block, 1, sizeof(block), f);
+		if (n == 0)
+			break;
+		if (order == -2)
+			order = n >= 4 ? romhack::byteOrder(block) : -1;
+		a = romhack::crc32(block, n, a);
+		romhack::toZ64(block, n, order);
+		b = romhack::crc32(block, n, b);
+	}
+	const bool failed = (share ? ps5vfs_ferror(f) : ferror(f)) != 0;
+	if (share)
+		ps5vfs_fclose(f);
+	else
+		fclose(f);
+	*raw = a, *z64 = b;
+	return !failed;
+}
+
+std::string folderOf(const std::string &path)
+{
+	const size_t slash = path.rfind('/');
+	return slash == std::string::npos ? std::string() : path.substr(0, slash);
+}
+
+/* Lists each romhack patch found as a cartridge of its own, with its base ROM and the facts of the
+ * patched header, and appends it to `found`. The base is (a) a raw ROM in the folder with the patch's
+ * stem, else (b) for a BPS or UPS a raw ROM of the declared source size whose CRC32 (as stored or in
+ * .z64 order) is the declared one (only size-matching ROMs are read), else (c) for an IPS the folder's
+ * only ROM. A patch with no base is left out, with a line saying why. What the last list (`known`,
+ * sorted by path) knew for the same patch (path and size) is kept, not read again. */
+/* A patch beside its base with the same name (game.z64 + game.bps) would show as a second "game", and
+ * share its play time (kept by name): it is "game (patched)" */
+void namePatched(Game &g)
+{
+	if (g.base.empty())
+		return;
+	const size_t slash = g.base.rfind('/');
+	if (lower(stem(slash == std::string::npos ? g.base : g.base.substr(slash + 1))) == lower(g.name))
+		g.name += " (patched)";
+}
+
+/* patches that failed in this run (kept between searches) */
+struct Failed {
+	uint64_t size;      // the patch file's
+	std::string why;
+	std::string base;   // the ROM chosen for it ("" none found)
+	uint64_t base_size; // its size
+	uint64_t signature; // the ROMs there were (path and size), for a patch with no base found
+};
+std::map<std::string, Failed> g_failed;
+
+void resolvePatches(std::vector<Game> &patches, std::vector<Game> &found, const std::vector<Game> &known)
+{
+	if (patches.empty())
+		return;
+	std::vector<Game> roms; /* the raw ROMs the bases are among, by path */
+	for (const Game &g : found)
+		if (g.base.empty() && rawRom(lower(g.path)))
+			roms.push_back(g);
+	std::sort(roms.begin(), roms.end(), [](const Game &a, const Game &b) { return a.path < b.path; });
+	std::map<std::string, std::pair<uint32_t, uint32_t>> crcs;
+	/* what the ROMs are, for a failure to be remembered against */
+	std::map<std::string, uint64_t> rom_sizes;
+	uint64_t signature = 1469598103934665603ull;
+	for (const Game &r : roms) {
+		rom_sizes[r.path] = r.size;
+		for (const char c : r.path)
+			signature = (signature ^ (unsigned char)c) * 1099511628211ull;
+		signature = (signature ^ r.size) * 1099511628211ull;
+	}
+	unsigned listed = 0, read = 0;
+	for (Game &p : patches) {
+		{
+			std::lock_guard lock(state().mutex);
+			state().status = p.path;
+		}
+		auto it = std::lower_bound(known.begin(), known.end(), p.path,
+			[](const Game &k, const std::string &path) { return k.path < path; });
+		/* (the base's size as the last list had it: a replaced base is read again) */
+		auto base_known = [&]() {
+			if (it == known.end() || it->base.empty())
+				return false;
+			const auto now = rom_sizes.find(it->base);
+			auto before = std::lower_bound(known.begin(), known.end(), it->base,
+				[](const Game &k, const std::string &path) { return k.path < path; });
+			return now != rom_sizes.end() && before != known.end() && before->path == it->base && before->size == now->second;
+		};
+		if (it != known.end() && it->path == p.path && it->size == p.size && it->facts && it->revision >= 0 && base_known()) {
+			const int tab = p.tab;
+			p = *it;
+			p.tab = tab;
+			found.push_back(p);
+			listed++;
+			continue;
+		}
+		const std::string folder = folderOf(p.path), l = lower(stem(p.path.substr(folder.size() + 1)));
+		/* a patch that failed before, the same file (size) and the same base (path and size) or, with no base
+		 * found, the same ROMs: not read again, the reason said once more */
+		const auto failed = g_failed.find(p.path);
+		if (failed != g_failed.end() && failed->second.size == p.size) {
+			const Failed &f = failed->second;
+			const auto b = rom_sizes.find(f.base);
+			if (f.base.empty() ? f.signature == signature : (b != rom_sizes.end() && b->second == f.base_size)) {
+				say("romhack: %s is not listed: %s", p.path.c_str(), f.why.c_str());
+				continue;
+			}
+		}
+		std::string base;
+		auto leave = [&](const std::string &why) {
+			say("romhack: %s is not listed: %s", p.path.c_str(), why.c_str());
+			const auto b = rom_sizes.find(base);
+			g_failed[p.path] = { p.size, why, base, b == rom_sizes.end() ? 0 : b->second, signature };
+		};
+		std::vector<uint8_t> patch;
+		std::string why;
+		if (!readWhole(p.path, 64u << 20, patch, &why, p.size)) {
+			leave("the patch could not be read: " + why);
+			continue;
+		}
+		romhack::Info info;
+		if (!romhack::info(patch.data(), patch.size(), &info, &why)) {
+			leave(why);
+			continue;
+		}
+		/* does this ROM fit a BPS or UPS: its size and CRC32 (as stored or in .z64 order) are the declared ones
+		 * (only a ROM of the right size is read) */
+		auto fits = [&](const Game &r) {
+			if (r.size == 0)
+				return false;
+			const bool as_source = r.size == info.source_size, as_target = info.either && r.size == info.target_size;
+			if (!as_source && !as_target)
+				return false;
+			auto c = crcs.find(r.path);
+			if (c == crcs.end()) {
+				uint32_t raw = 0, z64 = 0;
+				if (!crcsOfRom(r.path, &raw, &z64))
+					return false;
+				c = crcs.emplace(r.path, std::make_pair(raw, z64)).first;
+			}
+			for (const uint32_t crc : { c->second.first, c->second.second })
+				if ((as_source && crc == info.source_crc) || (as_target && crc == info.target_crc))
+					return true;
+			return false;
+		};
+		/* (a) the same stem in the same folder; for a patch with a CRC it must fit (a size the listing did
+		 * not give is taken as it is: applying checks it) */
+		for (const Game &r : roms)
+			if (folderOf(r.path) == folder && lower(stem(r.path.substr(folder.size() + 1))) == l &&
+				(!info.has_crc || r.size == 0 || fits(r))) {
+				base = r.path;
+				break;
+			}
+		if (base.empty() && info.has_crc) { /* (b) by size and CRC32, the patch's folder first */
+			for (int pass = 0; pass < 2 && base.empty(); pass++)
+				for (const Game &r : roms)
+					if ((folderOf(r.path) == folder) == (pass == 0) && fits(r)) {
+						base = r.path;
+						break;
+					}
+		}
+		if (base.empty() && info.format == romhack::Format::Ips) { /* (c) the folder's only ROM */
+			unsigned in_folder = 0;
+			std::string only;
+			for (const Game &g : found)
+				if (g.base.empty() && folderOf(g.path) == folder) {
+					in_folder++;
+					only = rawRom(lower(g.path)) ? g.path : std::string();
+				}
+			if (in_folder == 1)
+				base = only;
+		}
+		if (base.empty()) {
+			leave(info.has_crc ? "no ROM of its source size and CRC32 was found" : "no base ROM was found (the folder needs the ROM with the patch's name, or only one ROM)");
+			continue;
+		}
+		if (base.find('\t') != std::string::npos) {
+			leave("its base ROM's path holds a tab");
+			continue;
+		}
+		/* the patched ROM's header gives its name, save type and CIC */
+		std::vector<uint8_t> rom, result;
+		if (!readWhole(base, romhack::kMaxTarget, rom, &why, rom_sizes[base])) {
+			leave("the base ROM " + base + " could not be read: " + why);
+			continue;
+		}
+		if (!romhack::apply(patch.data(), patch.size(), rom.data(), rom.size(), result, &why)) {
+			leave(why);
+			continue;
+		}
+		read++;
+		if (result.size() < 0x1000 || romhack::byteOrder(result.data()) != 0) {
+			leave("the patched file is not an N64 ROM");
+			continue;
+		}
+		p.base = base;
+		namePatched(p);
+		factsFromHeader(p, result.data());
+		found.push_back(p);
+		listed++;
+	}
+	say("romhack: %u patch(es) listed (%u applied for their headers), %zu not", listed, read, patches.size() - listed);
 }
 
 } // namespace
@@ -402,7 +691,18 @@ int tabOfPath(const std::string &path)
 bool isRomName(const std::string &name)
 {
 	const std::string l = lower(name);
-	return rawRom(l) || endsWith(l, ".zip") || endsWith(l, ".7z");
+	return rawRom(l) || endsWith(l, ".zip") || endsWith(l, ".7z") || isDiskName(l);
+}
+
+bool isDiskName(const std::string &name)
+{
+	const std::string l = lower(name);
+	return endsWith(l, ".ndd") || endsWith(l, ".d64");
+}
+
+bool isPatchName(const std::string &name)
+{
+	return romhack::formatOfName(name) != romhack::Format::None;
 }
 
 void Library::load()
@@ -421,7 +721,7 @@ void Library::load()
 			}
 			std::vector<std::string> fields;
 			size_t at = 0;
-			const int count = version >= 4 ? 11 : version == 3 ? 10 : version == 2 ? 9 : 3;
+			const int count = version >= 5 ? 12 : version == 4 ? 11 : version == 3 ? 10 : version == 2 ? 9 : 3;
 			for (int i = 0; i < count - 1; i++) {
 				const size_t tab_at = text.find('\t', at);
 				if (tab_at == std::string::npos)
@@ -449,6 +749,10 @@ void Library::load()
 					g.crc = fields[8] == "-" ? "" : fields[8];
 				if (version >= 4)
 					g.revision = std::clamp(atoi(fields[9].c_str()), -1, 255);
+				if (version >= 5) {
+					g.base = fields[10] == "-" ? "" : fields[10];
+					namePatched(g);
+				}
 				if (version < 3)
 					g.facts = false; /* read again: v2 kept no key for cheats */
 			}
@@ -465,17 +769,23 @@ void Library::load()
 
 void Library::rescan()
 {
-	if (state().scanning.exchange(true))
+	/* a search asked for while one runs (Game Folders changed, a share added) is not lost: the places
+	 * were read at that search's start, so another runs when it ends */
+	if (state().scanning.exchange(true)) {
+		state().again = true;
 		return;
+	}
+	state().again = false;
 	std::thread([] {
 		const auto started = std::chrono::steady_clock::now();
 		std::vector<Game> found;
 		std::vector<std::string> seen;
 		std::vector<std::string> unlisted;
+		std::vector<Game> patches;
 		for (const Place &p : places()) {
 			/* (a place inside one searched before is seen already: not a failure) */
 			const bool already = std::find(seen.begin(), seen.end(), p.path) != seen.end();
-			if (!search(p, found, seen) && !already)
+			if (!search(p, found, patches, seen) && !already)
 				unlisted.push_back(p.path);
 		}
 		/* a place that could not be listed keeps what the last list had there, with its facts,
@@ -487,6 +797,15 @@ void Library::rescan()
 				known = state().games;
 			}
 			for (const std::string &place : unlisted) {
+				/* a USB drive that is gone (a chosen folder on it, unplugged) keeps nothing: its games
+				 * would only fail to start */
+				if (place.rfind("/mnt/usb", 0) == 0) {
+					const size_t slash = place.find('/', 5);
+					if (!isFolder(slash == std::string::npos ? place : place.substr(0, slash))) {
+						say("library: %s is not there (the USB drive is gone): its games are left out", place.c_str());
+						continue;
+					}
+				}
 				size_t kept = 0;
 				for (const Game &g : known)
 					if (g.path.size() > place.size() && g.path.compare(0, place.size(), place) == 0 &&
@@ -529,6 +848,8 @@ void Library::rescan()
 				read++;
 			}
 			say("library: %u ROM header(s) read", read);
+			/* the romhack patches, each with its base ROM (they need the ROMs' sizes, so after the search) */
+			resolvePatches(patches, found, known);
 		}
 		/* one entry per file: a place inside another (/data/psgopher/roms in /data) is seen once */
 		sortGames(found);
@@ -542,6 +863,8 @@ void Library::rescan()
 			state().status.clear();
 		}
 		state().scanning = false;
+		if (state().again.exchange(false))
+			library().rescan();
 	}).detach();
 }
 
@@ -626,6 +949,7 @@ bool setGameFolders(const std::vector<std::string> &folders)
 	const std::string file = foldersFile(), temporary = file + ".new";
 	mkdir((g_root + "/psgopher").c_str(), 0777);
 	mkdir((g_root + "/psgopher/config").c_str(), 0777);
+	chmod((g_root + "/psgopher/config").c_str(), 0777);
 	if (folders.empty())
 		return unlink(file.c_str()) == 0 || errno == ENOENT;
 	std::string text;
@@ -795,7 +1119,8 @@ void addPlayed(const std::string &name, double seconds)
 
 std::string localCopy(const std::string &path, std::string *error)
 {
-	if (!ps5vfs_is_virtual(path.c_str()))
+	/* a romhack patch is read where it is: playablePath reads it and its base and writes the result */
+	if (!ps5vfs_is_virtual(path.c_str()) || isPatchName(path))
 		return path;
 	const std::string folder = playFolder();
 	mkdir(folder.c_str(), 0777);
@@ -853,6 +1178,69 @@ std::string localCopy(const std::string &path, std::string *error)
 	fclose(out);
 	chmod(target.c_str(), 0666);
 	say("library: %s copied from the share (%zu KiB)", path.c_str(), data.size() / 1024);
+	return target;
+}
+
+std::string playablePath(const std::string &path, std::string *error)
+{
+	if (!isPatchName(path))
+		return path;
+	auto fail = [&](const std::string &why) {
+		if (error)
+			*error = why;
+		return std::string();
+	};
+	const std::string patch_name = path.substr(path.rfind('/') + 1);
+	std::string base;
+	uint64_t patch_size = 0, base_size = 0;
+	const std::vector<Game> listed = library().games();
+	for (const Game &g : listed)
+		if (g.path == path) {
+			base = g.base;
+			patch_size = g.size;
+			break;
+		}
+	for (const Game &g : listed)
+		if (!base.empty() && g.path == base)
+			base_size = g.size;
+	if (base.empty())
+		return fail(patch_name + ": no base ROM is known for this patch (it is listed only with one)");
+	std::vector<uint8_t> patch, rom, result;
+	std::string why;
+	if (!readWhole(path, 64u << 20, patch, &why, patch_size))
+		return fail(patch_name + ": the patch could not be read: " + why);
+	if (!readWhole(base, romhack::kMaxTarget, rom, &why, base_size))
+		return fail(patch_name + ": its base ROM " + base.substr(base.rfind('/') + 1) + " could not be read: " + why);
+	if (!romhack::apply(patch.data(), patch.size(), rom.data(), rom.size(), result, &why))
+		return fail(patch_name + ": " + why);
+	rom.clear(), rom.shrink_to_fit();
+	/* as localCopy: the last one written goes, one ROM at a time is kept */
+	const std::string folder = playFolder();
+	mkdir(folder.c_str(), 0777);
+	chmod(folder.c_str(), 0777);
+	if (DIR *d = opendir(folder.c_str())) {
+		while (dirent *e = readdir(d))
+			if (e->d_name[0] != '.')
+				unlink((folder + "/" + e->d_name).c_str());
+		closedir(d);
+	}
+	const std::string target = folder + "/" + stem(patch_name) + ".z64";
+	const romhack::Format format = romhack::formatOfData(patch.data(), patch.size());
+	std::string helperWhy;
+	if (helperWriteFile(g_root, target, result.data(), result.size(), &helperWhy)) {
+		chmod(target.c_str(), 0666);
+	} else {
+		unlink(target.c_str());
+		FILE *out = fopen(target.c_str(), "wb");
+		if (!out || fwrite(result.data(), 1, result.size(), out) != result.size()) {
+			if (out)
+				fclose(out);
+			return fail(patch_name + ": the patched ROM could not be written to " + folder + ": " + strerror(errno));
+		}
+		fclose(out);
+		chmod(target.c_str(), 0666);
+	}
+	say("romhack: %s applied to %s (%s, %zu KiB)", path.c_str(), base.c_str(), romhack::formatName(format), result.size() / 1024);
 	return target;
 }
 
