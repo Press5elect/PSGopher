@@ -497,6 +497,30 @@ int main(int argc, char **argv)
 		g_script.push_back(st);
 
 	setenv("PSGOPHER_ART", (std::string(PSGOPHER_SOURCE) + "/ps5/art").c_str(), 1);
+	/* The one-time early-build warning: a fresh config shows it before HOME is usable (Right and Circle do nothing, Cross
+	 * dismisses it and starts nothing), the flag is saved, and a second run does not show it (Cross starts the game) */
+	{
+		const std::vector<Step> main_script = g_script;
+		const std::string ini = work + "/data/psgopher/config/psgopher.ini";
+		CHECK(std::system(("mkdir -p '" + work + "/data/psgopher/config'").c_str()) == 0);
+		setenv("PSGOPHER_TITLE_INI", ini.c_str(), 1);
+		CHECK(access(ini.c_str(), F_OK) != 0);
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_RIGHT, nullptr, 2 }, { PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 3 }, { none, "36-early-warning", 3 },
+			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 6 }, { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult rw = psgopher::runMenu("");
+		CHECK(rw.play && rw.rom == work + "/data/psgopher/roms/Kart Champs (U).z64"); /* (HOME's first game: the Right was not taken) */
+		psgopher::TitleSettings saved;
+		saved.file = ini;
+		saved.load();
+		CHECK(saved.earlyWarningSeen);
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = { { none, nullptr, 6 }, { PAD_CROSS, nullptr, 2 } };
+		const psgopher::MenuResult rw2 = psgopher::runMenu("");
+		CHECK(rw2.play && rw2.rom == rw.rom);
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = main_script;
+	}
 	const psgopher::MenuResult r = psgopher::runMenu("A notice from the last game");
 	std::printf("menu returned: play %d, %s (probe %d); Gopher64's settings read %d times\n", r.play, r.rom.c_str(), r.load_state,
 	            g_setting_reads);
@@ -662,7 +686,7 @@ int main(int argc, char **argv)
 		const psgopher::MenuResult r3 = psgopher::runMenu(""); /* Cross on the question: the menu ends, no game */
 		CHECK(!r3.play && r3.rom.empty());
 	}
-	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask", "25-game-page", "26-game-page-video", "27-game-page-set", "28-game-page-controllers", "29-bench-marker", "30-pak-fact", "31-pak-fact-required", "32-pak-notice", "33-pak-fact-must-be-off", "34-game-page-emulation", "35-game-page-pak-set" }) {
+	for (const char *shot : { "14-close-confirm", "15-rack-letter-O", "16-rack-letter-hash", "1-home", "3-rack", "5-bench", "8-shares", "10-keyboard", "11-keyboard-typed", "13-home-probes", "17-update-idle", "18-update-available", "19-update-downloading", "20-update-failed", "21-update-ready", "22-update-install-ask", "23-update-rollback", "24-update-rollback-ask", "25-game-page", "26-game-page-video", "27-game-page-set", "28-game-page-controllers", "29-bench-marker", "30-pak-fact", "31-pak-fact-required", "32-pak-notice", "33-pak-fact-must-be-off", "34-game-page-emulation", "35-game-page-pak-set", "36-early-warning" }) {
 		struct stat st;
 		CHECK(stat((g_pictures + "/" + shot + ".ppm").c_str(), &st) == 0 && st.st_size > 1000);
 	}

@@ -1305,6 +1305,10 @@ MenuResult runMenu(const std::string &notice)
 		wsi_videoout_set_hdr10(0);
 
 	Menu menu;
+#ifdef PSGOPHER_MENU_HOST
+	if (const char *ini = getenv("PSGOPHER_TITLE_INI")) /* (the host test keeps the file in its work folder) */
+		menu.title.file = ini;
+#endif
 	menu.title.load();
 	if (g_displayAtStart.empty())
 		g_displayAtStart = menu.title.display;

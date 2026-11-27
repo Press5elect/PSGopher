@@ -110,6 +110,8 @@ void TitleSettings::load()
 			quickmenuTap = strcmp(value, "off") != 0;
 		else if (!strcmp(key, "update_check"))
 			updateCheck = strcmp(value, "off") != 0;
+		else if (!strcmp(key, "early_warning_seen"))
+			earlyWarningSeen = !strcmp(value, "on");
 		else if (!strcmp(key, "write_helper"))
 			writeHelper = strcmp(value, "off") != 0;
 		else if (!strncmp(key, "hotkey_", 7))
@@ -224,12 +226,16 @@ bool TitleSettings::save() const
 		"\n"
 		"# update_check: on asks GitHub whether a newer release is out each time the title starts (nothing is\n"
 		"# downloaded without asking: BENCH, Console, Check for Updates)\n"
-		"update_check = %s\n",
+		"update_check = %s\n"
+		"\n"
+		"# early_warning_seen: on once the early-build warning at the first start was accepted (not a setting: delete the\n"
+		"# line, or the file, to see it again)\n"
+		"early_warning_seen = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", expansionPak == 1 ? "on" : expansionPak == 2 ? "off" : "auto", audioBuffer,
 		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, keepGpuMemory ? "on" : "off",
 		finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto",
 		viAa ? "on" : "off", ditherFilter ? "on" : "off", divotFilter ? "on" : "off", gammaDither ? "on" : "off", nativeTexRect ? "on" : "off",
-		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", pictureDefaults, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
+		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", pictureDefaults, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off", earlyWarningSeen ? "on" : "off");
 	{
 		std::string lines;
 		for (size_t i = 0; i < hotkey.size(); i++)

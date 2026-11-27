@@ -521,11 +521,24 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 	/* "Close PSGopher?" has the pad while it is up: Cross closes (the title's clean exit), Circle stays */
 	PadInput quiet;
 	quiet.now = pad_in.now;
-	const PadInput &pad = close_open_ || update_ask_ || pak_ask_ ? quiet : pad_in;
+	/* the one-time early-build warning (first start, or after the config was reset) comes before anything */
+	if (!early_checked_) {
+		early_checked_ = true;
+		early_warn_ = host_.title && !host_.title->earlyWarningSeen;
+		if (early_warn_)
+			say("menu: the early-build warning shown");
+	}
+	const PadInput &pad = early_warn_ || close_open_ || update_ask_ || pak_ask_ ? quiet : pad_in;
+	if (early_warn_ && (pad_in.pressed & PAD_CROSS)) {
+		early_warn_ = false;
+		host_.title->earlyWarningSeen = true;
+		host_.title->save();
+		say("menu: the early-build warning accepted");
+	}
 	/* "Install vX.Y.Z?" and "Roll back to ...?" (BENCH, Console) are asked the same way: Cross does it,
 	 * Circle stays. An install that is in place closes the title the clean way, as the exit row does;
 	 * a roll back runs on the updater's thread and closes it when it is done */
-	if (update_ask_) {
+	if (update_ask_ && !early_warn_) {
 		if (pad_in.pressed & PAD_CIRCLE)
 			update_ask_ = 0;
 		else if (pad_in.pressed & PAD_CROSS) {
@@ -550,7 +563,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 			rollback_wanted_ = false;
 	}
 	/* a game that needs the Expansion Pak, started with it set to Off: Cross starts it anyway, Circle goes back */
-	if (pak_ask_) {
+	if (pak_ask_ && !early_warn_) {
 		if (pad_in.pressed & PAD_CIRCLE)
 			pak_ask_ = false;
 		else if (pad_in.pressed & PAD_CROSS) {
@@ -559,7 +572,7 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 				host_.play(pak_game_, pak_slot_);
 		}
 	}
-	if (close_open_) {
+	if (close_open_ && !early_warn_) {
 		if (pad_in.pressed & PAD_CIRCLE)
 			close_open_ = false;
 		else if (pad_in.pressed & PAD_CROSS) {
@@ -680,6 +693,60 @@ void Frontend::frame(ImDrawList *dl, const PadInput &pad_in, float w, float h, f
 			ink.text(f.mono_bold, 18, bx + 24, py + 223, on ? kInk : kText, label, .08f);
 			bx += bw + 14;
 		}
+	}
+	if (early_warn_) {
+		/* the owner's words, in paragraphs; the emoji at the end is drawn (neither face has it) */
+		static const char *const paras[] = {
+			"You're entering experimental territory. This build is still very much a work in progress and may contain more bugs than actual features.",
+			"Expect crashes, freezes, graphical glitches, unexpected behaviour, and possibly a console that decides it has had enough of life.",
+			"Games may freeze, the console may crash, things may break in spectacular and completely unpredictable ways. Nothing is guaranteed to work as intended.",
+			"Use at your own risk. Save your progress, keep your expectations low, and don't blame the emulator if your console suddenly decides to take an unscheduled vacation.",
+			"You've been warned. Have fun!",
+		};
+		const float pw = 1240, inner = pw - 96, line_h = 30, gap = 18;
+		const auto title_lines = wrap(ink, f.display, 38, "WARNING: VERY EARLY BUILD \xE2\x80\x93 PROCEED AT YOUR OWN RISK!", inner, 2);
+		std::vector<std::vector<std::string>> body;
+		float text_h = 0;
+		for (const char *p : paras) {
+			body.push_back(wrap(ink, f.mono, 21, p, inner, 6));
+			text_h += body.back().size() * line_h + gap;
+		}
+		const float title_h = title_lines.size() * 46.0f;
+		const float ph = 40 + 30 + title_h + 20 + text_h + 14 + 50 + 44, px = (1920 - pw) / 2, py = std::max(20.0f, (1080 - ph) / 2);
+		ink.rect(0, 0, 1920, 1080, IM_COL32(1, 5, 7, 200));
+		ink.glow(px, py, pw, ph, IM_COL32(255, 182, 72, 64), 24, 20);
+		ink.rect(px, py, pw, ph, IM_COL32(7, 17, 21, 250), 20);
+		ink.frame(px, py, pw, ph, kAmber, 20, 2);
+		float y = py + 40;
+		ink.text(f.mono, 13, px + 48, y, kDim, "PSGOPHER", .2f);
+		y += 30;
+		for (const std::string &l : title_lines) {
+			ink.text(f.display, 38, px + 48, y, kAmber, l, -.02f);
+			y += 46;
+		}
+		y += 20;
+		for (size_t i = 0; i < body.size(); i++) {
+			float lastw = 0, lasty = y;
+			for (const std::string &l : body[i]) {
+				lastw = ink.text(f.mono, 21, px + 48, y, kText, l);
+				lasty = y;
+				y += line_h;
+			}
+			if (i + 1 == body.size()) { /* a smiling face after the last line */
+				const float r = 11, cx = px + 48 + lastw + 14 + r, cy = lasty + 14;
+				dl->AddCircleFilled(ink.at(cx, cy), r * u_, kAmber, 24);
+				dl->AddCircleFilled(ink.at(cx - 4, cy - 3), 1.8f * u_, kInk, 8);
+				dl->AddCircleFilled(ink.at(cx + 4, cy - 3), 1.8f * u_, kInk, 8);
+				dl->PathArcTo(ink.at(cx, cy + 1), 6.5f * u_, 0.45f, 2.69f, 12);
+				dl->PathStroke(kInk, 1.8f * u_);
+			}
+			y += gap;
+		}
+		y += 14;
+		const char *label = "\xE2\x9C\x95  I UNDERSTAND";
+		const float bw = ink.width(f.mono_bold, 18, label, .08f) + 48;
+		ink.rect(px + 48, y, bw, 50, kText, 25);
+		ink.text(f.mono_bold, 18, px + 48 + 24, y + 15, kInk, label, .08f);
 	}
 	if (host_.notice) {
 		const std::string n = host_.notice();

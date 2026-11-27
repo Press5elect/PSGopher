@@ -177,6 +177,7 @@ private:
 	std::string picker_folder_, picker_key_;
 	bool picker_rom_ = true;
 	void filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
+	bool early_checked_ = false, early_warn_ = false; // the one-time early-build warning: asked once, up
 	bool close_open_ = false; // "Close PSGopher?" is up
 	/* "Install vX.Y.Z?" / "Roll back to ...?" is up (1 install, 2 roll back); the roll back's answer is waited for */
 	int update_ask_ = 0;

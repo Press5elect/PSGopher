@@ -56,6 +56,7 @@ struct TitleSettings {
 	bool writeHelper{ true };    // a ROM copied from a share is written by the write broker (a payload of its own:
 	                             // the console holds the title's own writes back after ~1.3 GiB; OGBox's decision: on)
 	bool updateCheck{ true };    // the title asks GitHub for a newer release at its start (OGBox's default: on)
+	bool earlyWarningSeen{ false }; // the one-time early-build warning was accepted (frontend.cpp); a reset config shows it again
 	bool quickmenuTap{ true };   // a touch pad tap opens the quick menu (kept on when nothing else leaves a game)
 	/* a game can be left: by the quick menu's tap or the hotkey's Leave game */
 	bool canLeaveGame() const { return quickmenuTap || (hotkeys && hotkey[2] >= 0); }
