@@ -56,6 +56,10 @@ The multi-agent audit of the front end (2026-11-25). Its bug IDs (`FE-nnn`) are 
 | [`frontend-audit/COVERAGE.md`](frontend-audit/COVERAGE.md) | What was inspected (the coverage figure) and what was not |
 | [`frontend-audit/ROADMAP.md`](frontend-audit/ROADMAP.md) | The order to fix and improve in |
 
+## Releases (`releases/`)
+
+[`releases/README.md`](releases/README.md): the published release notes, one file a release.
+
 ## History (`history/`)
 
 | Document | What it holds |
