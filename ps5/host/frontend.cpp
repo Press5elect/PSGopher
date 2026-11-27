@@ -2190,6 +2190,27 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 				sc.text = "Sets rows for " + titleOf(page_game_) + " only. Each starts at Use Global Setting; the other games keep the global settings.";
 		sections = std::move(page);
 	}
+	/* a section with no rows (or no sections) must not be indexed: on the console one was, at row -1
+	   (v0.0.1, a crash in BENCH); it is shown empty and named in the log once, so its cause can be found */
+	sections.erase(std::remove_if(sections.begin(), sections.end(), [this](const Section &sc) {
+		               if (!sc.rows.empty())
+			               return false;
+		               static std::string logged;
+		               if (logged.find("|" + sc.name + "|") == std::string::npos) {
+			               logged += "|" + sc.name + "|";
+			               say("bench: section \"%s\" has no rows (%s, view %d); left out", sc.name.c_str(),
+			                   game_page_ ? "a game's page" : "BENCH", (int)view_);
+		               }
+		               return true;
+	               }),
+	               sections.end());
+	if (sections.empty()) {
+		if (pad.pressed & PAD_CIRCLE) {
+			game_page_ = false;
+			setView(board::View::Home);
+		}
+		return;
+	}
 	const int ns = (int)sections.size();
 	bench_section_ = std::clamp(bench_section_, 0, ns - 1);
 	Section &sec = sections[bench_section_];

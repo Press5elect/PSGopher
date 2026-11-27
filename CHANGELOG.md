@@ -2,6 +2,12 @@
 
 Every change, the newest version first. Games are named by cartridge ID only.
 
+## v0.0.2 (2026-11-27)
+
+- Fixed: a crash in BENCH or a game's page when one of its sections had no rows (v0.0.1 read the
+  row before the first). Such a section is left out, and the boot log names it once
+  (`bench: section ... has no rows`).
+
 ## v0.0.1 (2026-11-27)
 
 The first release: a very early build. The title, the sandbox exit, network shares, USB drives,
