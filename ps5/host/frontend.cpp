@@ -20,6 +20,8 @@
 #include <dirent.h>
 #include <sys/stat.h>
 
+/* the 64DD IPL Gopher64 would take from data/64dd (psgopher.rs; it makes the folder) */
+extern "C" int psgopher_dd_ipl(int region, char *buffer, size_t size) __attribute__((weak));
 extern "C" {
 #include "platform.h"
 }
@@ -1894,6 +1896,15 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			r.kind = Row::Info, r.key = "dd_ipl", r.label = "64DD IPL";
 			r.help = "Shows the 64DD IPL that starts 64DD disks: a 4 MB dump of the IPL, placed in \"/data/psgopher/data/64dd\". Disks are listed with the cartridges.";
 			r.value = [] {
+				/* the one Gopher64 would take (a known IPL ID), when the core is linked in */
+				if (psgopher_dd_ipl) {
+					char path[512] = {};
+					const int n = psgopher_dd_ipl(-1, path, sizeof(path));
+					if (n <= 0)
+						return std::string("Not Found");
+					const char *slash = strrchr(path, '/');
+					return std::string(slash ? slash + 1 : path);
+				}
 				const std::string folder = libraryRoot() + "/psgopher/data/64dd";
 				std::string found;
 				if (DIR *d = opendir(folder.c_str())) {
@@ -2084,7 +2095,7 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 			                        return n == 0 ? std::string("Everywhere") : n == 1 ? std::string("1 folder") : std::to_string(n) + " folders";
 		                        },
 		                        "Selects the folders searched for cartridges, on the console or a USB drive. When none is selected, all of /data, every USB drive and the network shares are searched.",
-		                        [this] { picker_mode_ = 1, picker_sel_ = 0, picker_folder_.clear(), folders_changed_ = false, folders_opened_ = true; }));
+		                        [this] { picker_mode_ = 1, picker_sel_ = 0, picker_folder_.clear(), folders_changed_ = false, folders_error_ = false, folders_opened_ = true; }));
 		s.rows.push_back(action("console.search", "Search for Cartridges", [] { return std::string(library().scanning() ? "Searching" : "Search"); }, "Searches every location for cartridges again.",
 		                        [] { library().rescan(); }));
 		/* Fast Writes: the write broker (write_broker.h) */
@@ -2663,13 +2674,13 @@ void Frontend::folderPicker(ImDrawList *dl, const PadInput &pad, const FrontendF
 			picker_mode_ = 2, picker_folder_.clear(), picker_sel_ = 0;
 		} else if (e.what == 3) {
 			chosen.erase(std::remove(chosen.begin(), chosen.end(), e.path), chosen.end());
-			setGameFolders(chosen);
-			folders_changed_ = true;
+			folders_error_ = !setGameFolders(chosen);
+			folders_changed_ = folders_changed_ || !folders_error_;
 		} else if (e.what == 1) {
 			if (std::find(chosen.begin(), chosen.end(), e.path) == chosen.end())
 				chosen.push_back(e.path);
-			setGameFolders(chosen);
-			folders_changed_ = true;
+			folders_error_ = !setGameFolders(chosen);
+			folders_changed_ = folders_changed_ || !folders_error_;
 			picker_mode_ = 1, picker_sel_ = 0;
 		} else {
 			picker_folder_ = e.path;
@@ -2685,7 +2696,8 @@ void Frontend::folderPicker(ImDrawList *dl, const PadInput &pad, const FrontendF
 	const char *sub = picker_mode_ == 1 ? (chosen.empty() ? "none chosen: all of /data, every USB drive and the network shares are searched"
 	                                                       : "only these, /data/psgopher/roms and the network shares are searched")
 	                                    : picker_folder_.empty() ? "the console and its USB drives" : picker_folder_.c_str();
-	ink.text(f.mono, 14, x + 28, y + 56, kDim, sub);
+	ink.text(f.mono, 14, x + 28, y + 56, folders_error_ ? kAmber : kDim,
+	         folders_error_ ? "the folders could not be saved (/data/psgopher/config is not writable)" : sub);
 	const int visible = (int)((h - 140) / rh);
 	const int first = std::clamp(picker_sel_ - visible / 2, 0, std::max(0, n - visible));
 	for (int i = first; i < std::min(n, first + visible); i++) {

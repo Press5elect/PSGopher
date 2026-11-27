@@ -364,7 +364,8 @@ bool applyUps(const uint8_t *patch, size_t size, const uint8_t *base, size_t bas
 			hex8(u.in_crc) + " or " + hex8(u.out_crc) + ")");
 	const size_t length = (size_t)std::max<uint64_t>(u.in_size, u.out_size);
 	std::vector<uint8_t> work(length, 0);
-	memcpy(work.data(), base, std::min(base_size, length));
+	if (base_size > 0 && length > 0)
+		memcpy(work.data(), base, std::min(base_size, length));
 	Reader r{ patch, u.begin, u.end };
 	size_t at = 0;
 	while (r.left() > 0) {
@@ -456,6 +457,244 @@ bool apply(const uint8_t *patch, size_t patch_size, const uint8_t *base, size_t 
 			return false;
 	}
 	/* the result in .z64 order: a patch made against a .v64 gives a .v64 */
+	if (out.size() >= 4)
+		toZ64(out.data(), out.size(), byteOrder(out.data()));
+	return true;
+}
+
+/* ------------------------------------------------------------------ the head of the result alone */
+
+namespace {
+
+/* A ROM read in .z64 order without a converted copy of it: byte i of the .z64 form is p[i ^ 1] of a .v64
+ * and p[i ^ 3] of a .n64 (a trailing part short of a pair or word stays) */
+struct Source {
+	const uint8_t *p;
+	size_t n;
+	int order;
+	uint8_t at(size_t i) const
+	{
+		if (order == 1 && i < (n & ~(size_t)1))
+			return p[i ^ 1];
+		if (order == 2 && i < (n & ~(size_t)3))
+			return p[i ^ 3];
+		return p[i];
+	}
+};
+
+/* the CRC32 of a ROM as stored and in .z64 order, in blocks (a block of the second is converted in a small copy) */
+void crcsOf(const uint8_t *base, size_t size, int order, uint32_t *raw, uint32_t *z64)
+{
+	*raw = crc32(base, size);
+	if (order <= 0) {
+		*z64 = *raw;
+		return;
+	}
+	uint8_t block[1 << 14]; // (a multiple of 4: a word is never split between blocks)
+	uint32_t c = 0;
+	for (size_t at = 0; at < size; at += sizeof(block)) {
+		const size_t n = std::min(sizeof(block), size - at);
+		memcpy(block, base + at, n);
+		toZ64(block, n, order);
+		c = crc32(block, n, c);
+	}
+	*z64 = c;
+}
+
+bool headIps(const uint8_t *patch, size_t size, const Source &src, size_t limit, std::vector<uint8_t> &out, std::string *error)
+{
+	if (size < 8 || memcmp(patch, "PATCH", 5) != 0)
+		return fail(error, "this is not an IPS patch");
+	if (src.n > kMaxTarget)
+		return fail(error, "the ROM is too large");
+	out.resize(std::min(limit, src.n));
+	for (size_t i = 0; i < out.size(); i++)
+		out[i] = src.at(i);
+	size_t virtual_size = src.n; // (the size the whole result would have)
+	Reader r{ patch, 5, size };
+	while (r.left() > 0) {
+		if (r.left() < 3)
+			return fail(error, "the IPS patch is cut short");
+		const size_t offset = r.be(3);
+		if (offset == 0x454F46) // "EOF"
+			break;
+		if (r.left() < 2)
+			return fail(error, "the IPS patch is cut short");
+		size_t length = r.be(2);
+		bool run = false;
+		uint8_t value = 0;
+		if (length == 0) {
+			if (r.left() < 3)
+				return fail(error, "the IPS patch is cut short");
+			length = r.be(2);
+			value = r.byte();
+			run = true;
+			if (length == 0)
+				return fail(error, "the IPS patch has an empty run");
+		} else if (r.left() < length)
+			return fail(error, "the IPS patch is cut short");
+		if (offset + length > kMaxTarget)
+			return fail(error, "the patched ROM would be too large");
+		virtual_size = std::max(virtual_size, offset + length);
+		if (offset < limit) {
+			const size_t end = std::min(offset + length, limit);
+			if (end > out.size())
+				out.resize(end, 0);
+			for (size_t i = offset; i < end; i++)
+				out[i] = run ? value : patch[r.pos + (i - offset)];
+		}
+		if (!run)
+			r.pos += length;
+	}
+	if (r.left() == 3) {
+		const size_t length = r.be(3);
+		if (length > kMaxTarget)
+			return fail(error, "the patched ROM would be too large");
+		virtual_size = length;
+	}
+	out.resize(std::min(limit, virtual_size), 0);
+	return true;
+}
+
+bool headBps(const uint8_t *patch, size_t size, const Source &src, size_t limit, std::vector<uint8_t> &out, std::string *error)
+{
+	Bps b;
+	if (!parseBps(patch, size, &b, error))
+		return false;
+	if (b.target_size > kMaxTarget)
+		return fail(error, "the patched ROM would be too large");
+	if (b.source_size != src.n)
+		return fail(error, "the base ROM is not the one this patch was made for (it is " + std::to_string(src.n) +
+			" bytes, the patch wants " + std::to_string(b.source_size) + ")");
+	const size_t target = (size_t)b.target_size, want = std::min(limit, target);
+	out.assign(want, 0);
+	size_t at = 0;
+	int64_t source_rel = 0, target_rel = 0;
+	Reader r{ patch, b.actions_begin, b.actions_end };
+	while (r.left() > 0 && at < want) {
+		const uint64_t data = r.number();
+		if (r.bad)
+			return fail(error, "the BPS patch is cut short");
+		const uint64_t length = (data >> 2) + 1;
+		if (length > target - at)
+			return fail(error, "the BPS patch writes past the end of the ROM it makes");
+		const size_t n = (size_t)length, m = std::min(n, want - at); // (m of the n are wanted)
+		switch (data & 3) {
+		case 0:
+			if (at + n > src.n)
+				return fail(error, "the BPS patch reads past the end of the base ROM");
+			for (size_t i = 0; i < m; i++)
+				out[at + i] = src.at(at + i);
+			break;
+		case 1:
+			if (r.left() < n)
+				return fail(error, "the BPS patch is cut short");
+			memcpy(out.data() + at, patch + r.pos, m);
+			r.pos += n;
+			break;
+		default: {
+			const uint64_t x = r.number();
+			if (r.bad)
+				return fail(error, "the BPS patch is cut short");
+			const int64_t delta = (x & 1) ? -(int64_t)(x >> 1) : (int64_t)(x >> 1);
+			if ((data & 3) == 2) {
+				source_rel += delta;
+				if (source_rel < 0 || (uint64_t)source_rel > src.n || n > src.n - (size_t)source_rel)
+					return fail(error, "the BPS patch reads outside the base ROM");
+				for (size_t i = 0; i < m; i++)
+					out[at + i] = src.at((size_t)source_rel + i);
+				source_rel += (int64_t)n;
+			} else {
+				target_rel += delta;
+				if (target_rel < 0 || (uint64_t)target_rel >= at)
+					return fail(error, "the BPS patch copies from outside what it has made");
+				for (size_t i = 0; i < m; i++)
+					out[at + i] = out[(size_t)target_rel + i];
+				target_rel += (int64_t)n;
+			}
+			break;
+		}
+		}
+		at += n;
+	}
+	if (at < want)
+		return fail(error, "the BPS patch makes fewer bytes than it declares");
+	return true;
+}
+
+bool headUps(const uint8_t *patch, size_t size, const Source &src, size_t limit, std::vector<uint8_t> &out, std::string *error)
+{
+	Ups u;
+	if (!parseUps(patch, size, &u, error))
+		return false;
+	if (u.in_size > kMaxTarget || u.out_size > kMaxTarget)
+		return fail(error, "the patched ROM would be too large");
+	/* (the direction was decided by the caller's CRC32 check: the size says which it is) */
+	const uint64_t to_size = src.n == u.in_size ? u.out_size : u.in_size;
+	const size_t length = (size_t)std::max<uint64_t>(u.in_size, u.out_size), keep = std::min(limit, length);
+	std::vector<uint8_t> work(keep, 0);
+	for (size_t i = 0; i < std::min(keep, src.n); i++)
+		work[i] = src.at(i);
+	Reader r{ patch, u.begin, u.end };
+	size_t at = 0;
+	while (r.left() > 0) {
+		const uint64_t skip = r.number();
+		if (r.bad)
+			return fail(error, "the UPS patch is cut short");
+		if (skip > length - std::min(at, length) && skip > 0)
+			return fail(error, "the UPS patch writes outside the ROM");
+		at += (size_t)skip;
+		for (;;) {
+			const uint8_t b = r.byte();
+			if (r.bad)
+				return fail(error, "the UPS patch is cut short");
+			if (b != 0) {
+				if (at >= length)
+					return fail(error, "the UPS patch writes outside the ROM");
+				if (at < keep)
+					work[at] ^= b;
+			}
+			at++;
+			if (b == 0)
+				break;
+		}
+	}
+	work.resize((size_t)std::min<uint64_t>(keep, to_size));
+	out = std::move(work);
+	return true;
+}
+
+} // namespace
+
+bool applyHead(const uint8_t *patch, size_t patch_size, const uint8_t *base, size_t base_size, size_t limit,
+	std::vector<uint8_t> &out, std::string *error)
+{
+	Info i;
+	if (!info(patch, patch_size, &i, error))
+		return false;
+	const int order = base_size >= 4 ? byteOrder(base) : -1;
+	Source src{ base, base_size, 0 };
+	if (i.format == Format::Ips) {
+		src.order = std::max(order, 0);
+		if (!headIps(patch, patch_size, src, limit, out, error))
+			return false;
+	} else {
+		uint32_t raw = 0, z64 = 0;
+		crcsOf(base, base_size, order, &raw, &z64);
+		auto fits = [&](uint32_t crc) {
+			return (base_size == i.source_size && crc == i.source_crc) || (i.either && base_size == i.target_size && crc == i.target_crc);
+		};
+		const uint32_t shown = raw;
+		if (fits(raw))
+			src.order = 0;
+		else if (order > 0 && fits(z64))
+			src.order = order;
+		else
+			return fail(error, "the base ROM is not the one this patch was made for (CRC32 " + hex8(shown) + ", the patch wants " +
+				hex8(i.source_crc) + (i.either ? " or " + hex8(i.target_crc) : std::string()) + ")");
+		if (!(i.format == Format::Bps ? headBps : headUps)(patch, patch_size, src, limit, out, error))
+			return false;
+	}
 	if (out.size() >= 4)
 		toZ64(out.data(), out.size(), byteOrder(out.data()));
 	return true;

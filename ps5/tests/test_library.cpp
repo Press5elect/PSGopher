@@ -452,7 +452,9 @@ static void romhackLibrary(const std::string &base)
 	CHECK(same && same->base == data + "/hacks/same/base.z64" && same->path == data + "/hacks/same/base.bps");
 	CHECK(same && same->facts && same->header == "COMET HACK" && same->id == "NCHE" && same->revision == 3);
 	CHECK(findPatch(games, "base", false) && findPatch(games, "base", false)->header == "COMET KART"); /* the ROM itself too */
-	CHECK(same && psgopher::gameKey(*same) == "NCHE-03");
+	/* a hack has its own key (its base's code, and the hack's CRC1): its own per-game settings */
+	CHECK(same && psgopher::gameKey(*same) == "NCHE-03-" + same->crc.substr(0, 8) && same->crc.size() >= 8);
+	CHECK(findPatch(games, "base", false) && psgopher::gameKey(*findPatch(games, "base", false)) == "NCKE-00");
 	CHECK(same && same->tab == psgopher::TabInternal && same->size > 0);
 	const psgopher::Game *fall = findPatch(games, "fall");
 	CHECK(fall && fall->base == data + "/hacks/stem/real.z64" && fall->header == "COMET HACK");
@@ -476,11 +478,29 @@ static void romhackLibrary(const std::string &base)
 	/* the patched headers are what the facts were read from: 4 ROMs' and 4 patches' headers (+ the decoys) */
 	CHECK(g_facts_calls > calls_before);
 
-	/* the list is kept: v5 with the base, and read back */
-	const std::string tsv = data + "/psgopher/cache/library.tsv", kept = slurp(tsv);
-	CHECK(kept.rfind("#psgopher-library 5\n", 0) == 0);
-	CHECK(kept.find("\t" + data + "/hacks/same/base.z64\t" + data + "/hacks/same/base.bps\n") != std::string::npos);
-	CHECK(kept.find("\t-\t" + data + "/hacks/same/base.z64\n") != std::string::npos); /* a plain ROM's base is "-" */
+	/* the list is kept as version 4 (what the title before reads), the bases beside it, and read back */
+	const std::string tsv = data + "/psgopher/cache/library.tsv", bases_file = data + "/psgopher/cache/library-bases.tsv",
+		kept = slurp(tsv), kept_bases = slurp(bases_file);
+	CHECK(kept.rfind("#psgopher-library 4\n", 0) == 0);
+	CHECK(kept.find("\t" + data + "/hacks/same/base.bps\n") != std::string::npos);
+	CHECK(kept_bases.find(data + "/hacks/same/base.bps\t" + data + "/hacks/same/base.z64\n") != std::string::npos);
+	CHECK(kept_bases.find(data + "/hacks/same/base.z64\t") == std::string::npos); /* a plain ROM has no line */
+	{
+		size_t lines = 0;
+		for (const char c : kept_bases)
+			lines += c == '\n';
+		CHECK(lines == 5); /* base, remix, tweak, ups-hack, fall */
+		/* every line of the list has 11 fields: a title that reads version 4 reads it */
+		size_t at = kept.find('\n') + 1;
+		while (at < kept.size()) {
+			const size_t end = kept.find('\n', at);
+			size_t tabs = 0;
+			for (size_t i = at; i < end; i++)
+				tabs += kept[i] == '\t';
+			CHECK(tabs >= 10);
+			at = end + 1;
+		}
+	}
 	lib.load();
 	{
 		const auto back = lib.games();
@@ -504,7 +524,26 @@ static void romhackLibrary(const std::string &base)
 		lib.load();
 		const auto old = lib.games();
 		CHECK(old.size() == 1 && old[0].base.empty() && old[0].revision == 0 && old[0].header == "COMET KART" && old[0].path == plain->path);
+		/* a run started before the list was loaded (autostart.txt, benchmark.txt): a patch not in the list loads the kept list once */
 		write(tsv, kept);
+		std::string early_error;
+		const std::string early = psgopher::playablePath(data + "/hacks/same/base.bps", &early_error);
+		CHECK(early == data + "/psgopher/cache/play/base.z64" && slurp(early) == hack);
+		lib.load();
+		CHECK(lib.games().size() == games.size());
+		/* with the bases file gone a patch is not a game (its base is not known); a version 5 list holds the base itself */
+		std::remove(bases_file.c_str());
+		lib.load();
+		CHECK(lib.games().size() == games.size() - 5 && !findPatch(lib.games(), "remix"));
+		{
+			const psgopher::Game *p = findPatch(games, "remix");
+			write(tsv, "#psgopher-library 5\n0\t" + std::to_string(p->size) + "\t1\t6105\t32\t0\tNMRP\tMOSS REMIX\t11223344-55667788-C:45\t5\t" + p->base + "\t" + p->path + "\n");
+			lib.load();
+			const auto five = lib.games();
+			CHECK(five.size() == 1 && five[0].base == p->base && five[0].header == "MOSS REMIX" && five[0].revision == 5);
+		}
+		write(tsv, kept);
+		write(bases_file, kept_bases);
 		lib.load();
 		CHECK(lib.games().size() == games.size());
 	}
@@ -979,6 +1018,7 @@ int main(int argc, char **argv)
 		                         "01234567-89ABCDEF\tincompatible\tm64p\tunverified\n");
 		pakUseFile(data + "/pak.tsv");
 		CHECK(pakTable().size() == 4 && pakInfoOf("NBAD-00", "").status == PakStatus::Incompatible);
+		CHECK(pakInfoOf("NBAD-00-1A2B3C4D", "").status == PakStatus::Incompatible); /* a romhack patch's key: its base game's code */
 		TitleSettings global; /* Auto */
 		auto run = [&](const std::string &key, const TitleSettings &settings, const std::string &crc, int64_t *during) {
 			g_log.clear();

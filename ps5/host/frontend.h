@@ -182,6 +182,7 @@ private:
 	 * 2 choosing one to add (picker_folder_ is where it is); a change searches again when it closes */
 	int picker_mode_ = 0;
 	bool folders_changed_ = false;
+	bool folders_error_ = false;  // the last change could not be saved (shown in the chooser)
 	bool folders_opened_ = false; // the frame it opens: the Cross that opened it is not taken again
 	void folderPicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
 	bool early_checked_ = false, early_warn_ = false; // the one-time early-build warning: asked once, up

@@ -1561,7 +1561,7 @@ index 0000000..3039335
 +    0x00000056, 0x0003003e, 0x0000004e, 0x00000057, 0x000100fd, 0x00010038,
 +};
 diff --git a/src/device.rs b/src/device.rs
-index ced2472..8823fb8 100644
+index ced2472..0f3281e 100644
 --- a/src/device.rs
 +++ b/src/device.rs
 @@ -27,6 +27,7 @@ pub mod cop1;
@@ -1604,17 +1604,26 @@ index ced2472..8823fb8 100644
  ) {
      device.cpu.overclock = game_settings.overclock;
      if game_settings.disable_expansion_pak {
-@@ -63,7 +83,8 @@ pub fn run_game(
+@@ -63,7 +83,17 @@ pub fn run_game(
          device.ui.savestate.load_state = true;
      }
  
 -    cart::rom::init(device, rom_contents); // cart needs to come before rdram
++    // Gopher64's own ROM fixes (cart::patches) are applied in the cartridge's copy: the cheats'
++    // key and RetroAchievements take the ROM as it was, as when the ROM was copied. Only
++    // RetroAchievements needs the bytes kept (it is off on PS5); the key is computed now.
++    let game_crc = ui::storage::get_game_crc(&rom_contents);
++    let ra_rom = if ra_config.enabled {
++        Some(rom_contents.clone())
++    } else {
++        None
++    };
 +    cart::rom::init_owned(device, rom_contents); // cart needs to come before rdram
 +    dd::init(device); // the 64DD, when attached: 8 MB, the IPL's CIC
  
      // rdram pointer is shared with parallel-rdp and retroachievements
      rdram::init(device);
-@@ -74,11 +95,8 @@ pub fn run_game(
+@@ -74,11 +104,8 @@ pub fn run_game(
  
      // must be after video init
      if let Some(netplay_config) = &netplay_config {
@@ -1628,20 +1637,17 @@ index ced2472..8823fb8 100644
          if device.netplay.is_none() {
              ui::input::close(&mut device.ui);
              ui::audio::close(&mut device.ui);
-@@ -91,7 +109,11 @@ pub fn run_game(
+@@ -91,7 +118,8 @@ pub fn run_game(
  
      // must be after video init
      let (discord_watch_tx, discord_handle) = if ra_config.enabled && device.netplay.is_none() {
 -        retroachievements::load_game(rom_contents, rom_contents.len(), ra_config.rich_presence)
-+        retroachievements::load_game(
-+            &device.cart.rom,
-+            device.cart.rom.len(),
-+            ra_config.rich_presence,
-+        )
++        let rom = ra_rom.as_deref().unwrap_or(device.cart.rom.as_slice());
++        retroachievements::load_game(rom, rom.len(), ra_config.rich_presence)
      } else {
          (None, None)
      };
-@@ -113,18 +135,17 @@ pub fn run_game(
+@@ -113,18 +141,16 @@ pub fn run_game(
      ui::storage::format_saves(device);
  
      if !retroachievements::get_hardcore() {
@@ -1650,7 +1656,6 @@ index ced2472..8823fb8 100644
 -            &ui::storage::get_game_crc(rom_contents),
 -            game_settings.cheats,
 -        );
-+        let game_crc = ui::storage::get_game_crc(&device.cart.rom);
 +        cheats::init(device, &game_crc, game_settings.cheats);
      }
  
@@ -1664,7 +1669,7 @@ index ced2472..8823fb8 100644
  
      if let Some(netplay) = &mut device.netplay {
          netplay::close(netplay);
-@@ -284,6 +305,8 @@ pub struct Device {
+@@ -284,6 +310,8 @@ pub struct Device {
      pub vru: controller::vru::Vru,
      pub transferpaks: [controller::transferpak::TransferPak; 4],
      pub cheats: cheats::Cheats,
@@ -1673,7 +1678,7 @@ index ced2472..8823fb8 100644
  }
  
  pub fn zero_m128i() -> __m128i {
-@@ -311,6 +334,9 @@ impl Device {
+@@ -311,6 +339,9 @@ impl Device {
              dst.clone_state_from(src);
          }
          self.cheats.clone_from(&device.cheats);
@@ -1683,7 +1688,7 @@ index ced2472..8823fb8 100644
      }
  
      pub fn new(with_ui: bool) -> Box<Device> {
-@@ -401,6 +427,8 @@ impl Device {
+@@ -401,6 +432,8 @@ impl Device {
                  }; events::EVENT_TYPE_COUNT],
                  next_event_count: u64::MAX,
                  next_event: events::EVENT_TYPE_NONE,
@@ -1692,7 +1697,7 @@ index ced2472..8823fb8 100644
              },
              pif: pif::Pif {
                  rom: [0; 1984],
-@@ -468,6 +496,7 @@ impl Device {
+@@ -468,6 +501,7 @@ impl Device {
                          func: rsp_su_instructions::reserved,
                          opcode: 0,
                          instruction_type: rsp_cpu::InstructionType::Su,
@@ -1700,7 +1705,7 @@ index ced2472..8823fb8 100644
                      }; 0x1000 / 4],
                      last_instruction_type: rsp_cpu::InstructionType::Su,
                      instruction_type: rsp_cpu::InstructionType::Su,
-@@ -571,6 +600,7 @@ impl Device {
+@@ -571,6 +605,7 @@ impl Device {
                  boot: true,
                  enabled: false,
              },
@@ -3171,10 +3176,10 @@ index 6496c9b..0c45875 100644
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
 diff --git a/src/device/dd.rs b/src/device/dd.rs
 new file mode 100644
-index 0000000..db5e9ad
+index 0000000..36e45c5
 --- /dev/null
 +++ b/src/device/dd.rs
-@@ -0,0 +1,2086 @@
+@@ -0,0 +1,2220 @@
 +// The Nintendo 64DD (disk drive): its ASIC registers, the C2 and data sector buffers and the
 +// micro-sequencer RAM at 0x05000000, the IPL ROM at 0x06000000, the drive (seek, read, write,
 +// motor), the real-time clock, and its interrupt, the cartridge line (COP0 Cause IP3).
@@ -3210,7 +3215,6 @@ index 0000000..db5e9ad
 +pub mod disk;
 +
 +use crate::device;
-+use std::collections::BTreeMap;
 +
 +/// The cartridge interrupt line, INT1 (n64brew: the 64DD's MECHA and BM interrupts)
 +pub const COP0_CAUSE_IP3: u64 = 1 << 11;
@@ -3375,7 +3379,8 @@ index 0000000..db5e9ad
 +    /// the clock: BCD year, month, day, hour, minute, second
 +    pub rtc: [u8; 6],
 +    /// the blocks the game wrote, by physical block index (the medium's state)
-+    pub overlay: BTreeMap<u32, Vec<u8>>,
++    #[serde(with = "disk::overlay_serde")]
++    pub overlay: disk::Overlay,
 +    /// the disk image this state belongs to (its SHA-256), empty without a disk
 +    pub disk_hash: String,
 +}
@@ -3458,8 +3463,33 @@ index 0000000..db5e9ad
 +    Ok((data, IplKind::Unknown, "big-endian"))
 +}
 +
-+/// An IPL in the search folder (every file of 4 MB there), the disk's region first
-+fn find_ipl(dir: &std::path::Path, region: Option<disk::Region>) -> Option<std::path::PathBuf> {
++/// The IPL model a file's first 0x40 bytes name, in any of the three byte orders
++fn header_kind(header: &[u8]) -> IplKind {
++    if header.len() < 0x40 {
++        return IplKind::Unknown;
++    }
++    let id = &header[0x3B..0x3F];
++    let mut v64 = header[0x38..0x40].to_vec();
++    for pair in v64.chunks_exact_mut(2) {
++        pair.swap(0, 1);
++    }
++    let mut n64 = header[0x38..0x40].to_vec();
++    for word in n64.chunks_exact_mut(4) {
++        word.reverse();
++    }
++    [id, &v64[3..7], &n64[3..7]]
++        .iter()
++        .map(|id| IplKind::from_id(id))
++        .find(|kind| *kind != IplKind::Unknown)
++        .unwrap_or(IplKind::Unknown)
++}
++
++/// An IPL in the search folder (a 4 MB file whose header has a known IPL ID: NDDJ, NDDE, NDXJ;
++/// only headers are read), the disk's region first
++pub(crate) fn find_ipl(
++    dir: &std::path::Path,
++    region: Option<disk::Region>,
++) -> Option<std::path::PathBuf> {
 +    let mut found: Vec<(std::path::PathBuf, IplKind)> = Vec::new();
 +    let mut entries: Vec<_> = std::fs::read_dir(dir)
 +        .ok()?
@@ -3471,11 +3501,11 @@ index 0000000..db5e9ad
 +        if std::fs::metadata(&path).map(|m| m.len()).ok() != Some(IPL_SIZE as u64) {
 +            continue;
 +        }
-+        // (only a file whose header has a known IPL ID: NDDJ, NDDE, NDXJ)
-+        if let Ok(data) = std::fs::read(&path)
-+            && let Ok((_, kind, _)) = identify_ipl(data)
-+            && kind != IplKind::Unknown
-+        {
++        let mut header = [0u8; 0x40];
++        let read = std::fs::File::open(&path)
++            .and_then(|mut file| std::io::Read::read_exact(&mut file, &mut header));
++        let kind = header_kind(&header);
++        if read.is_ok() && kind != IplKind::Unknown {
 +            found.push((path, kind));
 +        }
 +    }
@@ -3501,6 +3531,20 @@ index 0000000..db5e9ad
 +        return Ok(Dd::default());
 +    }
 +    let disk = if let Some(path) = disk_path {
++        // (the size first: a large file is never read)
++        let size = std::fs::metadata(path)
++            .map_err(|e| error(format!("could not read the disk {}: {e}", path.display())))?
++            .len();
++        if !disk::size_accepted(size) {
++            return Err(error(format!(
++                "{}: not a 64DD disk image ({size} bytes; NDD is {}, the physical layout {}, D64 between {} and {})",
++                path.display(),
++                disk::NDD_SIZE,
++                disk::PHYSICAL_SIZE,
++                disk::D64_MIN,
++                disk::D64_END
++            )));
++        }
 +        let image = std::fs::read(path)
 +            .map_err(|e| error(format!("could not read the disk {}: {e}", path.display())))?;
 +        Some(disk::Disk::parse(image).map_err(|e| error(format!("{}: {e}", path.display())))?)
@@ -3516,6 +3560,20 @@ index 0000000..db5e9ad
 +            ))
 +        })?,
 +    };
++    let ipl_size = std::fs::metadata(&ipl_path)
++        .map_err(|e| {
++            error(format!(
++                "could not read the IPL {}: {e}",
++                ipl_path.display()
++            ))
++        })?
++        .len();
++    if !(0x1000..=IPL_SIZE as u64).contains(&ipl_size) {
++        return Err(error(format!(
++            "{}: not a 64DD IPL ROM ({ipl_size} bytes; the IPL is {IPL_SIZE})",
++            ipl_path.display()
++        )));
++    }
 +    let data = std::fs::read(&ipl_path).map_err(|e| {
 +        error(format!(
 +            "could not read the IPL {}: {e}",
@@ -3615,6 +3673,23 @@ index 0000000..db5e9ad
 +    })
 +}
 +
++/// The header name of a disk-only run, as storage.rs's get_game_name reads it back (the save and
++/// state names' prefix: "<name>-<hash of the header>")
++pub fn placeholder_name(id: &str) -> String {
++    let name: String = format!("64DD {id}")
++        .chars()
++        .take(0x14)
++        .map(|c| {
++            if c.is_ascii_alphanumeric() || c == ' ' {
++                c
++            } else {
++                '_'
++            }
++        })
++        .collect();
++    name.trim().to_string()
++}
++
 +/// The header Gopher64 names a run by when there is no cartridge (the game ID, the save and
 +/// state names, the cheats' key): the disk's ID and hash, or the IPL's. Only its identity is used:
 +/// with no cartridge the cartridge space is open bus (start clears the ROM before the CPU runs).
@@ -3630,7 +3705,7 @@ index 0000000..db5e9ad
 +        ),
 +    };
 +    rom[0x10..0x18].copy_from_slice(&hash_prefix(&hash));
-+    let name = format!("64DD {id}");
++    let name = placeholder_name(&id);
 +    for (i, c) in name
 +        .bytes()
 +        .chain(std::iter::repeat(b' '))
@@ -5207,13 +5282,14 @@ index 0000000..db5e9ad
 +        };
 +        assert!(restore_entry(&device.dd, load(), Some(entry_of(bad))).is_none());
 +        let mut bad = snapshot.dd.state.clone();
-+        bad.overlay.insert(0, vec![0; 10]);
++        bad.overlay.insert(0, std::sync::Arc::new(vec![0; 10]));
 +        assert!(restore_entry(&device.dd, load(), Some(entry_of(bad))).is_none());
 +        let mut bad = snapshot.dd.state.clone();
-+        bad.overlay.insert(disk::BLOCKS as u32, vec![0; 0x4D08]);
++        bad.overlay
++            .insert(disk::BLOCKS as u32, std::sync::Arc::new(vec![0; 0x4D08]));
 +        assert!(restore_entry(&device.dd, load(), Some(entry_of(bad))).is_none());
 +        let mut good = snapshot.dd.state.clone();
-+        good.overlay.insert(0, vec![0; 0x4D08]);
++        good.overlay.insert(0, std::sync::Arc::new(vec![0; 0x4D08]));
 +        assert!(restore_entry(&device.dd, load(), Some(entry_of(good))).is_some());
 +        assert!(restore_entry(&device.dd, load(), Some(vec![1, 2, 3])).is_none());
 +    }
@@ -5227,7 +5303,11 @@ index 0000000..db5e9ad
 +        // the same writes: nothing to save
 +        device.clone_state(&snapshot);
 +        assert!(!device.cpu.events[EVENT_TYPE_DD_SAVE].enabled);
-+        snapshot.dd.state.overlay.insert(0, vec![0; 0x4D08]);
++        snapshot
++            .dd
++            .state
++            .overlay
++            .insert(0, std::sync::Arc::new(vec![0; 0x4D08]));
 +        device.clone_state(&snapshot);
 +        assert!(device.dd.dirty);
 +        assert!(
@@ -5260,13 +5340,72 @@ index 0000000..db5e9ad
 +        assert_eq!(find_ipl(&dir, None), Some(dir.join("b-us.bin")));
 +        let _ = std::fs::remove_dir_all(&dir);
 +    }
++
++    #[test]
++    fn ipl_headers_in_every_byte_order() {
++        let mut big = vec![0u8; 0x40];
++        big[0x3B..0x3F].copy_from_slice(b"NDDE");
++        assert_eq!(header_kind(&big), IplKind::Usa);
++        let mut v64 = big.clone();
++        for pair in v64.chunks_exact_mut(2) {
++            pair.swap(0, 1);
++        }
++        assert_eq!(header_kind(&v64), IplKind::Usa);
++        let mut n64 = big.clone();
++        for word in n64.chunks_exact_mut(4) {
++            word.reverse();
++        }
++        assert_eq!(header_kind(&n64), IplKind::Usa);
++        assert_eq!(header_kind(&[0u8; 0x40]), IplKind::Unknown);
++        assert_eq!(header_kind(&big[..0x3F]), IplKind::Unknown);
++    }
++
++    #[test]
++    fn the_name_is_the_one_saves_and_states_use() {
++        let device = with_disk();
++        let rom = placeholder_rom(&device.dd);
++        assert_eq!(placeholder_name("TSTJ"), "64DD TSTJ");
++        assert_eq!(
++            crate::ui::storage::get_game_name(&rom),
++            placeholder_name("TSTJ")
++        );
++        assert_eq!(placeholder_name("A_9z"), "64DD A_9z");
++    }
++
++    #[test]
++    fn oversized_files_are_refused_before_reading() {
++        let dir = std::env::temp_dir().join(format!("gopher64-dd-size-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(&dir).unwrap();
++        // sparse files: their size is checked, they are never read
++        let big = dir.join("big.ndd");
++        std::fs::File::create(&big)
++            .unwrap()
++            .set_len(8 << 30)
++            .unwrap();
++        let ipl = dir.join("ipl.bin");
++        std::fs::File::create(&ipl)
++            .unwrap()
++            .set_len(1 << 30)
++            .unwrap();
++        let error = attach(Some(&ipl), Some(&big), &dir, &dir, false)
++            .err()
++            .unwrap();
++        assert!(
++            error.to_string().contains("not a 64DD disk image"),
++            "{error}"
++        );
++        let error = attach(Some(&ipl), None, &dir, &dir, false).err().unwrap();
++        assert!(error.to_string().contains("not a 64DD IPL ROM"), "{error}");
++        let _ = std::fs::remove_dir_all(&dir);
++    }
 +}
 diff --git a/src/device/dd/disk.rs b/src/device/dd/disk.rs
 new file mode 100644
-index 0000000..0ac0e0f
+index 0000000..2557190
 --- /dev/null
 +++ b/src/device/dd/disk.rs
-@@ -0,0 +1,1114 @@
+@@ -0,0 +1,1260 @@
 +// 64DD disk images: format detection, the system area check, the map from the drive's physical
 +// blocks (head, track, block) to the bytes of the user's image, and the writes kept beside it.
 +//
@@ -5302,6 +5441,35 @@ index 0000000..0ac0e0f
 +//   reads as dumped, every time, so a run is reproducible.
 +
 +use std::collections::BTreeMap;
++use std::sync::Arc;
++
++/// The blocks the game wrote, by physical block index. Shared (copy on write) between the running
++/// drive and its save-state and rewind copies: a snapshot copies pointers, a write copies one block.
++pub type Overlay = BTreeMap<u32, Arc<Vec<u8>>>;
++
++/// The overlay in a save state: a map of block index to bytes, as a BTreeMap<u32, Vec<u8>> is
++/// (serde's Arc support is a feature Gopher64 does not enable)
++pub mod overlay_serde {
++    use super::Overlay;
++    use serde::{Deserialize, Deserializer, Serializer};
++    use std::sync::Arc;
++
++    pub fn serialize<S: Serializer>(overlay: &Overlay, serializer: S) -> Result<S::Ok, S::Error> {
++        serializer.collect_map(
++            overlay
++                .iter()
++                .map(|(index, block)| (index, block.as_slice())),
++        )
++    }
++
++    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<Overlay, D::Error> {
++        let map = std::collections::BTreeMap::<u32, Vec<u8>>::deserialize(deserializer)?;
++        Ok(map
++            .into_iter()
++            .map(|(index, block)| (index, Arc::new(block)))
++            .collect())
++    }
++}
 +
 +/// The retail dump format (Mupen64Plus, ares, converted MAME dumps): the 0x10DC logical blocks in
 +/// LBA order.
@@ -5309,8 +5477,8 @@ index 0000000..0ac0e0f
 +/// The physical layout (MAME's raw format, ares' own): every track of both heads in order.
 +pub const PHYSICAL_SIZE: usize = 0x435B0C0;
 +/// The development format (.d64): a 0x200 header, then the ROM and RAM areas' blocks.
-+const D64_MIN: usize = 0x4F08;
-+const D64_END: usize = 0x3D79140;
++pub const D64_MIN: usize = 0x4F08;
++pub const D64_END: usize = 0x3D79140;
 +
 +pub const TRACKS: u32 = 1175; // per head
 +/// Physical blocks: 2 heads x 1175 tracks x 2 blocks; the index of ares' error table
@@ -5568,7 +5736,7 @@ index 0000000..0ac0e0f
 +}
 +
 +/// ares' sizeCheck for a .d64: the header's areas must account for the file exactly
-+fn d64_size_check(input: &[u8]) -> bool {
++fn d64_size_check(input: &[u8], file_size: usize) -> bool {
 +    let disk_type = input[0x05] as usize;
 +    if disk_type >= 7 {
 +        return false;
@@ -5582,7 +5750,7 @@ index 0000000..0ac0e0f
 +            size += lba_size(disk_type, lba) as usize;
 +        }
 +    }
-+    input.len() == size
++    file_size == size
 +}
 +
 +/// ares' createErrorTable: which physical blocks read with errors. The system area's copies that
@@ -5689,6 +5857,100 @@ index 0000000..0ac0e0f
 +    Some(output)
 +}
 +
++/// ares' analyze: the region (from the first valid system block) and the disk ID (from the first
++/// valid ID block), from the image's start (its first 16 zone-0 blocks, or a .d64's header)
++fn analyze(head: &[u8], format: Format, error: &[u8]) -> (Region, String) {
++    let dev = error[12] == 0;
++    let block0 = BLOCK_SIZE[0] as usize;
++    let mut region = Region::Japan;
++    for &block in &SYSTEM_BLOCKS {
++        if dev {
++            if error[block + 2] != 0 {
++                continue;
++            }
++            region = Region::Development;
++        } else {
++            if error[block] != 0 {
++                continue;
++            }
++            region = if head[block * block0] == 0xE8 {
++                Region::Japan
++            } else {
++                Region::Usa
++            };
++        }
++        break;
++    }
++    let mut id = String::new();
++    for &block in &DISK_ID_BLOCKS {
++        if error[block] != 0 {
++            continue;
++        }
++        let offset = if format == Format::D64 {
++            0x100
++        } else {
++            block * block0
++        };
++        id = head[offset..offset + 4]
++            .iter()
++            .map(|&c| {
++                if c.is_ascii_alphanumeric() {
++                    c as char
++                } else {
++                    '_'
++                }
++            })
++            .collect();
++        break;
++    }
++    if id.is_empty() {
++        id = String::from("____");
++    }
++    (region, id)
++}
++
++/// The image sizes Disk::parse accepts (checked before reading a file)
++pub fn size_accepted(size: u64) -> bool {
++    usize::try_from(size).ok().and_then(detect_format).is_some()
++}
++
++/// A disk image's ID and region, read from its start only (the system and disk ID blocks are the
++/// first 16 blocks of zone 0 in the NDD and physical layouts; a .d64 has them in its header): the
++/// same as Disk::parse finds, without reading the whole image
++#[cfg_attr(not(psgopher), allow(dead_code))] // (psgopher.rs's psgopher_disk_facts)
++pub fn facts_from_file(path: &std::path::Path) -> Result<(String, Region), String> {
++    use std::io::Read;
++    let size = std::fs::metadata(path).map_err(|e| e.to_string())?.len();
++    let Some(format) = usize::try_from(size).ok().and_then(detect_format) else {
++        return Err(format!("not a 64DD disk image ({size} bytes)"));
++    };
++    let head_size = if format == Format::D64 {
++        0x200
++    } else {
++        16 * BLOCK_SIZE[0] as usize
++    };
++    let mut head = vec![0u8; head_size];
++    std::fs::File::open(path)
++        .and_then(|mut file| file.read_exact(&mut head))
++        .map_err(|e| e.to_string())?;
++    if format == Format::D64 && !d64_size_check(&head, size as usize) {
++        return Err("not a 64DD disk image (a .d64 whose header does not match its size)".into());
++    }
++    let Some(error) = error_table(&head, format) else {
++        return Err("not a 64DD disk image (a .d64 with an invalid header)".into());
++    };
++    let dev = error[12] == 0;
++    if format == Format::Ndd
++        && !SYSTEM_BLOCKS
++            .iter()
++            .any(|&b| error[if dev { b + 2 } else { b }] == 0)
++    {
++        return Err("not a usable 64DD disk image (no valid system area)".into());
++    }
++    let (region, id) = analyze(&head, format, &error);
++    Ok((id, region))
++}
++
 +/// A 64DD disk: the user's image (never written) and how the drive sees it
 +pub struct Disk {
 +    pub format: Format,
@@ -5715,7 +5977,7 @@ index 0000000..0ac0e0f
 +                image.len()
 +            ));
 +        };
-+        if format == Format::D64 && !d64_size_check(&image) {
++        if format == Format::D64 && !d64_size_check(&image, image.len()) {
 +            return Err(
 +                "not a 64DD disk image (a .d64 whose header does not match its size)".into(),
 +            );
@@ -5822,51 +6084,7 @@ index 0000000..0ac0e0f
 +            }
 +        }
 +
-+        // analyze: the region and the disk ID
-+        let mut region = Region::Japan;
-+        for &block in &SYSTEM_BLOCKS {
-+            if dev {
-+                if error[block + 2] != 0 {
-+                    continue;
-+                }
-+                region = Region::Development;
-+            } else {
-+                if error[block] != 0 {
-+                    continue;
-+                }
-+                region = if image[block * block0] == 0xE8 {
-+                    Region::Japan
-+                } else {
-+                    Region::Usa
-+                };
-+            }
-+            break;
-+        }
-+        let mut id = String::new();
-+        for &block in &DISK_ID_BLOCKS {
-+            if error[block] != 0 {
-+                continue;
-+            }
-+            let offset = if format == Format::D64 {
-+                0x100
-+            } else {
-+                block * block0
-+            };
-+            id = image[offset..offset + 4]
-+                .iter()
-+                .map(|&c| {
-+                    if c.is_ascii_alphanumeric() {
-+                        c as char
-+                    } else {
-+                        '_'
-+                    }
-+                })
-+                .collect();
-+            break;
-+        }
-+        if id.is_empty() {
-+            id = String::from("____");
-+        }
++        let (region, id) = analyze(&image, format, &error);
 +
 +        let hash = crate::device::cart::rom::calculate_hash(&image);
 +        Ok(Disk {
@@ -5894,7 +6112,7 @@ index 0000000..0ac0e0f
 +
 +    /// A byte of a physical block, the game's writes first
 +    #[cfg(test)]
-+    pub fn read(&self, overlay: &BTreeMap<u32, Vec<u8>>, index: usize, offset: u32) -> u8 {
++    pub fn read(&self, overlay: &Overlay, index: usize, offset: u32) -> u8 {
 +        if index >= BLOCKS || offset >= block_size_of_index(index) {
 +            return 0;
 +        }
@@ -5905,13 +6123,7 @@ index 0000000..0ac0e0f
 +    }
 +
 +    /// Bytes of a physical block from `offset` on, into `out` (a sector; zeros past the block)
-+    pub fn read_into(
-+        &self,
-+        overlay: &BTreeMap<u32, Vec<u8>>,
-+        index: usize,
-+        offset: u32,
-+        out: &mut [u8],
-+    ) {
++    pub fn read_into(&self, overlay: &Overlay, index: usize, offset: u32, out: &mut [u8]) {
 +        out.fill(0);
 +        if index >= BLOCKS {
 +            return;
@@ -5936,13 +6148,7 @@ index 0000000..0ac0e0f
 +
 +    /// Write bytes of a physical block from `offset` on (a sector; what passes the block's end is
 +    /// dropped): into the overlay, the image stays as it is
-+    pub fn write_from(
-+        &self,
-+        overlay: &mut BTreeMap<u32, Vec<u8>>,
-+        index: usize,
-+        offset: u32,
-+        data: &[u8],
-+    ) {
++    pub fn write_from(&self, overlay: &mut Overlay, index: usize, offset: u32, data: &[u8]) {
 +        if index >= BLOCKS {
 +            return;
 +        }
@@ -5955,29 +6161,25 @@ index 0000000..0ac0e0f
 +        let block = overlay.entry(index as u32).or_insert_with(|| {
 +            let mut block = vec![0; size];
 +            self.read_into(&BTreeMap::new(), index, 0, &mut block);
-+            block
++            Arc::new(block)
 +        });
-+        block[start..end].copy_from_slice(&data[..end - start]);
++        Arc::make_mut(block)[start..end].copy_from_slice(&data[..end - start]);
 +    }
 +
 +    /// Write a byte of a physical block: into the overlay, the image stays as it is
 +    #[cfg(test)]
-+    pub fn write(
-+        &self,
-+        overlay: &mut BTreeMap<u32, Vec<u8>>,
-+        index: usize,
-+        offset: u32,
-+        value: u8,
-+    ) {
++    pub fn write(&self, overlay: &mut Overlay, index: usize, offset: u32, value: u8) {
 +        if index >= BLOCKS || offset >= block_size_of_index(index) {
 +            return;
 +        }
 +        let block = overlay.entry(index as u32).or_insert_with(|| {
-+            (0..block_size_of_index(index))
-+                .map(|i| self.base(index, i))
-+                .collect()
++            Arc::new(
++                (0..block_size_of_index(index))
++                    .map(|i| self.base(index, i))
++                    .collect(),
++            )
 +        });
-+        block[offset as usize] = value;
++        Arc::make_mut(block)[offset as usize] = value;
 +    }
 +}
 +
@@ -6007,7 +6209,7 @@ index 0000000..0ac0e0f
 +    bytes
 +}
 +
-+pub fn encode_writes(hash: &str, overlay: &BTreeMap<u32, Vec<u8>>) -> Vec<u8> {
++pub fn encode_writes(hash: &str, overlay: &Overlay) -> Vec<u8> {
 +    let mut out = Vec::with_capacity(48 + overlay.values().map(|b| b.len() + 8).sum::<usize>());
 +    out.extend_from_slice(WRITES_MAGIC);
 +    out.extend_from_slice(&WRITES_VERSION.to_le_bytes());
@@ -6021,7 +6223,7 @@ index 0000000..0ac0e0f
 +    out
 +}
 +
-+pub fn decode_writes(data: &[u8], hash: &str) -> Result<BTreeMap<u32, Vec<u8>>, String> {
++pub fn decode_writes(data: &[u8], hash: &str) -> Result<Overlay, String> {
 +    let word = |at: usize| -> Result<u32, String> {
 +        data.get(at..at + 4)
 +            .map(|b| u32::from_le_bytes(b.try_into().unwrap()))
@@ -6051,7 +6253,7 @@ index 0000000..0ac0e0f
 +        };
 +        at += length;
 +        if (index as usize) < BLOCKS && length == block_size_of_index(index as usize) as usize {
-+            overlay.insert(index, block.to_vec());
++            overlay.insert(index, Arc::new(block.to_vec()));
 +        } else {
 +            return Err(format!("a record for block {index} of {length} bytes"));
 +        }
@@ -6379,6 +6581,89 @@ index 0000000..0ac0e0f
 +            "truncated"
 +        );
 +        assert!(decode_writes(b"nonsense", &disk.hash).is_err());
++    }
++
++    #[test]
++    fn facts_from_the_start_of_the_file_match_parse() {
++        let dir = std::env::temp_dir().join(format!("gopher64-dd-facts-{}", std::process::id()));
++        let _ = std::fs::remove_dir_all(&dir);
++        std::fs::create_dir_all(&dir).unwrap();
++        // a retail NDD, and the same disk in the physical layout
++        let image = synthetic_ndd(4, b"FCTJ");
++        let ndd = Disk::parse(image.clone()).unwrap();
++        std::fs::write(dir.join("a.ndd"), &image).unwrap();
++        assert_eq!(
++            facts_from_file(&dir.join("a.ndd")).unwrap(),
++            (ndd.id.clone(), ndd.region)
++        );
++        let mut physical = vec![0u8; PHYSICAL_SIZE];
++        let mut sector = vec![0u8; 0x4D08];
++        for index in 0..16 {
++            ndd.read_into(&BTreeMap::new(), index, 0, &mut sector);
++            physical[index * 0x4D08..(index + 1) * 0x4D08].copy_from_slice(&sector);
++        }
++        std::fs::write(dir.join("b.bin"), &physical).unwrap();
++        let phys = Disk::parse(physical).unwrap();
++        assert_eq!(
++            facts_from_file(&dir.join("b.bin")).unwrap(),
++            (phys.id, phys.region)
++        );
++        // a development disk (US system area for a change: region from byte 0)
++        let mut us = image.clone();
++        let block0 = BLOCK_SIZE[0] as usize;
++        let system = system_sector([0x22, 0x63, 0xEE, 0x56], 4, 0xE8);
++        for &lba in &SYSTEM_BLOCKS {
++            fill_block(&mut us, lba * block0, &system);
++        }
++        std::fs::write(dir.join("c.ndd"), &us).unwrap();
++        assert_eq!(facts_from_file(&dir.join("c.ndd")).unwrap().1, Region::Usa);
++        // a .d64: its header only
++        let mut d64 = vec![0u8; 0x200];
++        d64[0x1C] = 0x80;
++        d64[0xE2..0xE6].copy_from_slice(&[0xFF; 4]);
++        d64[0x100..0x104].copy_from_slice(b"FCTD");
++        d64.resize(0x200 + lba_size(0, 24) as usize, 0);
++        std::fs::write(dir.join("d.d64"), &d64).unwrap();
++        assert_eq!(
++            facts_from_file(&dir.join("d.d64")).unwrap(),
++            ("FCTD".to_string(), Region::Development)
++        );
++        // not a disk
++        std::fs::write(dir.join("e.ndd"), [0u8; 100]).unwrap();
++        assert!(facts_from_file(&dir.join("e.ndd")).is_err());
++        std::fs::write(dir.join("f.ndd"), vec![0u8; NDD_SIZE]).unwrap();
++        assert!(
++            facts_from_file(&dir.join("f.ndd")).is_err(),
++            "no system area"
++        );
++        assert!(facts_from_file(&dir.join("missing.ndd")).is_err());
++        assert!(size_accepted(NDD_SIZE as u64) && size_accepted(PHYSICAL_SIZE as u64));
++        assert!(!size_accepted(8 << 30) && !size_accepted(PHYSICAL_SIZE as u64 + 1));
++        let _ = std::fs::remove_dir_all(&dir);
++    }
++
++    #[test]
++    fn overlay_blocks_are_shared_until_written() {
++        let disk = Disk::parse(synthetic_ndd(0, b"TSTJ")).unwrap();
++        let mut overlay = Overlay::new();
++        disk.write_from(&mut overlay, 600, 0, &[1, 2]);
++        let snapshot = overlay.clone();
++        assert!(
++            Arc::ptr_eq(&overlay[&600], &snapshot[&600]),
++            "a copy shares the block"
++        );
++        disk.write_from(&mut overlay, 600, 0, &[3]);
++        assert_eq!(snapshot[&600][0], 1, "the copy keeps what it had");
++        assert_eq!(overlay[&600][..2], [3, 2]);
++        // the save state's bytes are a BTreeMap<u32, Vec<u8>>'s
++        #[derive(serde::Serialize)]
++        struct S<'a>(#[serde(with = "overlay_serde")] &'a Overlay);
++        let plain: BTreeMap<u32, Vec<u8>> = overlay.iter().map(|(k, v)| (*k, v.to_vec())).collect();
++        let bytes = postcard::to_stdvec(&S(&overlay)).unwrap();
++        assert_eq!(bytes, postcard::to_stdvec(&plain).unwrap());
++        #[derive(serde::Deserialize)]
++        struct D(#[serde(with = "overlay_serde")] Overlay);
++        assert_eq!(postcard::from_bytes::<D>(&bytes).unwrap().0, overlay);
 +    }
 +}
 diff --git a/src/device/events.rs b/src/device/events.rs
@@ -7615,10 +7900,10 @@ index 4e51a1b..292e88a 100644
                  disable_expansion_pak,
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..50a5c0c
+index 0000000..ca40914
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,1262 @@
+@@ -0,0 +1,1331 @@
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
@@ -8095,6 +8380,75 @@ index 0000000..50a5c0c
 +        }
 +        Err(_) => false, // (an ED64 header with a save type Gopher64 does not know panics)
 +    }
++}
++
++/// 64DD regions, for psgopher_dd_ipl and psgopher_disk_facts: 0 Japan (NTSC-J), 1 USA (NTSC-U),
++/// 2 development (NTSC-DEV); -1 any
++fn dd_region_code(region: crate::device::dd::disk::Region) -> i32 {
++    use crate::device::dd::disk::Region;
++    match region {
++        Region::Japan => 0,
++        Region::Usa => 1,
++        Region::Development => 2,
++    }
++}
++
++/// The 64DD IPL Gopher64 takes for a disk of `region` when none is given (--dd-ipl): a 4 MB file
++/// in data/64dd whose header ID is a known IPL's (NDDJ, NDDE, NDXJ), that region's first. Its
++/// path's length, 0 when there is none. The folder is made when it is missing, for users to find.
++///
++/// # Safety
++/// `buffer` has room for `size` bytes.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_dd_ipl(region: i32, buffer: *mut std::ffi::c_char, size: usize) -> i32 {
++    let path = std::panic::catch_unwind(|| {
++        use crate::device::dd::disk::Region;
++        let dir = dirs().data_dir.join("64dd");
++        let _ = std::fs::create_dir_all(&dir);
++        let region = match region {
++            0 => Some(Region::Japan),
++            1 => Some(Region::Usa),
++            2 => Some(Region::Development),
++            _ => None,
++        };
++        crate::device::dd::find_ipl(&dir, region)
++            .map(|path| path.to_string_lossy().into_owned())
++            .unwrap_or_default()
++    })
++    .unwrap_or_default();
++    copy_out(&path, buffer, size) as i32
++}
++
++/// A 64DD disk image's facts, from its system and ID blocks only (not the whole image): its
++/// 4-character ID, its region (see dd_region_code), and the name a disk-only run's saves and
++/// states start with ("64DD <ID>", the header name Gopher64 gives such a run; the states are
++/// data/states/<name>-<hash>.state<N>, the hash being of that header, which holds the image's
++/// SHA-256). False when it is not a disk image Gopher64 takes.
++///
++/// # Safety
++/// `path` is a NUL-terminated string; `name` has room for `name_size` bytes, `id` for 5;
++/// `region` is writable (each may be null).
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_disk_facts(
++    path: *const std::ffi::c_char,
++    name: *mut std::ffi::c_char,
++    name_size: usize,
++    id: *mut std::ffi::c_char,
++    region: *mut i32,
++) -> bool {
++    let path = c_text(path);
++    let facts = std::panic::catch_unwind(|| {
++        crate::device::dd::disk::facts_from_file(std::path::Path::new(&path)).ok()
++    });
++    let Ok(Some((disk_id, disk_region))) = facts else {
++        return false;
++    };
++    copy_out(&crate::device::dd::placeholder_name(&disk_id), name, name_size);
++    copy_out(&disk_id, id, 5);
++    if !region.is_null() {
++        unsafe { *region = dd_region_code(disk_region) };
++    }
++    true
 +}
 +
 +/// Gopher64's cheat database (data/cheats.json in the core), parsed once.

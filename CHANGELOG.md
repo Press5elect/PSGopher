@@ -32,6 +32,16 @@ Every change, the newest version first. Games are named by cartridge ID only.
   64 MiB), and the ROM is held in memory once while the game runs instead of twice (Gopher64 kept
   its loaded copy beside the cartridge's). A test reads a 252 MB ROM to its last word and builds a
   100 MiB romhack. Not run on a console.
+- Fixed (a second review): Gopher64's own fixes to a few ROMs no longer change their cheats' key
+  (their cheats were listed but not applied after the ROM was held once); a 64DD disk's probes are
+  listed on the board (by the disk's ID); a romhack has per-game settings of its own (its key adds
+  the hack's checksum) while its Expansion Pak status stays its base game's; a patch is read only as
+  far as its header when the list is made (a 100 MB hack no longer builds its whole ROM in memory
+  then); a read error on a share is tried again at the next search; library.tsv stays in the form
+  v0.0.1 reads (the patches' bases are in library-bases.tsv), so rolling back keeps the list; a
+  64DD file is checked by its size before it is read; a chosen folder that is gone keeps no games;
+  benchmark.txt and autostart.txt can name a share's ROM or a romhack; the 64DD IPL row shows the IPL
+  Gopher64 will use, and the title makes its folder.
 - Fixed: a change to Game Folders or the shares made while a search was running was dropped: the
   search now runs again when that one ends.
 - Fixed: a chosen game folder on a USB drive that is unplugged no longer keeps its games in the

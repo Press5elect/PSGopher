@@ -157,11 +157,13 @@ PakInfo PakTable::find(const std::string &key, const std::string &crc) const
 	const Entry *e = nullptr;
 	if (crc.size() >= 17)
 		e = get(upper(crc.substr(0, 17)));
-	const bool header = key.size() == 7 && key[4] == '-' && key.rfind("file-", 0) != 0;
+	/* (a romhack patch's key has its hack's CRC1 after the revision: "NXXE-01-1A2B3C4D", the game's code is the first 7) */
+	const std::string code = key.size() == 16 && key[7] == '-' ? key.substr(0, 7) : key;
+	const bool header = code.size() == 7 && code[4] == '-' && code.rfind("file-", 0) != 0;
 	if (!e && header)
-		e = get(upper(key));
+		e = get(upper(code));
 	if (!e && header)
-		e = get(upper(key.substr(0, 4)));
+		e = get(upper(code.substr(0, 4)));
 	return e ? PakInfo{ e->status, e->source } : PakInfo{};
 }
 

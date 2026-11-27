@@ -329,7 +329,19 @@ static int play(const std::string &chosen_rom, int load_state = -1)
     * ROM's path is left as it is) */
    play_error.clear();
    std::string patch_error;
-   const std::string rom = psgopher::playablePath(chosen_rom, &patch_error);
+   /* a share's ROM or disk named by benchmark.txt or autostart.txt (the board's own starts copy it
+    * first, in Menu::play): Gopher64 reads its ROM from the console's storage */
+   std::string named = chosen_rom;
+   if (named.rfind("/smb/", 0) == 0 && !psgopher::isPatchName(named)) {
+      std::string copy_error;
+      named = psgopher::localCopy(chosen_rom, &copy_error);
+      if (named.empty()) {
+         say("play: %s could not be copied from the share: %s", chosen_rom.c_str(), copy_error.c_str());
+         play_error = chosen_rom + ": " + copy_error;
+         return 1;
+      }
+   }
+   const std::string rom = psgopher::playablePath(named, &patch_error);
    if (rom.empty()) {
       say("romhack: %s", patch_error.c_str());
       play_error = patch_error;

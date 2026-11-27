@@ -59,6 +59,22 @@ static std::string asN64(std::string r)
 	return r;
 }
 
+/* the head alone is the first bytes of the whole result, for every limit */
+static void sameHead(const std::string &patch, const std::string &base)
+{
+	std::string full;
+	CHECK(run(patch, base, full));
+	for (const size_t limit : { (size_t)4, (size_t)8, (size_t)0x100, (size_t)0x1000, (size_t)0x2000, (size_t)0x10000 }) {
+		std::vector<uint8_t> head;
+		std::string why;
+		const bool ok = applyHead((const uint8_t *)patch.data(), patch.size(), (const uint8_t *)base.data(), base.size(), limit, head, &why);
+		CHECK(ok);
+		if (std::string(head.begin(), head.end()) != full.substr(0, std::min(limit, full.size())))
+			std::fprintf(stderr, "head differs: format %s, limit %zu, base %zu bytes, result %zu, head %zu\n", formatName(formatOfData((const uint8_t *)patch.data(), patch.size())), limit, base.size(), full.size(), head.size());
+		CHECK(std::string(head.begin(), head.end()) == full.substr(0, std::min(limit, full.size())));
+	}
+}
+
 int main()
 {
 	CHECK(crc32((const uint8_t *)"123456789", 9) == 0xCBF43926u);
@@ -301,6 +317,64 @@ int main()
 		p.record(0, "A");
 		CHECK(run(p.finish(), std::string("xyzw"), out) && out == "Ayzw");
 		CHECK(!run("", base, out) && !run("NOPE", base, out, &why) && why.find("not an IPS") != std::string::npos);
+	}
+
+	/* ---- the head alone: every format, every byte order, the result shorter and longer than the head */
+	{
+		const std::string z = rom(0x3000, 7);
+		const std::string orders[3] = { z, asV64(z), asN64(z) };
+		std::string patched = z;
+		patched.replace(0x20, 8, "HEADHACK");
+		patched.replace(0x1800, 6, "INSIDE");
+		patched.replace(0x2ff0, 4, "TAIL");
+		std::string longer = patched + std::string(100, 'L'), shorter = patched.substr(0, 0x1400);
+		for (const std::string &b : orders) {
+			encode::Ips ips;
+			ips.record(0x20, "HEADHACK");
+			ips.record(0xFF8, "ACROSS-THE-LIMIT"); /* a record over the head's end */
+			ips.run(0x1000, 50, 'r');
+			ips.record(0x3000 + 8, "past the end");
+			sameHead(ips.finish(), b);
+			sameHead(ips.finish(0x1200), b);
+			sameHead(ips.finish(0x8000), b);
+			sameHead(encode::Ips().finish(), b);
+			sameHead(encode::Ips().finish(0x800), b);
+			for (const std::string &want : { patched, longer, shorter }) {
+				/* the patch was made against the base in its own order: BPS and UPS by the ROM as stored */
+				sameHead(encode::ups(b, [&] { std::string t = want; toZ64((uint8_t *)t.data(), t.size(), byteOrder((const uint8_t *)b.data())); return t; }()), b);
+				sameHead(encode::ups(z, want), b);
+				sameHead(encode::ups(want, z), want);
+				encode::Bps bps(z);
+				bps.sourceRead(0x20);
+				bps.targetRead("HEADHACK");
+				bps.sourceRead(0x1800 - 0x28);
+				bps.targetRead("INSIDE");
+				bps.sourceCopy(0x100, 0x400);
+				bps.targetCopy(0x30, 0x10);
+				bps.targetRead(std::string(70, 'q'));
+				bps.sourceRead(z.size() - bps.target.size());
+				sameHead(bps.finish(), b);
+				encode::Bps vb(b); /* made against the base as stored */
+				vb.sourceRead(0x40);
+				vb.targetRead("v-order data");
+				vb.sourceRead(b.size() - vb.target.size());
+				sameHead(vb.finish(), b);
+			}
+		}
+		/* a head of a patch that does not fit is refused as the whole one is */
+		std::vector<uint8_t> head;
+		std::string other = z;
+		other[0x500] ^= 1;
+		encode::Bps bps(z);
+		bps.sourceRead(z.size());
+		const std::string patch = bps.finish();
+		CHECK(!applyHead((const uint8_t *)patch.data(), patch.size(), (const uint8_t *)other.data(), other.size(), 0x1000, head, &why) &&
+			why.find("CRC32") != std::string::npos);
+		CHECK(!applyHead((const uint8_t *)"NOPE", 4, (const uint8_t *)z.data(), z.size(), 0x1000, head, &why));
+		/* a UPS of two empty ROMs: nothing to copy from a null base */
+		const std::string empty_ups = encode::ups("", "");
+		CHECK(run(empty_ups, "", out) && out.empty());
+		CHECK(applyHead((const uint8_t *)empty_ups.data(), empty_ups.size(), nullptr, 0, 0x1000, head, &why) && head.empty());
 	}
 
 	if (failures) {

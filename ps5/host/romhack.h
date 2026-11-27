@@ -56,6 +56,14 @@ bool info(const uint8_t *patch, size_t size, Info *out, std::string *error);
 bool apply(const uint8_t *patch, size_t patch_size, const uint8_t *base, size_t base_size, std::vector<uint8_t> &out,
 	std::string *error);
 
+/* Only the first `limit` bytes of what apply() would give (fewer when the result is shorter), in .z64 order,
+ * without making the whole patched ROM or a converted copy of the base: for a ROM's header. The base must fit
+ * the patch (the source CRC32 is checked, as stored or in .z64 order) and the patch's own checksum is checked;
+ * the target's CRC32 and the patch's later actions are not (apply() does that, when the game starts).
+ * `limit` should be a multiple of 4 (the head is put in .z64 order by words and pairs). */
+bool applyHead(const uint8_t *patch, size_t patch_size, const uint8_t *base, size_t base_size, size_t limit,
+	std::vector<uint8_t> &out, std::string *error);
+
 /* The formats alone, on the bytes as given (no byte order tried; BPS and UPS check the checksums) */
 bool applyIps(const uint8_t *patch, size_t patch_size, const uint8_t *base, size_t base_size, std::vector<uint8_t> &out,
 	std::string *error);
