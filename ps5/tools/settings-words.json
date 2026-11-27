@@ -72,7 +72,7 @@
  },
  "input.controller_assignment.*": {
   "label": "composed",
-  "label_source": "src/ui/gui/controller_page.slint:207",
+  "label_source": "src/ui/gui/controller_page.slint:208",
   "choices": "written"
  },
  "input.input_profile_binding.*": {
@@ -90,18 +90,18 @@
  },
  "profile.input.*": {
   "label": "exact",
-  "label_source": "src/ui/input_profile.rs:521-539",
+  "label_source": "src/ui/input_profile.rs:522-540",
   "choices": "written",
   "note": "the N64's inputs, as Gopher64's wizard names them"
  },
  "profile.deadzone": {
   "label": "exact",
-  "label_source": "src/ui/gui/input_profile.slint:39",
+  "label_source": "src/ui/gui/input_profile.slint:62",
   "choices": "written"
  },
  "hotkey.activator": {
   "label": "composed",
-  "label_source": "src/ui/input_profile.rs:539",
+  "label_source": "src/ui/input_profile.rs:540",
   "choices": "written"
  },
  "profile.selected": {

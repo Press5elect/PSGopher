@@ -14,8 +14,8 @@
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 upstream=https://github.com/gopher64/gopher64.git
-# master of 2026-11-27 (pull request 1458: cargo update)
-revision=70452ee882b8d67ff4dbe9e2f0b746aad7c293fe
+# master of 2026-11-27 (pull request 1460: controller profile deletion)
+revision=f6c6db136232ec3d6dc2640be59023362f09402e
 patch="$root/ps5/patches/gopher64/ps5.patch"
 vendor="$root/vendor/gopher64"
 # parallel-rdp is a submodule of Gopher64's (its own repository, at the commit Gopher64's pin

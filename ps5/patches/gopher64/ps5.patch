@@ -10161,7 +10161,7 @@ index 6e73c6d..ac29a2a 100644
                          // Retained resampler input isn't playable audio. An
                          // underrun must slow consumption even if this block
 diff --git a/src/ui/config.rs b/src/ui/config.rs
-index ccced72..a9950e5 100644
+index 7546f39..051af2a 100644
 --- a/src/ui/config.rs
 +++ b/src/ui/config.rs
 @@ -98,7 +98,7 @@ fn write_cheats(cheats: &Cheats) {
@@ -10173,15 +10173,18 @@ index ccced72..a9950e5 100644
      {
          eprintln!("Error writing cheats: {}", e);
      }
-@@ -133,7 +133,7 @@ fn write_config(config: &Config) {
-     let dirs = ui::get_dirs();
-     let file_path = dirs.config_dir.join("config.json");
-     if let Ok(f) = std::fs::File::create(file_path)
--        && let Err(e) = serde_json::to_writer_pretty(f, &config)
-+        && let Err(e) = serde_json::to_writer_pretty(std::io::BufWriter::new(f), &config)
-     {
-         eprintln!("Error writing config: {}", e);
+@@ -135,7 +135,10 @@ impl Config {
+     pub fn save(&self) -> std::io::Result<()> {
+         let file_path = ui::get_dirs().config_dir.join("config.json");
+         let file = std::fs::File::create(file_path)?;
+-        serde_json::to_writer_pretty(file, self)?;
++        // PSGopher: one buffered write rather than many small ones (a write each is slow on the console)
++        let mut writer = std::io::BufWriter::new(file);
++        serde_json::to_writer_pretty(&mut writer, self)?;
++        std::io::Write::flush(&mut writer)?;
+         Ok(())
      }
+ 
 diff --git a/src/ui/input.rs b/src/ui/input.rs
 index 34c6d92..c0c5f11 100644
 --- a/src/ui/input.rs
