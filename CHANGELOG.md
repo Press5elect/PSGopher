@@ -72,7 +72,7 @@ Every change, the newest version first. Games are named by cartridge ID only.
 - Fixed: a ROM whose header uses the homebrew save-type field with a value it does not define, or
   whose game ID is not text (seen in romhacks and homebrew), no longer refuses to start: the game
   ID's save type is used, as for a ROM without that header.
-- Changed: Gopher64's pin moved to `f6c6db136232` (crate updates, among them sevenz-rust2 0.27;
+- Changed: Gopher64's pin moved to `240ccf441ddb` (Rust 1.100.1, crate updates, among them sevenz-rust2 0.27;
   controller profiles can be deleted in Gopher64's own interface; parallel-rdp at `c2d02a6c1407`).
   The patch's buffered config write was made again in Gopher64's new `Config::save`.
 

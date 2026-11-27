@@ -1,5 +1,5 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index df68b4b..c12c6dd 100644
+index cdbc25b..e56a765 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
 @@ -22,7 +22,6 @@ sha2 = "0.11"
