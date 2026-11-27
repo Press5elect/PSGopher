@@ -68,6 +68,18 @@ int main()
 	const std::string base = rom(0x2000);
 	std::string out, why;
 
+	/* a ROM past 64 MB (romhacks reach 100 MB and more; the cartridge space is 252 MB): a BPS that
+	 * grows an 8 KiB base to 100 MiB, the end written last */
+	{
+		encode::Bps p(base);
+		p.sourceRead(0x2000);
+		const size_t big = 100u << 20;
+		p.targetCopy(big - 0x2000 - 4, 0);
+		p.targetRead("BIG!");
+		CHECK(run(p.finish(), base, out) && out.size() == big && out.compare(big - 4, 4, "BIG!") == 0 &&
+			out.compare(0x2000, 0x2000, base) == 0);
+	}
+
 	/* ---- IPS */
 	{
 		encode::Ips p;

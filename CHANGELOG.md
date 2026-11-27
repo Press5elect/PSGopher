@@ -27,6 +27,11 @@ Every change, the newest version first. Games are named by cartridge ID only.
   `cache/play`); `.v64` and `.n64` bases are matched in either order. A patch beside a base of the
   same name is listed as "<name> (patched)". Patches that fit no ROM are left out, with the reason
   in the boot log. Host-tested (with sanitizers and a fuzzer); not run on a console.
+- Added: **ROMs past 64 MB**, up to the cartridge space's 252 MB (large romhacks pass 100 MB).
+  Gopher64 already read the whole space; a romhack's patch file may now be up to 256 MiB (it was
+  64 MiB), and the ROM is held in memory once while the game runs instead of twice (Gopher64 kept
+  its loaded copy beside the cartridge's). A test reads a 252 MB ROM to its last word and builds a
+  100 MiB romhack. Not run on a console.
 - Fixed: a change to Game Folders or the shares made while a search was running was dropped: the
   search now runs again when that one ends.
 - Fixed: a chosen game folder on a USB drive that is unplugged no longer keeps its games in the

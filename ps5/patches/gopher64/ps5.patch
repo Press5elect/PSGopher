@@ -1561,7 +1561,7 @@ index 0000000..3039335
 +    0x00000056, 0x0003003e, 0x0000004e, 0x00000057, 0x000100fd, 0x00010038,
 +};
 diff --git a/src/device.rs b/src/device.rs
-index ced2472..fe7cfd6 100644
+index ced2472..8823fb8 100644
 --- a/src/device.rs
 +++ b/src/device.rs
 @@ -27,6 +27,7 @@ pub mod cop1;
@@ -1572,16 +1572,86 @@ index ced2472..fe7cfd6 100644
  pub mod events;
  pub mod exceptions;
  pub mod fpu_instructions;
-@@ -64,6 +65,7 @@ pub fn run_game(
+@@ -47,12 +48,31 @@ pub mod tlb;
+ pub mod unmapped;
+ pub mod vi;
+ 
++#[allow(dead_code)] // kept: the lockstep harness (ps5/tests/lockstep) starts a game with a borrowed ROM
+ pub fn run_game(
+     device: &mut Device,
+     rom_contents: &[u8],
+     game_settings: ui::GameSettings,
+     ra_config: retroachievements::RAConfig,
+     netplay_config: Option<netplay::NetplayConfig>,
++) {
++    run_game_owned(
++        device,
++        rom_contents.to_vec(),
++        game_settings,
++        ra_config,
++        netplay_config,
++    );
++}
++
++// PSGopher: the ROM is moved into the cartridge rather than copied, so a large ROM (romhacks
++// reach the cartridge space's 252 MB) is held in memory once while the game runs, not twice
++pub fn run_game_owned(
++    device: &mut Device,
++    rom_contents: Vec<u8>,
++    game_settings: ui::GameSettings,
++    ra_config: retroachievements::RAConfig,
++    netplay_config: Option<netplay::NetplayConfig>,
+ ) {
+     device.cpu.overclock = game_settings.overclock;
+     if game_settings.disable_expansion_pak {
+@@ -63,7 +83,8 @@ pub fn run_game(
+         device.ui.savestate.load_state = true;
      }
  
-     cart::rom::init(device, rom_contents); // cart needs to come before rdram
+-    cart::rom::init(device, rom_contents); // cart needs to come before rdram
++    cart::rom::init_owned(device, rom_contents); // cart needs to come before rdram
 +    dd::init(device); // the 64DD, when attached: 8 MB, the IPL's CIC
  
      // rdram pointer is shared with parallel-rdp and retroachievements
      rdram::init(device);
-@@ -120,11 +122,13 @@ pub fn run_game(
-         );
+@@ -74,11 +95,8 @@ pub fn run_game(
+ 
+     // must be after video init
+     if let Some(netplay_config) = &netplay_config {
+-        device.netplay = netplay::init(
+-            device,
+-            netplay_config,
+-            cart::rom::is_system_pal(rom_contents),
+-        );
++        let pal = cart::rom::is_system_pal(&device.cart.rom);
++        device.netplay = netplay::init(device, netplay_config, pal);
+         if device.netplay.is_none() {
+             ui::input::close(&mut device.ui);
+             ui::audio::close(&mut device.ui);
+@@ -91,7 +109,11 @@ pub fn run_game(
+ 
+     // must be after video init
+     let (discord_watch_tx, discord_handle) = if ra_config.enabled && device.netplay.is_none() {
+-        retroachievements::load_game(rom_contents, rom_contents.len(), ra_config.rich_presence)
++        retroachievements::load_game(
++            &device.cart.rom,
++            device.cart.rom.len(),
++            ra_config.rich_presence,
++        )
+     } else {
+         (None, None)
+     };
+@@ -113,18 +135,17 @@ pub fn run_game(
+     ui::storage::format_saves(device);
+ 
+     if !retroachievements::get_hardcore() {
+-        cheats::init(
+-            device,
+-            &ui::storage::get_game_crc(rom_contents),
+-            game_settings.cheats,
+-        );
++        let game_crc = ui::storage::get_game_crc(&device.cart.rom);
++        cheats::init(device, &game_crc, game_settings.cheats);
      }
  
 +    dd::start(device);
@@ -1594,7 +1664,7 @@ index ced2472..fe7cfd6 100644
  
      if let Some(netplay) = &mut device.netplay {
          netplay::close(netplay);
-@@ -284,6 +288,8 @@ pub struct Device {
+@@ -284,6 +305,8 @@ pub struct Device {
      pub vru: controller::vru::Vru,
      pub transferpaks: [controller::transferpak::TransferPak; 4],
      pub cheats: cheats::Cheats,
@@ -1603,7 +1673,7 @@ index ced2472..fe7cfd6 100644
  }
  
  pub fn zero_m128i() -> __m128i {
-@@ -311,6 +317,9 @@ impl Device {
+@@ -311,6 +334,9 @@ impl Device {
              dst.clone_state_from(src);
          }
          self.cheats.clone_from(&device.cheats);
@@ -1613,7 +1683,7 @@ index ced2472..fe7cfd6 100644
      }
  
      pub fn new(with_ui: bool) -> Box<Device> {
-@@ -401,6 +410,8 @@ impl Device {
+@@ -401,6 +427,8 @@ impl Device {
                  }; events::EVENT_TYPE_COUNT],
                  next_event_count: u64::MAX,
                  next_event: events::EVENT_TYPE_NONE,
@@ -1622,7 +1692,7 @@ index ced2472..fe7cfd6 100644
              },
              pif: pif::Pif {
                  rom: [0; 1984],
-@@ -468,6 +479,7 @@ impl Device {
+@@ -468,6 +496,7 @@ impl Device {
                          func: rsp_su_instructions::reserved,
                          opcode: 0,
                          instruction_type: rsp_cpu::InstructionType::Su,
@@ -1630,7 +1700,7 @@ index ced2472..fe7cfd6 100644
                      }; 0x1000 / 4],
                      last_instruction_type: rsp_cpu::InstructionType::Su,
                      instruction_type: rsp_cpu::InstructionType::Su,
-@@ -571,6 +583,7 @@ impl Device {
+@@ -571,6 +600,7 @@ impl Device {
                  boot: true,
                  enabled: false,
              },
@@ -1815,10 +1885,26 @@ index f2ae41e..d176f97 100644
      device::memory::masked_write_32(
          &mut device.memory.dcache[line_index].words[((phys_address >> 2) & 3) as usize],
 diff --git a/src/device/cart/rom.rs b/src/device/cart/rom.rs
-index 3994201..f2c5d34 100644
+index 3994201..ccce248 100644
 --- a/src/device/cart/rom.rs
 +++ b/src/device/cart/rom.rs
-@@ -136,7 +136,15 @@ pub fn init(device: &mut device::Device, rom_file: &[u8]) {
+@@ -127,16 +127,30 @@ pub fn dma_write(
+     device::pi::calculate_cycles(device, 1, length)
+ }
+ 
++#[allow(dead_code)] // kept: the lockstep harness (ps5/tests/lockstep) starts a game with a borrowed ROM
+ pub fn init(device: &mut device::Device, rom_file: &[u8]) {
++    init_owned(device, rom_file.to_vec());
++}
++
++// PSGopher: the ROM moved in (device::run_game_owned), not copied
++pub fn init_owned(device: &mut device::Device, rom_file: Vec<u8>) {
+     device.cart.sc64.cfg[device::cart::sc64::SC64_BOOTLOADER_SWITCH as usize] = 1;
+ 
+-    device.cart.rom = rom_file.to_vec();
++    device.cart.rom = rom_file;
+     device.cart.pal = is_system_pal(&device.cart.rom);
+     set_cic(device);
  
      device.ui.game_hash = calculate_hash(&device.cart.rom);
  
@@ -1835,7 +1921,7 @@ index 3994201..f2c5d34 100644
      if device.ui.game_id.contains('\0') {
          device.ui.game_id = String::from("UNK");
      }
-@@ -154,25 +162,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
+@@ -154,25 +168,31 @@ pub fn is_system_pal(rom_contents: &[u8]) -> bool {
      false
  }
  
@@ -1885,6 +1971,39 @@ index 3994201..f2c5d34 100644
              device.cart.cic_seed = CIC_SEED_5167;
              device.cart.sc64.cfg[device::cart::sc64::SC64_ROM_WRITE_ENABLE as usize] = 1;
          }
+@@ -191,3 +211,32 @@ pub fn calculate_hash(data: &[u8]) -> String {
+         .map(|b| format!("{:02X}", b))
+         .collect()
+ }
++
++// PSGopher: a ROM past 64 MB (romhacks reach 100 MB and more) is read in the whole cartridge
++// space, 0x10000000-0x1FBFFFFF (252 MB), and its debug window is not laid over it
++#[cfg(test)]
++mod large_rom_tests {
++    use crate::device;
++
++    #[test]
++    fn a_252_mb_rom_is_read_to_its_end() {
++        let mut dev = device::Device::new(false);
++        dev.cpu.clock_rate = 93_750_000;
++        let size = 0x0FC0_0000; // the cartridge space
++        let mut rom = vec![0u8; size];
++        rom[0..4].copy_from_slice(&0x8037_1240u32.to_be_bytes());
++        rom[0x0600_0000..0x0600_0004].copy_from_slice(&0xB16B_00B5u32.to_be_bytes()); // at 96 MB
++        rom[0x03FF_0000..0x03FF_0004].copy_from_slice(&0x1500_0000u32.to_be_bytes()); // under the debug window
++        rom[size - 4..].copy_from_slice(&0x0E4D_0E4Du32.to_be_bytes()); // the last word
++        super::init_owned(&mut dev, rom);
++        assert_eq!(dev.cart.rom.len(), size, "moved in whole");
++        device::memory::init(&mut dev);
++        let mut read = |address: u64| {
++            let page = (address >> 16) as usize;
++            dev.memory.memory_map_read[page](&mut dev, address, device::memory::AccessSize::Word)
++        };
++        assert_eq!(read(0x1600_0000), 0xB16B_00B5);
++        assert_eq!(read(0x13FF_0000), 0x1500_0000);
++        assert_eq!(read(0x1FBF_FFFC), 0x0E4D_0E4D);
++    }
++}
 diff --git a/src/device/controller.rs b/src/device/controller.rs
 index 714ed70..72331ec 100644
 --- a/src/device/controller.rs
@@ -7361,7 +7480,7 @@ index 593659b..3c0c51f 100644
  
      if !in_rollback {
 diff --git a/src/lib.rs b/src/lib.rs
-index 4e51a1b..c02c337 100644
+index 4e51a1b..292e88a 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -3,6 +3,12 @@
@@ -7482,6 +7601,18 @@ index 4e51a1b..c02c337 100644
                  (shutdown_tx, usb_handle, device.ui.usb) = ui::usb::init();
              }
          }
+@@ -283,9 +334,9 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+             None
+         };
+ 
+-        device::run_game(
++        device::run_game_owned(
+             &mut device,
+-            &rom_contents,
++            std::mem::take(&mut rom_contents),
+             ui::GameSettings {
+                 overclock,
+                 disable_expansion_pak,
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
 index 0000000..50a5c0c

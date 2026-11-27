@@ -46,6 +46,8 @@ std::string foldersFile() { return g_root + "/psgopher/config/folders.cfg"; }
 std::string playedFile() { return g_root + "/psgopher/cache/played.tsv"; }
 std::string statesFolder() { return g_root + "/psgopher/data/states"; }
 std::string playFolder() { return g_root + "/psgopher/cache/play"; }
+/* a romhack's patch file: a large hack's patch carries most of its ROM (some pass 100 MB) */
+constexpr size_t kMaxPatch = 256u << 20;
 constexpr int kDepth = 5;               // folders below a place
 constexpr unsigned kLocalBudget = 60000; // entries a local place may cost
 constexpr unsigned kShareBudget = 8000;  // ... a share (each folder is a round trip)
@@ -407,7 +409,7 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<Game> &pat
 	return listed;
 }
 
-/* A file read whole, through ps5vfs for a share (a patch is at most 64 MiB, a ROM 256 MiB). `hint` is the
+/* A file read whole, through ps5vfs for a share (a patch or a ROM is at most 256 MiB: romhacks pass 64 MB, up to the cartridge space's 252 MB). `hint` is the
  * size the listing gave (0 unknown): the buffer is made that size at once and read into, so the file is
  * in memory once; with no hint it grows as it is read. */
 bool readWhole(const std::string &path, size_t cap, std::vector<uint8_t> &data, std::string *error, uint64_t hint = 0)
@@ -584,7 +586,7 @@ void resolvePatches(std::vector<Game> &patches, std::vector<Game> &found, const 
 		};
 		std::vector<uint8_t> patch;
 		std::string why;
-		if (!readWhole(p.path, 64u << 20, patch, &why, p.size)) {
+		if (!readWhole(p.path, kMaxPatch, patch, &why, p.size)) {
 			leave("the patch could not be read: " + why);
 			continue;
 		}
@@ -1140,7 +1142,7 @@ std::string localCopy(const std::string &path, std::string *error)
 			*error = std::string("the share did not open it: ") + strerror(errno);
 		return {};
 	}
-	/* read whole (a ROM is at most 64 MiB, a zip of one less), then one write: a title's write()
+	/* read whole (a ROM is at most 256 MiB: the cartridge space is 252 MB, which romhacks use), then one write: a title's write()
 	 * costs about 3 ms each, whatever its size */
 	std::vector<unsigned char> data;
 	unsigned char block[1 << 16];
@@ -1207,7 +1209,7 @@ std::string playablePath(const std::string &path, std::string *error)
 		return fail(patch_name + ": no base ROM is known for this patch (it is listed only with one)");
 	std::vector<uint8_t> patch, rom, result;
 	std::string why;
-	if (!readWhole(path, 64u << 20, patch, &why, patch_size))
+	if (!readWhole(path, kMaxPatch, patch, &why, patch_size))
 		return fail(patch_name + ": the patch could not be read: " + why);
 	if (!readWhole(base, romhack::kMaxTarget, rom, &why, base_size))
 		return fail(patch_name + ": its base ROM " + base.substr(base.rfind('/') + 1) + " could not be read: " + why);
