@@ -9,8 +9,8 @@ emulator, for jailbroken consoles running homebrew. Gopher64's emulation is used
 its VR4300 and RSP interpreters and parallel-rdp, the Vulkan compute RDP, running on RADV
 linked into the title.
 
-**Status: in development, no release yet.** The title runs on the console (2026-11-25): the board,
-USB drives, network shares and games, which do not reach full speed yet. What has and has not run
+**Status: v0.0.1, a very early build.** The title runs on the console (2026-11-25): the board,
+USB drives, network shares and games, at full speed at 8x in the games played so far. What has and has not run
 on a console is in [`CHANGELOG.md`](CHANGELOG.md).
 
 This page is the user's guide. Developers: the documentation index is [`docs/README.md`](docs/README.md).

@@ -130,6 +130,8 @@ mkdir -p "$app/sce_sys" "$app/sce_module"
 "$tool" self --inspect --file "$app/eboot.bin" > /dev/null
 cp "$param" "$app/sce_sys/param.json"
 cp "$root/ps5/sce_sys/icon0.png" "$app/sce_sys/icon0.png"
+# the home screen's pictures: behind the selected title and while it loads (ps5/tools/make-title-art.py)
+cp "$root/ps5/sce_sys/pic0.dds" "$root/ps5/sce_sys/pic1.dds" "$app/sce_sys/"
 # the sandbox exit's helper, sent to the payload loader from /app0 (ps5/host/sandbox.cpp)
 cp "$root/build/sandbox-elevator.elf" "$app/sandbox-elevator.elf"
 # the write broker, sent to the payload loader for the copy of a share's ROM (ps5/host/write_broker.cpp)
@@ -142,6 +144,11 @@ mkdir -p "$app/gamedata"
 cp "$root/ps5/gamedata/expansion-pak.tsv" "$app/gamedata/"
 # the attributions kept and the other authors' parts (NOTICE), and the fonts' licence
 cp "$root/NOTICE" "$app/NOTICE.txt"
+# the licence the program is under (GPL-3.0: it goes with every copy of the binary), the user's guide
+# and the changes (the updater replaces them with each release: ps5/host/update.cpp)
+cp "$root/LICENSE" "$app/LICENSE.txt"
+cp "$root/README.md" "$app/README.md"
+cp "$root/CHANGELOG.md" "$app/CHANGELOG.md"
 mkdir -p "$app/licenses"
 cp "$root/.deps/src/bricolage/OFL.txt" "$app/licenses/OFL-BricolageGrotesque.txt"
 cp "$root/.deps/src/jetbrains-mono/OFL.txt" "$app/licenses/OFL-JetBrainsMono.txt"

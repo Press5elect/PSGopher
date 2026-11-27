@@ -1,16 +1,16 @@
 # PSGopher changelog
 
-Every change, the newest version first. Nothing is released yet: Unreleased is the state of the
-branch. Games are named by cartridge ID only.
+Every change, the newest version first. Games are named by cartridge ID only.
 
-## Unreleased
+## v0.0.1 (2026-11-27)
 
-Status: the title, the sandbox exit, an SMB share, USB drives, covers, descriptions, the sound buffer and three games
-have run on a console (2026-11-25): one NTSC game at full speed, two below it. Not yet run on a
-console: the cheats, variable refresh, HDR10.
+The first release: a very early build. The title, the sandbox exit, network shares, USB drives,
+covers, descriptions and games at full speed at 8x have run on a console; the rest is listed below
+as each part was made.
 
 ### Front end
 
+- Added: the title's pictures on the console's home screen: PSGopher, the Gopher64 logo, by Press5elect and its GitHub address (`ps5/tools/make-title-art.py`; the gopher is Gopher64's icon, GPL-3.0). Not yet seen on a console.
 - Added: a one-time warning at the first start that this is a very early build.
 - Fixed: the cartridge seated in the board's slot is drawn as the strip's: the grey shell and its label, not a black shell with the cover stretched over it.
 - Added: the Expansion Pak row (BENCH > Emulation, and a game's page) is **Auto (Default)**, On or Off, in place of Gopher64's "Disable Expansion Pak". `ps5/gamedata/expansion-pak.tsv` lists the cartridges that need the Expansion Pak (3 games, 9 codes), use it for more (133 codes) and misbehave with it (4 cartridges), from Nintendo's accessories page, Wikipedia, Project64's database and Mupen64Plus's, each entry with its sources (`docs/dev/expansion-pak.md`). Auto turns the Expansion Pak on except for a game that misbehaves with it; a game's own choice wins; the boot log says `settings: expansion pak <on|off> (<status>; <source>)`. HOME's panel and the game's page show Expansion Pak (Required, Enhanced, Must be off, Not used) and the N64's memory (8 MB or 4 MB); starting a game that needs the Expansion Pak with it set to Off asks first. A psgopher.ini or a game's file from before reads Gopher64's old switch as the new row. Host-tested; not run on a console.
