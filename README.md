@@ -105,7 +105,7 @@ there; `/data/psgopher/` when the title folder takes no file), with the run befo
 `psgopher-boot.previous.log`, as OGBox and Crux2 keep theirs. Gopher64's own messages are in it too.
 When a game does not start, the board says why at the top.
 
-No games, BIOS or other copyrighted data are included.
+No games, BIOS or other copyrighted data are included. Where each part of PSGopher came from is in [`PROVENANCE.md`](PROVENANCE.md).
 
 ## Licence and credits
 

@@ -18,10 +18,14 @@ term of GPL-3.0 section 7(b) that the author attribution be preserved:
                             from OGBox's ps5/src/platform/ps5_sandbox.*; ps5/elevation, OGBox's,
                             from Crux2), ps5/tools/build-elevator.sh, the write broker (ps5/broker,
                             ps5/host/write_broker.*, ps5/tools/build-broker.sh, ps5/tests/broker),
+                            the updater (ps5/host/update*, Crux2's by way of OGBox),
+                            ps5/tools/make-release-zip.py and ps5/tools/make-title-art.py,
                             and the changes marked "OGBox"
                             in the files below;
   "Crux2 by Press5elect"    the virtual file layer (ps5/vfs, Crux2's ps5vfs by way of OGBox) and
-                            the libc gaps (ps5/host/libc_gaps.c, Crux2's and OGBox's ps5_libc.c):
+                            the libc gaps (ps5/host/libc_gaps.c, Crux2's and OGBox's ps5_libc.c), the
+                            elevation client's connection retry (ps5/elevation/elevation.cpp,
+                            ps5/tests/elevation), ps5/tools/build-profile-runtime.sh:
                             the files whose header carries "keep the attribution "Crux2 by
                             Press5elect"".
 
@@ -43,3 +47,10 @@ folder's licenses/): Bricolage Grotesque (Mathieu Triay) and JetBrains Mono (Jet
 stb_truetype and stb_image (Sean Barrett, public domain or MIT). The PS5 layer in ps5/host/platform* (Mihawk's PS5 Vulkan Template, MIT); RADV
 (Mesa, MIT) through Mihawk's PS5_Mesa and PS5_Vulkan, with Crux2's driver patches; the payload
 SDK and platform layer (Mihawk's PS5_PayloadSDK).
+Porpoise (Dolphin for PS5, GPL-3.0-or-later): the elevation client's connection retry, by way of
+Crux2. PS5_RetroArch's tools/make-title-art.py (Mihawk-99, GPL-3.0-or-later): the DDS header and
+BC7 encoder, by way of Crux2 and OGBox. The Expansion Pak table holds facts (statuses by cartridge
+code) from Nintendo's accessories page, English Wikipedia (CC BY-SA 4.0), Project64's
+Project64.rdb and Mupen64Plus' mupen64plus.ini (GPL-2.0); none of their text is carried.
+
+Where each part came from is recorded in PROVENANCE.md.
