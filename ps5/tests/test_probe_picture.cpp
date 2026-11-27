@@ -2,6 +2,7 @@
  * PSGopher - a probe's picture (ps5/host/probe_picture.h): the path, the PNG (decoded again by
  * stb_image), the atomic write and its replacement, the removal, the impossible sizes.
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
  */
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb_image.h"

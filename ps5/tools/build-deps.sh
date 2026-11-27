@@ -15,6 +15,7 @@
 # Newest of each, as the owner's rule asks; check-sources.sh says when one moved on.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 sdk=$("$root/ps5/tools/setup-sdk.sh")

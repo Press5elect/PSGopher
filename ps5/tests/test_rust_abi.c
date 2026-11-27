@@ -4,6 +4,7 @@
  * the four converters against FreeBSD 11 answers given here.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
  */
 #define main rust_abi_unused_main
 #include "../host/rust_abi.c"

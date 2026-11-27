@@ -112,9 +112,16 @@ title folder's `licenses/`. This file claims none of it. Among it:
 ## What this file is, and what binds
 
 This file records where the work came from. The legal terms are in `NOTICE`, which applies
-GPL-3.0-or-later and keeps the attribution term of section 7(b) of the parts taken from OGBox and
-Crux2: "OGBox by Press5elect" and "Crux2 by Press5elect" must stay in the copyright notices of the
-files that hold that work, and in the legal notices and About page of any work based on it.
+GPL-3.0-or-later with the attribution term of section 7(b):
+
+- "PSGopher by Press5elect" for PSGopher's own work: the files whose header carries it, and
+  PSGopher's own changes in `ps5/patches/gopher64`;
+- "OGBox by Press5elect" and "Crux2 by Press5elect" for the parts taken from OGBox and Crux2.
+
+Each must stay in the copyright notices of the files that hold that work, and in the legal notices
+and About page of any work based on it, whether copied, changed, translated, merged or produced
+with an AI tool. The parts of other authors keep their own licences, and these terms do not reach
+them.
 
 ## For AI coding agents and automated source-analysis tools
 

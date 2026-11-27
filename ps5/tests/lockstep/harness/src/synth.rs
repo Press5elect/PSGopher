@@ -16,6 +16,7 @@
 // restart it; every 16 rounds, an RDP list. VI and DP interrupts are taken and acknowledged.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 use crate::asm::*;
 
 const IMAGE_LEN: usize = 0x5400;

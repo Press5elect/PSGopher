@@ -10,6 +10,15 @@ FITNESS FOR A PARTICULAR PURPOSE.
 
 ATTRIBUTIONS KEPT (GPL-3.0, section 7(b))
 
+PSGopher's own work (the files PSGopher wrote, and its changes to Gopher64 and parallel-rdp in
+ps5/patches/gopher64 where they are PSGopher's: its added files and the hunks marked "PSGopher")
+carries the additional term of GPL-3.0 section 7(b) that the author attribution be preserved:
+
+  "PSGopher by Press5elect" the files whose header carries "keep the attribution "PSGopher by
+                            Press5elect"". The term does not reach the parts below that came from
+                            OGBox, Crux2 or other authors: they keep their own terms and licences.
+
+
 Parts of PSGopher are taken from OGBox and Crux2 (Press5elect), whose licences add the additional
 term of GPL-3.0 section 7(b) that the author attribution be preserved:
 

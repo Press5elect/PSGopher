@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 """Recompile parallel-rdp shaders into its precompiled bank, shaders/slangmosh.hpp.
 
 parallel-rdp ships its shaders as SPIR-V in slangmosh.hpp, written by Granite's slangmosh

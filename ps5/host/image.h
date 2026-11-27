@@ -2,6 +2,7 @@
  * PSGopher - pictures for the front end: a PNG file to RGBA8 pixels (stb_image), kept once decoded.
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
  */
 #pragma once
 

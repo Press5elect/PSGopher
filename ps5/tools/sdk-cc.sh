@@ -4,6 +4,7 @@
 # -target x86_64-sie-ps5. It is dropped; everything else goes through unchanged.
 # Usage: SDK_CC=<prospero-clang or prospero-clang++> sdk-cc.sh <args>
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 args=()
 for a in "$@"; do [[ $a == --target=* ]] || args+=("$a"); done
 exec "${SDK_CC:?}" "${args[@]}"

@@ -2,6 +2,7 @@
  * PSGopher - the title's own settings (title_settings.h).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
  */
 #include "title_settings.h"
 

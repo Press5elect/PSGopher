@@ -1,6 +1,7 @@
 // A small MIPS assembler for the synthetic test ROM (VR4300 and RSP encodings), with labels.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 #![allow(dead_code)]
 
 pub const ZERO: u32 = 0;

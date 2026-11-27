@@ -8,6 +8,7 @@
 #   psgopher_sharp.frag                        -> psgopher_sharp_spirv.hpp    (Final Filter: Sharp Bilinear)
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 dir="$root/vendor/gopher64/parallel-rdp"

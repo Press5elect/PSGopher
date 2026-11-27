@@ -12,6 +12,7 @@
 # ps5/tools/setup-sdk.sh). docs/dev/building.md has the whole setup.
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 vulkan=${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}

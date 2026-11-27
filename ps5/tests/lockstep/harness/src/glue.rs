@@ -3,6 +3,7 @@
 // rather than being compared wrongly.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 use crate::rsp_unit::RspState;
 use crate::snapshot::{Hasher, Kind, RDRAM_BLOCK, Snapshot, hash_bytes};
 use gcore::device::Device;

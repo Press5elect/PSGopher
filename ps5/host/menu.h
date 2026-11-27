@@ -3,6 +3,7 @@
  * RADV, between games (each game's Vulkan is Gopher64's own: the list makes and ends its own).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
  */
 #pragma once
 

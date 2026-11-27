@@ -3936,10 +3936,12 @@ index 4e51a1b..b97e584 100644
          }
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..c8141ae
+index 0000000..50a5c0c
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,1260 @@
+@@ -0,0 +1,1262 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
 +//!
 +//! Everything else runs as on the desktop: `psgopher_main` parses the arguments the title passes
@@ -5202,10 +5204,12 @@ index 0000000..c8141ae
 +}
 diff --git a/src/psgopher_http.rs b/src/psgopher_http.rs
 new file mode 100644
-index 0000000..895d20a
+index 0000000..6afd808
 --- /dev/null
 +++ b/src/psgopher_http.rs
-@@ -0,0 +1,518 @@
+@@ -0,0 +1,520 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 +//! PSGopher (PS5): HTTPS GET for the updater (ps5/host/update_net.cpp): to a buffer or to a file,
 +//! with redirects. Added by PSGopher's ps5.patch.
 +//!
@@ -5726,10 +5730,12 @@ index 0000000..895d20a
 +}
 diff --git a/src/psgopher_zip.rs b/src/psgopher_zip.rs
 new file mode 100644
-index 0000000..1cdd5a6
+index 0000000..00cebab
 --- /dev/null
 +++ b/src/psgopher_zip.rs
-@@ -0,0 +1,219 @@
+@@ -0,0 +1,221 @@
++// SPDX-License-Identifier: GPL-3.0-or-later
++// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 +//! PSGopher (PS5): a ZIP archive for the updater (ps5/host/update.cpp), through the `zip` crate
 +//! Gopher64 already links. Added by PSGopher's ps5.patch.
 +//!

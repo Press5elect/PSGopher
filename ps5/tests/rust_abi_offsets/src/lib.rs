@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 //! Offsets and sizes of the FreeBSD 12 structures in Rust's libc, the version Rust's std uses
 //! (keep `=0.2.x` in Cargo.toml at the std's: build-core.sh's toolchain, library/Cargo.lock).
 #![no_std]

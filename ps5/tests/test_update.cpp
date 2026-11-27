@@ -5,7 +5,7 @@
 // "Crux2 by Press5elect"; see NOTICE.
 //
 // PSGopher 0.0.1: from Crux2 v1.0.17 (08c3507, ps5/tests/update/update_test.cpp), for PSGopher's updater.
-// PSGopher: from PSGopher db63d46 (tests/update/update_test.cpp), for PSGopher's updater
+// PSGopher: from OGBox db63d46 (tests/update/update_test.cpp), for PSGopher's updater
 // (ps5/host/update.cpp): PSGopher's title folder (art/, licenses/, write-broker.elf), its title ID
 // and its releases' names; the ZIPs are written here by a small writer (stored and deflate-stored
 // entries) and read by the same `zip` crate code the title links (ps5/tests/update_zip); a

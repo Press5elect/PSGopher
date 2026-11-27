@@ -3,6 +3,7 @@
 # layer's host build. Needs build/sdl3-include (ps5/tools/build-core.sh makes it) and the RADV
 # archive's Vulkan headers.
 # SPDX-License-Identifier: GPL-3.0-or-later
+# Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
 vulkan=${PS5_VULKAN_DIR:-$root/../PS5_Vulkan}

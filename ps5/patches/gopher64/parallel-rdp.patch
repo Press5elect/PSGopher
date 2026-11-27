@@ -713,11 +713,13 @@ index 918673b..ee1e8a4 100644
  
 diff --git a/parallel-rdp/shaders/rdram_layout.h b/parallel-rdp/shaders/rdram_layout.h
 new file mode 100644
-index 0000000..88b1426
+index 0000000..252878a
 --- /dev/null
 +++ b/parallel-rdp/shaders/rdram_layout.h
-@@ -0,0 +1,64 @@
-+/* PSGopher: the layout of the upscaled ("multisampled") RDRAM, an experiment that is off by default.
+@@ -0,0 +1,66 @@
++/* PSGopher: the layout of the upscaled ("multisampled") RDRAM (per pixel by default: psgopher.ini rdp_layout).
++ * SPDX-License-Identifier: GPL-3.0-or-later
++ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 + *
 + * parallel-rdp keeps the upscaled RDRAM as NUM_SAMPLES copies of RDRAM ("slices"), RDRAM_SIZE apart.
 + * At 8x that is 64 copies 8 MiB apart, and one upscaled 8x8 tile reads 64 addresses 8 MiB apart.

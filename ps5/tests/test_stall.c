@@ -5,6 +5,7 @@
  * intervals over 50 ms) are counted into the video line's tail (psgopher_hitch_summary).
  *
  * SPDX-License-Identifier: GPL-3.0-or-later
+ * Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
  */
 #include "bench.h"
 #include "psgopher_sdl3.h"

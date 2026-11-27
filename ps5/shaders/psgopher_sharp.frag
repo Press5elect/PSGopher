@@ -9,6 +9,7 @@
 // so it needs no push constant. Below 1 (the picture shrunk) it is 1, which is plain bilinear.
 //
 // SPDX-License-Identifier: GPL-3.0-or-later
+// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 
 layout(location = 0) out vec4 FragColor;
 layout(set = 0, binding = 0) uniform sampler2D uTexture;
