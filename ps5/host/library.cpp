@@ -40,6 +40,7 @@ namespace {
 
 std::string g_root = "/data"; // the console's /data (the host tests' folder)
 std::string listFile() { return g_root + "/psgopher/cache/library.tsv"; }
+std::string foldersFile() { return g_root + "/psgopher/config/folders.cfg"; }
 std::string playedFile() { return g_root + "/psgopher/cache/played.tsv"; }
 std::string statesFolder() { return g_root + "/psgopher/data/states"; }
 std::string playFolder() { return g_root + "/psgopher/cache/play"; }
@@ -217,6 +218,7 @@ std::string stem(const std::string &name)
 struct Place {
 	std::string path;
 	int tab;
+	bool chosen{ false }; // a game folder the user chose: every .7z in it is listed
 };
 
 bool isFolder(const std::string &path)
@@ -230,6 +232,21 @@ std::vector<Place> places()
 	std::vector<Place> out;
 	/* the title's own folder first: what is found twice keeps the first place's tab */
 	out.push_back({ g_root + "/psgopher/roms", TabInternal });
+	/* game folders chosen in BENCH: only they are searched, not the whole of /data and every drive
+	 * (a reporter's USB drive gave no games; a large drive or /data is slow to search whole) */
+	const std::vector<std::string> chosen = gameFolders();
+	for (const std::string &folder : chosen)
+		out.push_back({ folder, tabOfPath(folder), true });
+	if (!chosen.empty()) {
+		for (unsigned i = 0;; i++) {
+			const char *mount = ps5vfs_mount_point(i);
+			if (!mount)
+				break;
+			if (strncmp(mount, "/smb/", 5) == 0)
+				out.push_back({ mount, TabNetwork });
+		}
+		return out;
+	}
 	out.push_back({ g_root, TabInternal });
 	for (int i = 0; i < 8; i++) {
 		const std::string usb = "/mnt/usb" + std::to_string(i);
@@ -349,7 +366,7 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<std::strin
 			if (!rom && endsWith(l, ".zip"))
 				rom = zipHoldsRom(full);
 			if (!rom && endsWith(l, ".7z"))
-				rom = n64Folder;
+				rom = n64Folder || place.chosen;
 			if (rom) {
 				Game g;
 				g.name = stem(e.name);
@@ -582,6 +599,49 @@ std::string gameKey(const Game &g, bool *from_header)
 void libraryUseRoot(const std::string &root)
 {
 	g_root = root;
+}
+
+std::vector<std::string> gameFolders()
+{
+	std::vector<std::string> out;
+	FILE *f = fopen(foldersFile().c_str(), "rb");
+	if (!f)
+		return out;
+	char line[1024];
+	while (fgets(line, sizeof(line), f)) {
+		std::string path = line;
+		while (!path.empty() && (path.back() == '\n' || path.back() == '\r'))
+			path.pop_back();
+		while (path.size() > 1 && path.back() == '/')
+			path.pop_back();
+		if (!path.empty() && path[0] == '/' && std::find(out.begin(), out.end(), path) == out.end())
+			out.push_back(path);
+	}
+	fclose(f);
+	return out;
+}
+
+bool setGameFolders(const std::vector<std::string> &folders)
+{
+	const std::string file = foldersFile(), temporary = file + ".new";
+	mkdir((g_root + "/psgopher").c_str(), 0777);
+	mkdir((g_root + "/psgopher/config").c_str(), 0777);
+	if (folders.empty())
+		return unlink(file.c_str()) == 0 || errno == ENOENT;
+	std::string text;
+	for (const std::string &folder : folders)
+		text += folder + "\n";
+	FILE *f = fopen(temporary.c_str(), "wb");
+	if (!f)
+		return false;
+	const bool ok = fwrite(text.data(), 1, text.size(), f) == text.size();
+	fclose(f);
+	if (ok && rename(temporary.c_str(), file.c_str()) == 0) {
+		chmod(file.c_str(), 0666);
+		return true;
+	}
+	unlink(temporary.c_str());
+	return false;
 }
 
 Library &library()

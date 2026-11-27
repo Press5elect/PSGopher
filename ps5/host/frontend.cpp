@@ -1949,6 +1949,7 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 					return v.empty() ? std::string("\xE2\x80\x94 None") : baseName(v);
 				};
 				file.run = [this, key, which] {
+					picker_mode_ = 0;
 					picker_key_ = key, picker_rom_ = which == 0, picker_sel_ = 0;
 					const std::string v = host_.text ? host_.text(key) : "";
 					picker_folder_ = v.empty() ? "" : v.substr(0, v.rfind('/'));
@@ -2069,6 +2070,13 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		const std::string elevation = off ? "Off" : host_.elevated && host_.elevated() ? "On" : "Unavailable";
 		s.rows.push_back(action("console.sandbox", "Leave the Sandbox", [elevation] { return elevation; }, "When enabled, leaves the sandbox to reach USB drives and all of /data.",
 		                        [this, off] { if (host_.set_elevation_off) host_.set_elevation_off(!off); }));
+		s.rows.push_back(action("console.folders", "Game Folders",
+		                        [] {
+			                        const size_t n = gameFolders().size();
+			                        return n == 0 ? std::string("Everywhere") : n == 1 ? std::string("1 folder") : std::to_string(n) + " folders";
+		                        },
+		                        "Selects the folders searched for cartridges, on the console or a USB drive. When none is selected, all of /data, every USB drive and the network shares are searched.",
+		                        [this] { picker_mode_ = 1, picker_sel_ = 0, picker_folder_.clear(), folders_changed_ = false, folders_opened_ = true; }));
 		s.rows.push_back(action("console.search", "Search for Cartridges", [] { return std::string(library().scanning() ? "Searching" : "Search"); }, "Searches every location for cartridges again.",
 		                        [] { library().rescan(); }));
 		/* Fast Writes: the write broker (write_broker.h) */
@@ -2471,8 +2479,12 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	         game_page_ ? "L2 \xC2\xB7 R2  SECTION      \xE2\x96\xB2 \xE2\x96\xBC  SETTING      \xE2\x97\x84 \xE2\x96\xBA  CHANGE      \xE2\x9C\x95  CHOOSE      \xE2\x97\x8B  BACK"
 	                    : "L1 \xC2\xB7 R1  VIEWS      L2 \xC2\xB7 R2  SECTION      \xE2\x96\xB2 \xE2\x96\xBC  SETTING      \xE2\x97\x84 \xE2\x96\xBA  CHANGE      \xE2\x9C\x95  CHOOSE      \xE2\x97\x8B  HOME",
 	         .08f);
-	if (picker_sel_ >= 0)
-		filePicker(dl, pad, f);
+	if (picker_sel_ >= 0) {
+		if (picker_mode_ == 0)
+			filePicker(dl, pad, f);
+		else
+			folderPicker(dl, pad, f);
+	}
 }
 
 /* A Game Boy ROM or save for a Transfer Pak: folders and files of the console and its USB drives
@@ -2571,6 +2583,123 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 	if (n == 1 && !picker_folder_.empty())
 		ink.text(f.mono, 14, x + 28, y + 140, kDim, picker_rom_ ? "No .gb or .gbc files here" : "No .sav files here");
 	ink.text(f.mono, 14, x + 28, y + h - 34, kDim, "\xE2\x96\xB2 \xE2\x96\xBC  MOVE      \xE2\x9C\x95  OPEN \xC2\xB7 CHOOSE      \xE2\x97\x8B  CLOSE", .08f);
+}
+
+/* The game folders: the list (Cross on one removes it, the first row adds one), and the chooser,
+ * which lists folders only, from the console's /data, its extended storage and its USB drives. */
+void Frontend::folderPicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
+{
+	Ink ink{ dl, u_ };
+	struct Entry {
+		std::string label, path;
+		int what; // 0 a folder to open, 1 "use this folder", 2 "add a folder", 3 a chosen folder
+	};
+	std::vector<Entry> entries;
+	std::vector<std::string> chosen = gameFolders();
+	if (picker_mode_ == 1) {
+		entries.push_back({ "+ Add a folder", "", 2 });
+		for (const std::string &c : chosen)
+			entries.push_back({ c, c, 3 });
+	} else if (picker_folder_.empty()) {
+		entries.push_back({ "/data", "/data", 0 });
+		for (const char *ext : { "/mnt/ext0", "/mnt/ext1" }) {
+			struct stat st;
+			if (stat(ext, &st) == 0 && S_ISDIR(st.st_mode))
+				entries.push_back({ ext, ext, 0 });
+		}
+		for (int i = 0; i < 8; i++) {
+			const std::string usb = "/mnt/usb" + std::to_string(i);
+			struct stat st;
+			if (stat(usb.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+				entries.push_back({ usb, usb, 0 });
+		}
+	} else {
+		const size_t slash = picker_folder_.rfind('/');
+		const std::string up = slash == 0 || slash == std::string::npos ? "" : picker_folder_.substr(0, slash);
+		entries.push_back({ "\xE2\x86\x90 up", up == "/mnt" ? "" : up, 0 });
+		entries.push_back({ "\xE2\x9C\x93 Use this folder", picker_folder_, 1 });
+		std::vector<Entry> folders;
+		if (DIR *d = opendir(picker_folder_.c_str())) {
+			while (dirent *e = readdir(d)) {
+				if (e->d_name[0] == '.' || e->d_name[0] == '$')
+					continue;
+				const std::string path = picker_folder_ + "/" + e->d_name;
+				bool folder = e->d_type == DT_DIR;
+				if (e->d_type == DT_UNKNOWN || e->d_type == DT_LNK) {
+					struct stat st;
+					folder = stat(path.c_str(), &st) == 0 && S_ISDIR(st.st_mode);
+				}
+				if (folder)
+					folders.push_back({ std::string(e->d_name) + "/", path, 0 });
+			}
+			closedir(d);
+		}
+		std::sort(folders.begin(), folders.end(), [](const Entry &a, const Entry &b) { return a.label < b.label; });
+		entries.insert(entries.end(), folders.begin(), folders.end());
+	}
+	const int n = (int)entries.size();
+	picker_sel_ = std::clamp(picker_sel_, 0, std::max(0, n - 1));
+	const bool opened = folders_opened_;
+	folders_opened_ = false;
+	if (opened) {
+	} else if (pad.repeat(PAD_DOWN) && n)
+		picker_sel_ = (picker_sel_ + 1) % n;
+	else if (pad.repeat(PAD_UP) && n)
+		picker_sel_ = (picker_sel_ + n - 1) % n;
+	if (opened) {
+	} else if (pad.pressed & PAD_CIRCLE) {
+		if (picker_mode_ == 2) {
+			picker_mode_ = 1, picker_sel_ = 0;
+			return;
+		}
+		picker_sel_ = -1;
+		if (folders_changed_)
+			library().rescan();
+		folders_changed_ = false;
+		return;
+	}
+	if (!opened && (pad.pressed & PAD_CROSS) && n) {
+		const Entry e = entries[picker_sel_];
+		if (e.what == 2) {
+			picker_mode_ = 2, picker_folder_.clear(), picker_sel_ = 0;
+		} else if (e.what == 3) {
+			chosen.erase(std::remove(chosen.begin(), chosen.end(), e.path), chosen.end());
+			setGameFolders(chosen);
+			folders_changed_ = true;
+		} else if (e.what == 1) {
+			if (std::find(chosen.begin(), chosen.end(), e.path) == chosen.end())
+				chosen.push_back(e.path);
+			setGameFolders(chosen);
+			folders_changed_ = true;
+			picker_mode_ = 1, picker_sel_ = 0;
+		} else {
+			picker_folder_ = e.path;
+			picker_sel_ = 0;
+		}
+		return;
+	}
+	const float x = 520, y = 150, w = 880, h = 860, rh = 40;
+	dl->AddRectFilled(S(0, 0), S(1920, 1080), IM_COL32(0, 0, 0, 150));
+	ink.rect(x, y, w, h, IM_COL32(7, 17, 21, 250), 16);
+	ink.frame(x, y, w, h, kAmber, 16, 2);
+	ink.text(f.display, 26, x + 28, y + 18, kText, picker_mode_ == 1 ? "Game folders" : "Add a game folder");
+	const char *sub = picker_mode_ == 1 ? (chosen.empty() ? "none chosen: all of /data, every USB drive and the network shares are searched"
+	                                                       : "only these, /data/psgopher/roms and the network shares are searched")
+	                                    : picker_folder_.empty() ? "the console and its USB drives" : picker_folder_.c_str();
+	ink.text(f.mono, 14, x + 28, y + 56, kDim, sub);
+	const int visible = (int)((h - 140) / rh);
+	const int first = std::clamp(picker_sel_ - visible / 2, 0, std::max(0, n - visible));
+	for (int i = first; i < std::min(n, first + visible); i++) {
+		const float ry = y + 90 + (i - first) * rh;
+		const bool here = i == picker_sel_;
+		if (here)
+			ink.rect(x + 12, ry, w - 24, rh - 4, kAmber, 8);
+		ink.text(f.mono_bold, 16, x + 28, ry + 9, here ? kInk : kText, entries[i].label);
+	}
+	ink.text(f.mono, 14, x + 28, y + h - 34, kDim,
+	         picker_mode_ == 1 ? "\xE2\x96\xB2 \xE2\x96\xBC  MOVE      \xE2\x9C\x95  ADD \xC2\xB7 REMOVE      \xE2\x97\x8B  CLOSE"
+	                           : "\xE2\x96\xB2 \xE2\x96\xBC  MOVE      \xE2\x9C\x95  OPEN \xC2\xB7 USE      \xE2\x97\x8B  BACK",
+	         .08f);
 }
 
 } // namespace psgopher

@@ -245,6 +245,10 @@
   "label": "written",
   "choices": "written"
  },
+ "console.folders": {
+  "label": "written",
+  "choices": "written"
+ },
  "console.search": {
   "label": "written",
   "choices": "written"

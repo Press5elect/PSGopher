@@ -178,6 +178,12 @@ private:
 	std::string picker_folder_, picker_key_;
 	bool picker_rom_ = true;
 	void filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
+	/* the game folders (BENCH > Console): 0 the Game Boy picker above, 1 the list of chosen folders,
+	 * 2 choosing one to add (picker_folder_ is where it is); a change searches again when it closes */
+	int picker_mode_ = 0;
+	bool folders_changed_ = false;
+	bool folders_opened_ = false; // the frame it opens: the Cross that opened it is not taken again
+	void folderPicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
 	bool early_checked_ = false, early_warn_ = false; // the one-time early-build warning: asked once, up
 	bool close_open_ = false; // "Close PSGopher?" is up
 	/* "Install vX.Y.Z?" / "Roll back to ...?" is up (1 install, 2 roll back); the roll back's answer is waited for */

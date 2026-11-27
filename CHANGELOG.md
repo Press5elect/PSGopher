@@ -2,6 +2,17 @@
 
 Every change, the newest version first. Games are named by cartridge ID only.
 
+## Unreleased
+
+- Added: **Game Folders** (BENCH > Console): choose the folders searched for cartridges, on the
+  console, its extended storage or a USB drive. With any chosen, a search covers only them,
+  `/data/psgopher/roms` and the network shares, not all of `/data` and every drive; with none, the
+  search is as before. A `.7z` in a chosen folder is listed whatever the folder's name. Kept in
+  `/data/psgopher/config/folders.cfg`. Host-tested (the search and the chooser's pictures); not run
+  on a console.
+- Changed: Gopher64's pin moved to `70452ee882b8` (crate updates, among them sevenz-rust2 0.27;
+  parallel-rdp at `c2d02a6c1407`); both patches apply unchanged.
+
 ## v0.0.1 (2026-11-27)
 
 The first release: a very early build. The title, the sandbox exit, network shares, USB drives,

@@ -22,7 +22,9 @@ slot, its facts beside it as Gopher64 reads them (game ID, lockout chip, save me
 play time and your probes (save states). It finds every N64 ROM (`.z64`, `.n64`, `.v64`, and a
 `.zip` or `.7z` of one) you dumped from your own cartridges, on the console's storage (anywhere in
 `/data`, a few folders deep; `/data/psgopher/roms` is a good place), on USB drives and extended
-storage, and on network shares.
+storage, and on network shares. To search only some folders (a large USB drive is slow to search
+whole), choose them in BENCH > Console > Game Folders: then only they, `/data/psgopher/roms` and the
+network shares are searched.
 
 - **HOME**: the board and the cartridge strip (recently played first). ◄ ► cartridge, ✕ power on,
   □ power on from a probe, △ the game's page (its cheats and its own settings, below). ○ asks to close PSGopher (✕ closes, ○ stays). Each cartridge shows its box art (libretro's thumbnails) and

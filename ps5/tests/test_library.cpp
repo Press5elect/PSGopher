@@ -503,6 +503,30 @@ int main(int argc, char **argv)
 		CHECK(g_facts_calls == 3); /* no header read again */
 	}
 
+	/* game folders chosen in BENCH: only they (with the roms folder and the shares) are searched,
+	 * and a .7z in one is listed whatever its folder's name; with none, the whole search again */
+	{
+		CHECK(psgopher::gameFolders().empty());
+		CHECK(psgopher::setGameFolders({ data + "/games/", data + "/games" }));
+		const auto chosen = psgopher::gameFolders();
+		CHECK(chosen.size() == 1 && chosen[0] == data + "/games");
+		lib.rescan();
+		for (int i = 0; i < 500 && lib.scanning(); i++)
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		const auto picked = lib.games();
+		CHECK(find(picked, "gamma"));             /* in the chosen folder */
+		CHECK(find(picked, "random"));            /* a .7z there, not in an N64 folder */
+		CHECK(find(picked, "Alpha (U)"));         /* the title's roms folder */
+		CHECK(find(picked, "Delta"));             /* the shares */
+		CHECK(!find(picked, "eboot"));
+		CHECK(psgopher::setGameFolders({}));
+		CHECK(psgopher::gameFolders().empty());
+		lib.rescan();
+		for (int i = 0; i < 500 && lib.scanning(); i++)
+			std::this_thread::sleep_for(std::chrono::milliseconds(10));
+		CHECK(!find(lib.games(), "random") && lib.games().size() == games.size());
+	}
+
 	/* probes: Gopher64's states of the game by its header's name, newest first */
 	folders(data + "/psgopher/data/states");
 	write(data + "/psgopher/data/states/COMET KART-ABC.state1", "s");

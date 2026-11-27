@@ -95,6 +95,12 @@ public:
 
 Library &library();
 
+/* The game folders chosen in BENCH > Console (config/folders.cfg, one path a line). When there are
+ * any, a search covers only them, the title's roms folder and the network shares; with none it
+ * covers /data, every USB drive and extended storage. A .7z in a chosen folder is always listed. */
+std::vector<std::string> gameFolders();
+bool setGameFolders(const std::vector<std::string> &folders);
+
 /* The tests' hook: the console's /data is `root` (the title's data at <root>/psgopher). */
 void libraryUseRoot(const std::string &root);
 

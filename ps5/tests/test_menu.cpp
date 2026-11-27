@@ -543,7 +543,7 @@ int main(int argc, char **argv)
 		g_script = {
 			{ none, nullptr, 6 },
 			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
-			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, /* Check for Updates */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, /* Check for Updates (after Game Folders) */
 			{ none, "17-update-idle", 3 },
 			{ none, nullptr, 1, releaseOffered },
 			{ PAD_CROSS, "18-update-available", 3 },
@@ -564,7 +564,7 @@ int main(int argc, char **argv)
 			{ none, nullptr, 6 },
 			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6, upToDateWithPrevious }, /* BENCH, Console */
 			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 },
-			{ PAD_DOWN, nullptr, 2 },                                  /* Roll Back */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 },        /* Roll Back */
 			{ none, "23-update-rollback", 3 },
 			{ PAD_CROSS, "24-update-rollback-ask", 3 },
 			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 6 },           /* it is checked (the updater's thread) */
@@ -572,6 +572,28 @@ int main(int argc, char **argv)
 		};
 		const psgopher::MenuResult r5 = psgopher::runMenu("");
 		CHECK(!r5.play && g_rollbacks == 1 && g_installs == 1 && g_checks == 1);
+	}
+	/* BENCH, Console, Game Folders: the list (none), the chooser at the top, a folder used, the list
+	 * with it; Circle closes it and searches again. Then the folder is removed (Cross on it). */
+	{
+		using namespace updater_stub;
+		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
+		g_script = {
+			{ none, nullptr, 6 },
+			{ PAD_R1, nullptr, 2 }, { PAD_R1, nullptr, 2 }, { L2, nullptr, 2 }, { L2, nullptr, 2 }, { none, nullptr, 6 }, /* BENCH, Console */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { none, "40-bench-game-folders", 3 },
+			{ PAD_CROSS, nullptr, 2 }, { none, "41-game-folders-none", 3 },
+			{ PAD_CROSS, nullptr, 2 }, { none, "42-game-folders-choose", 3 },                   /* Add a folder */
+			{ PAD_CROSS, nullptr, 2 }, { none, nullptr, 3 },                                    /* /data */
+			{ PAD_DOWN, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, { none, "43-game-folders-one", 3 }, /* Use this folder */
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 30 },                                  /* closed: searched again */
+			{ PAD_CROSS, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, { PAD_CROSS, nullptr, 2 },      /* removed */
+			{ PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 30 },
+			{ PAD_R1, nullptr, 2 }, { none, nullptr, 8 },
+			{ PAD_CROSS, nullptr, 2 } };                                                         /* power on */
+		const psgopher::MenuResult rf = psgopher::runMenu("");
+		CHECK(rf.play);
+		CHECK(psgopher::gameFolders().empty());
 	}
 	/* A game's page (Triangle on HOME): its rows start at Use Global Setting; Resolution and Final Filter set for
 	 * the game go to its file by its key; BENCH marks them; the game starts with them over the global settings and
