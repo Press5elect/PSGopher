@@ -153,6 +153,8 @@ mkdir -p "$app/licenses"
 cp "$root/.deps/src/bricolage/OFL.txt" "$app/licenses/OFL-BricolageGrotesque.txt"
 cp "$root/.deps/src/jetbrains-mono/OFL.txt" "$app/licenses/OFL-JetBrainsMono.txt"
 cp "$root/ps5/licenses/ISC-ares.txt" "$app/licenses/ISC-ares.txt"
+cp "$root/ps5/licenses/MIT-AMD-FidelityFX-CAS.txt" "$app/licenses/MIT-AMD-FidelityFX-CAS.txt"
+cp "$root/ps5/licenses/BSD-3-NVIDIA-FXAA.txt" "$app/licenses/BSD-3-NVIDIA-FXAA.txt"
 (cd "$vulkan/runtime" && sha256sum --check --strict --quiet libc.prx.sha256)
 cp "$vulkan/runtime/libc.prx" "$app/sce_module/libc.prx"
 mv "$work/eboot.elf.new" "$work/eboot.elf"

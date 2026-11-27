@@ -42,6 +42,10 @@
   "choices": "written",
   "default_field": "overclock"
  },
+ "overclock_speed": {
+  "label": "written",
+  "choices": "written"
+ },
  "expansion_pak": {
   "label": "written",
   "choices": "written"
@@ -157,6 +161,14 @@
   "choices": "written"
  },
  "final_filter": {
+  "label": "written",
+  "choices": "written"
+ },
+ "post_aa": {
+  "label": "written",
+  "choices": "written"
+ },
+ "sharpening": {
   "label": "written",
   "choices": "written"
  },

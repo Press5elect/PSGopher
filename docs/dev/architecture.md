@@ -152,7 +152,12 @@ Bilinear is `ps5/shaders/psgopher_sharp.frag`, drawn with a linear sampler; Bili
 plain blit with the matching sampler; the CRT shader keeps Nearest), the video interface's `vi.*`
 options in `ScanoutOptions`, `RDP::Quirks` for the texture rectangles, `crop_overscan_pixels` (added to
 the widescreen letterbox's `crop_rect` when that is on), `downscale_steps` and Bob or Blend
-deinterlacing. Downsampling's steps are independent of the upscale, and SSAA downscaling still means
+deinterlacing. Bicubic and Lanczos are `ps5/shaders/psgopher_resample.frag` (compiled twice, the second
+with `LANCZOS`), drawn in the blit's place. Post Anti-Aliasing (`psgopher_fxaa.frag`) and Sharpening
+(`psgopher_cas.frag`), when either is on (`PSGOPHER_POST_AA`, `PSGOPHER_SHARPENING`), draw the picture
+with its filter into a layer of the screen's size first (`psg_post.a`), FXAA into a second (`psg_post.b`)
+when CAS follows, and the last pass into the frame's target (the swapchain, or HDR10's SDR picture layer
+before the PQ pass), before the messages; with both off the frame is drawn as before. Downsampling's steps are independent of the upscale, and SSAA downscaling still means
 all of them (`psgopher_downscale_steps`: SSAA wins, else the row's steps, never past log2 of the upscale).
 
 A game's own settings (`game_settings.cpp`) are BENCH's rows, one number each, in

@@ -55,7 +55,12 @@ BlackBearReloaded's ps5-native-app-boilerplate (GPL-3.0-or-later; ps5/elevation/
 linked for the network shares. Dear ImGui (Omar Cornut, MIT), the front end's and the quick menu's
 drawing. The front end's faces, under the SIL Open Font License 1.1 (their licences in the title
 folder's licenses/): Bricolage Grotesque (Mathieu Triay) and JetBrains Mono (JetBrains).
-stb_truetype and stb_image (Sean Barrett, public domain or MIT). The PS5 layer in ps5/host/platform* (Mihawk's PS5 Vulkan Template, MIT); RADV
+stb_truetype and stb_image (Sean Barrett, public domain or MIT). The picture's Sharpening
+(ps5/shaders/psgopher_cas.frag) is AMD FidelityFX Contrast Adaptive Sharpening (Copyright (c) 2017-2019
+Advanced Micro Devices, Inc., MIT) and its Post Anti-Aliasing (ps5/shaders/psgopher_fxaa.frag) NVIDIA FXAA
+3.11 by Timothy Lottes (Copyright (c) 2014-2015, NVIDIA CORPORATION, BSD 3-clause), ported to GLSL; their
+notices are in those files and in the title folder's licenses/MIT-AMD-FidelityFX-CAS.txt and
+licenses/BSD-3-NVIDIA-FXAA.txt. The PS5 layer in ps5/host/platform* (Mihawk's PS5 Vulkan Template, MIT); RADV
 (Mesa, MIT) through Mihawk's PS5_Mesa and PS5_Vulkan, with Crux2's driver patches; the payload
 SDK and platform layer (Mihawk's PS5_PayloadSDK).
 Porpoise (Dolphin for PS5, GPL-3.0-or-later): the elevation client's connection retry, by way of

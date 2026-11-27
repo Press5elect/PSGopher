@@ -110,6 +110,28 @@ else
     echo "test_menu: skipped (needs .deps/src/imgui, vendor/gopher64 and a build's build/ps5/gen/menu_font.h)"
 fi
 
+# the picture's shaders (ps5/shaders): compiled and validated (glslangValidator, spirv-val) as
+# make-shaders.sh does, the headers the title carries checked to be theirs; then the final filters
+# (Sharp Bilinear, Bicubic, Lanczos), Post Anti-Aliasing (FXAA) and Sharpening (CAS) drawn through the PC's
+# Vulkan (lavapipe) on small pictures and compared with CPU references (test_picture_filters.cpp)
+if [[ -f $rdp/volk/volk.c ]] && command -v glslangValidator >/dev/null && command -v spirv-val >/dev/null; then
+    rm -rf "$out/shaders" && mkdir -p "$out/shaders"
+    PSGOPHER_SHADER_OUT="$out/shaders" bash "$root/ps5/tools/make-shaders.sh" >/dev/null
+    for header in "$out"/shaders/*.hpp; do
+        cmp -s "$header" "$root/vendor/gopher64/parallel-rdp/${header##*/}" ||
+            { echo "${header##*/}: not made from ps5/shaders (run ps5/tools/make-shaders.sh)" >&2; exit 1; }
+    done
+    [[ -f $out/volk.o ]] || ${CC:-gcc} -O1 -g -fsanitize=address,undefined -I"$rdp/vulkan-headers/include" -c "$rdp/volk/volk.c" -o "$out/volk.o"
+    ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -fsanitize=address,undefined \
+        -I"$rdp/volk" -I"$rdp/vulkan-headers/include" -I"$root/vendor/gopher64/parallel-rdp" \
+        "$root/ps5/tests/test_picture_filters.cpp" "$out/volk.o" -o "$out/test_picture_filters" -ldl
+    [[ -f $lavapipe ]] && export VK_ICD_FILENAMES=$lavapipe
+    mkdir -p "$out/picture-filters"
+    "$out/test_picture_filters" "$out/picture-filters"
+else
+    echo "test_picture_filters: skipped (needs vendor/gopher64, glslang-tools and spirv-tools)"
+fi
+
 # the FreeBSD 12 converters for Rust (ps5/host/rust_abi.c) against Rust's libc's own offsets, which
 # a no_std library built for x86_64-unknown-freebsd reports (rustup target add x86_64-unknown-freebsd)
 if rustup +nightly target list --installed 2>/dev/null | grep -qx x86_64-unknown-freebsd; then

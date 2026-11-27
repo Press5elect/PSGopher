@@ -6,12 +6,14 @@
 #   psgopher_hdr.frag                          -> psgopher_hdr_spirv.hpp      (HDR10 packing, D14)
 #   psgopher_overlay.vert, psgopher_overlay.frag -> psgopher_overlay_spirv.hpp (the quick menu)
 #   psgopher_sharp.frag                        -> psgopher_sharp_spirv.hpp    (Final Filter: Sharp Bilinear)
+#   psgopher_resample.frag (twice, -DLANCZOS)  -> psgopher_resample_spirv.hpp (Final Filter: Bicubic, Lanczos)
+#   psgopher_fxaa.frag, psgopher_cas.frag      -> psgopher_post_spirv.hpp     (Post Anti-Aliasing: FXAA; Sharpening: CAS)
 #
 # SPDX-License-Identifier: GPL-3.0-or-later
 # Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see NOTICE.
 set -euo pipefail
 root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/../.." && pwd)
-dir="$root/vendor/gopher64/parallel-rdp"
+dir=${PSGOPHER_SHADER_OUT:-$root/vendor/gopher64/parallel-rdp} # (the host tests make them elsewhere, to compare)
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' EXIT
 tool=$(glslangValidator --version | head -1)
 header() { # out, then name=spv pairs
@@ -34,7 +36,12 @@ open(out, 'w').write('\n'.join(lines))
 print('==> %s' % out)
 PY
 }
-compile() { glslangValidator --quiet -V --target-env vulkan1.1 -o "$tmp/$2.spv" "$root/ps5/shaders/$1"; }
+compile() { # source, name, then glslangValidator's own options (-D...); each is validated as the host tests do
+    local source=$1 name=$2
+    shift 2
+    glslangValidator --quiet -V --target-env vulkan1.1 "$@" -o "$tmp/$name.spv" "$root/ps5/shaders/$source"
+    spirv-val --target-env vulkan1.1 "$tmp/$name.spv"
+}
 compile psgopher_hdr.frag hdr
 header "$dir/psgopher_hdr_spirv.hpp" psgopher_hdr_fragment_spirv="$tmp/hdr.spv"
 compile psgopher_overlay.vert overlay_vert
@@ -43,3 +50,10 @@ header "$dir/psgopher_overlay_spirv.hpp" psgopher_overlay_vertex_spirv="$tmp/ove
     psgopher_overlay_fragment_spirv="$tmp/overlay_frag.spv"
 compile psgopher_sharp.frag sharp
 header "$dir/psgopher_sharp_spirv.hpp" psgopher_sharp_fragment_spirv="$tmp/sharp.spv"
+compile psgopher_resample.frag bicubic
+compile psgopher_resample.frag lanczos -DLANCZOS=1
+header "$dir/psgopher_resample_spirv.hpp" psgopher_bicubic_fragment_spirv="$tmp/bicubic.spv" \
+    psgopher_lanczos_fragment_spirv="$tmp/lanczos.spv"
+compile psgopher_fxaa.frag fxaa
+compile psgopher_cas.frag cas
+header "$dir/psgopher_post_spirv.hpp" psgopher_fxaa_fragment_spirv="$tmp/fxaa.spv" psgopher_cas_fragment_spirv="$tmp/cas.spv"

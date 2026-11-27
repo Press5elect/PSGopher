@@ -19,6 +19,8 @@ extern "C" void say(const char *format, ...) __attribute__((format(printf, 1, 2)
 namespace psgopher {
 
 const char kTitleSettingsFile[] = "/data/psgopher/config/psgopher.ini";
+/* final_filter's words in the file and PSGOPHER_FINAL_FILTER (interface.cpp reads them), by TitleSettings::finalFilter */
+static const char *const kFinalFilterWords[5] = { "sharp", "bilinear", "nearest", "bicubic", "lanczos" };
 
 const HotkeyAction kHotkeyActions[15] = {
 	{ "save", "Save State" },         { "load", "Load State" },         { "exit", "Leave Game" },
@@ -84,7 +86,11 @@ void TitleSettings::load()
 			rdpThreaded = false; /* taken out: on the console it made the RDP's commands about 20 times costlier
 			                        on the emulation thread (40-52% against 100% single-threaded, 2026-11-27) */
 		else if (!strcmp(key, "final_filter"))
-			finalFilter = !strcmp(value, "bilinear") ? 1 : !strcmp(value, "nearest") ? 2 : 0;
+			finalFilter = !strcmp(value, "bilinear") ? 1 : !strcmp(value, "nearest") ? 2 : !strcmp(value, "bicubic") ? 3 : !strcmp(value, "lanczos") ? 4 : 0;
+		else if (!strcmp(key, "post_aa"))
+			postAa = !strcmp(value, "fxaa") ? 1 : 0;
+		else if (!strcmp(key, "sharpening"))
+			sharpening = !strcmp(value, "low") ? 1 : !strcmp(value, "medium") ? 2 : !strcmp(value, "high") ? 3 : 0;
 		else if (!strcmp(key, "vi_bilinear"))
 			viBilinear = !strcmp(value, "on") ? 1 : !strcmp(value, "off") ? 2 : 0;
 		else if (!strcmp(key, "vi_aa"))
@@ -103,6 +109,8 @@ void TitleSettings::load()
 			cropOverscan = atoi(value) >= 16 ? 16 : atoi(value) >= 8 ? 8 : 0;
 		else if (!strcmp(key, "downsample"))
 			downsample = std::clamp(atoi(value), 0, 3);
+		else if (!strcmp(key, "overclock_speed"))
+			overclockSpeed = std::clamp(atoi(value), 0, 4);
 		else if (!strcmp(key, "deinterlace"))
 			deinterlace = !strcmp(value, "bob") ? 0 : 1;
 		else if (!strcmp(key, "hotkeys"))
@@ -191,7 +199,8 @@ bool TitleSettings::save() const
 		"keep_gpu_memory = %s\n"
 		"\n"
 		"# The picture (BENCH, Video). final_filter: how the picture is scaled to the screen: sharp (crisp texels, a\n"
-		"# one-pixel blend at their edges), bilinear or nearest; the CRT shader, when on, takes the filter's place\n"
+		"# one-pixel blend at their edges), bilinear, nearest, bicubic (Catmull-Rom) or lanczos (3 lobes); the CRT\n"
+		"# shader, when on, takes the filter's place\n"
 		"final_filter = %s\n"
 		"# vi_bilinear: the N64's video interface's own smoothing when it scales: auto (off from 4x up), on, off\n"
 		"vi_bilinear = %s\n"
@@ -234,7 +243,7 @@ bool TitleSettings::save() const
 		"early_warning_seen = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", expansionPak == 1 ? "on" : expansionPak == 2 ? "off" : "auto", audioBuffer,
 		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, keepGpuMemory ? "on" : "off",
-		finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto",
+		kFinalFilterWords[std::clamp(finalFilter, 0, 4)], viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto",
 		viAa ? "on" : "off", ditherFilter ? "on" : "off", divotFilter ? "on" : "off", gammaDither ? "on" : "off", nativeTexRect ? "on" : "off",
 		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", pictureDefaults, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off", earlyWarningSeen ? "on" : "off");
 	{
@@ -243,6 +252,24 @@ bool TitleSettings::save() const
 			lines += std::string("hotkey_") + kHotkeyActions[i].key + " = " + std::to_string(hotkey[i]) + "\n";
 		const size_t used = strlen(text);
 		snprintf(text + used, sizeof(text) - used, "%s", lines.c_str());
+	}
+	{
+		const size_t used = strlen(text);
+		snprintf(text + used, sizeof(text) - used,
+		         "\n# overclock_speed: the N64 CPU's clock when Overclock N64 CPU (Gopher64's switch, in its config.json) is on:\n"
+		         "# 0 125 MHz (Gopher64's), 1 150 MHz, 2 187.5 MHz (twice the N64's), 3 250 MHz, 4 281.25 MHz (three times)\n"
+		         "overclock_speed = %d\n",
+		         overclockSpeed);
+	}
+	{
+		static const char *const kSharpeningWords[] = { "off", "low", "medium", "high" };
+		const size_t used = strlen(text);
+		snprintf(text + used, sizeof(text) - used,
+		         "\n# post_aa: anti-aliasing at the screen's resolution, after the final filter: off or fxaa (NVIDIA FXAA 3.11)\n"
+		         "post_aa = %s\n"
+		         "# sharpening: AMD FidelityFX CAS at the screen's resolution, after post_aa: off, low, medium or high\n"
+		         "sharpening = %s\n",
+		         postAa == 1 ? "fxaa" : "off", kSharpeningWords[std::clamp(sharpening, 0, 3)]);
 	}
 	/* one write of a small file, beside it first */
 	const std::string path = file.empty() ? kTitleSettingsFile : file;
@@ -280,7 +307,9 @@ const Field kFields[] = {
 	{ "keep_gpu_memory", [](const TitleSettings &t) -> int64_t { return t.keepGpuMemory; }, [](TitleSettings &t, int64_t v) { t.keepGpuMemory = v != 0; } },
 	{ "audio_buffer", [](const TitleSettings &t) -> int64_t { return t.audioBuffer; },
 	  [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)std::clamp<int64_t>(v, 2, 8) / 2 * 2; } },
-	{ "final_filter", [](const TitleSettings &t) -> int64_t { return t.finalFilter; }, [](TitleSettings &t, int64_t v) { t.finalFilter = (int)std::clamp<int64_t>(v, 0, 2); } },
+	{ "final_filter", [](const TitleSettings &t) -> int64_t { return t.finalFilter; }, [](TitleSettings &t, int64_t v) { t.finalFilter = (int)std::clamp<int64_t>(v, 0, 4); } },
+	{ "post_aa", [](const TitleSettings &t) -> int64_t { return t.postAa; }, [](TitleSettings &t, int64_t v) { t.postAa = v == 1 ? 1 : 0; } },
+	{ "sharpening", [](const TitleSettings &t) -> int64_t { return t.sharpening; }, [](TitleSettings &t, int64_t v) { t.sharpening = (int)std::clamp<int64_t>(v, 0, 3); } },
 	{ "vi_bilinear", [](const TitleSettings &t) -> int64_t { return t.viBilinear; }, [](TitleSettings &t, int64_t v) { t.viBilinear = (int)std::clamp<int64_t>(v, 0, 2); } },
 	{ "vi_aa", [](const TitleSettings &t) -> int64_t { return t.viAa; }, [](TitleSettings &t, int64_t v) { t.viAa = v != 0; } },
 	{ "dither_filter", [](const TitleSettings &t) -> int64_t { return t.ditherFilter; }, [](TitleSettings &t, int64_t v) { t.ditherFilter = v != 0; } },
@@ -290,6 +319,8 @@ const Field kFields[] = {
 	{ "crop_overscan", [](const TitleSettings &t) -> int64_t { return t.cropOverscan; },
 	  [](TitleSettings &t, int64_t v) { t.cropOverscan = v >= 16 ? 16 : v >= 8 ? 8 : 0; } },
 	{ "downsample", [](const TitleSettings &t) -> int64_t { return t.downsample; }, [](TitleSettings &t, int64_t v) { t.downsample = (int)std::clamp<int64_t>(v, 0, 3); } },
+	{ "overclock_speed", [](const TitleSettings &t) -> int64_t { return t.overclockSpeed; },
+	  [](TitleSettings &t, int64_t v) { t.overclockSpeed = (int)std::clamp<int64_t>(v, 0, 4); } },
 	{ "deinterlace", [](const TitleSettings &t) -> int64_t { return t.deinterlace; }, [](TitleSettings &t, int64_t v) { t.deinterlace = v == 1 ? 1 : 0; } },
 };
 const Field *fieldOf(const std::string &key)
@@ -360,7 +391,12 @@ void TitleSettings::applyHdr() const
 	/* read when the game's device starts (vulkan/memory_allocator.cpp logs what it does) */
 	setenv("PSGOPHER_KEEP_GPU_MEMORY", keepGpuMemory ? "1" : "0", 1);
 	/* the picture: read when the game's renderer starts (rdp_init logs them) */
-	setenv("PSGOPHER_FINAL_FILTER", finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", 1);
+	setenv("PSGOPHER_FINAL_FILTER", kFinalFilterWords[std::clamp(finalFilter, 0, 4)], 1);
+	setenv("PSGOPHER_POST_AA", postAa == 1 ? "fxaa" : "off", 1);
+	{
+		static const char *const kSharpeningWords[] = { "off", "low", "medium", "high" };
+		setenv("PSGOPHER_SHARPENING", kSharpeningWords[std::clamp(sharpening, 0, 3)], 1);
+	}
 	setenv("PSGOPHER_VI_BILINEAR", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto", 1);
 	setenv("PSGOPHER_VI_AA", viAa ? "1" : "0", 1);
 	setenv("PSGOPHER_DITHER_FILTER", ditherFilter ? "1" : "0", 1);
@@ -369,6 +405,9 @@ void TitleSettings::applyHdr() const
 	setenv("PSGOPHER_NATIVE_TEXRECT", nativeTexRect ? "1" : "0", 1);
 	setenv("PSGOPHER_CROP_OVERSCAN", std::to_string(cropOverscan).c_str(), 1);
 	setenv("PSGOPHER_DOWNSAMPLE", std::to_string(downsample).c_str(), 1);
+	/* the CPU's clock with Overclock on: read when the game's CPU starts (cpu.rs) */
+	static const char *const kOverclockHz[] = { "125000000", "150000000", "187500000", "250000000", "281250000" };
+	setenv("PSGOPHER_OVERCLOCK_HZ", kOverclockHz[std::clamp(overclockSpeed, 0, 4)], 1);
 	setenv("PSGOPHER_DEINTERLACE", deinterlace == 1 ? "blend" : "bob", 1);
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");

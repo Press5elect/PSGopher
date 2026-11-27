@@ -349,7 +349,8 @@ static int play(const std::string &chosen_rom, int load_state = -1)
    }
    const std::string slot = std::to_string(load_state);
    /* a 64DD disk is given with --disk: Gopher64 boots it with the IPL it finds in data/64dd */
-   const bool disk = psgopher::isDiskName(rom);
+   struct stat rom_stat;
+   const bool disk = psgopher::isDiskFile(rom, stat(rom.c_str(), &rom_stat) == 0 ? (uint64_t)rom_stat.st_size : 0);
    std::vector<const char *> args = {"psgopher", "--fullscreen"};
    if (load_state >= 0)
       args.insert(args.end(), {"--load-state", slot.c_str()});
@@ -362,7 +363,7 @@ static int play(const std::string &chosen_rom, int load_state = -1)
    /* what costs speed, beside the video line (Gopher64's config.json) */
    say("settings: upscale %lldx%s, overclock %s, rewind %s, expansion pak %s",
        (long long)psgopher_setting_get("video.upscale"), psgopher_setting_get("video.ssaa") == 1 ? " supersampled" : "",
-       psgopher_setting_get("emulation.overclock") == 1 ? "on" : "off", psgopher_setting_get("emulation.rewind") == 1 ? "on" : "off",
+       psgopher_setting_get("emulation.overclock") == 1 ? (std::string("on at ") + (getenv("PSGOPHER_OVERCLOCK_HZ") ? getenv("PSGOPHER_OVERCLOCK_HZ") : "125000000") + " Hz").c_str() : "off", psgopher_setting_get("emulation.rewind") == 1 ? "on" : "off",
        psgopher_setting_get("emulation.disable_expansion_pak") == 1 ? "off" : "on");
    psgopher_video_reset();
    psgopher_stall_start(); /* the freeze watchdog: logging only, with Slow moments */

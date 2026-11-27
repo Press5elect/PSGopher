@@ -1806,8 +1806,12 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		                        { { "Off", 0 }, { "On", 1 } }, 0));
 		s.rows.push_back(field_row("downsample", "Downsampling", "Selects how far the upscaled picture is scaled down before it is shown: to 1/2, 1/4 or 1/8 of the Resolution, never below the original size. Smooths edges and reduces sharpness. SSAA downscaling, when enabled, always scales down all the way.",
 		                           { { "Off", 0 }, { "1/2", 1 }, { "1/4", 2 }, { "1/8", 3 } }, 0));
-		s.rows.push_back(field_row("final_filter", "Final Filter", "Selects how the picture is scaled to the screen. Sharp Bilinear keeps each pixel crisp and blends only at the edges between pixels, Bilinear smooths the whole picture, and Nearest repeats pixels without blending. The CRT shader replaces this filter.",
-		                           { { "Sharp Bilinear", 0 }, { "Bilinear", 1 }, { "Nearest", 2 } }, 0));
+		s.rows.push_back(field_row("final_filter", "Final Filter", "Selects how the picture is scaled to the screen. Sharp Bilinear keeps pixels crisp, blending only at their edges, Bilinear smooths, Nearest repeats pixels, and Bicubic and Lanczos keep fine detail sharp, Lanczos the most. The CRT shader replaces this filter.",
+		                           { { "Sharp Bilinear", 0 }, { "Bilinear", 1 }, { "Nearest", 2 }, { "Bicubic", 3 }, { "Lanczos", 4 } }, 0));
+		s.rows.push_back(field_row("post_aa", "Post Anti-Aliasing", "Selects an edge smoothing filter applied to the picture at the screen's resolution, after it is scaled. FXAA smooths jagged edges and softens fine detail slightly. The CRT shader turns it off.",
+		                           { { "Off", 0 }, { "FXAA", 1 } }, 0));
+		s.rows.push_back(field_row("sharpening", "Sharpening", "Sets how strongly the picture is sharpened at the screen's resolution, after it is scaled and smoothed. Contrast adaptive sharpening brings out detail most where contrast is low and holds back at hard edges, which keeps halos small. The CRT shader turns it off.",
+		                           { { "Off", 0 }, { "Low", 1 }, { "Medium", 2 }, { "High", 3 } }, 0));
 		s.rows.push_back(field_row("vi_bilinear", "VI Bilinear", "Selects whether the video interface smooths the picture as it scales it, as the N64 does. Auto turns the smoothing off at 4x and 8x, where the larger picture is smooth already, and leaves it on at 1x and 2x.",
 		                           { { "Auto", 0 }, { "On", 1 }, { "Off", 2 } }, 0));
 		s.rows.push_back(field_row("vi_aa", "VI Anti-Aliasing", "When enabled, applies the video interface's edge smoothing, as the N64 does. When disabled, edges stay as drawn, which is sharper but more jagged.",
@@ -1886,8 +1890,11 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 	/* Emulation */
 	{
 		Section s{ "Emulation", "xtal", "Controls the emulated N64: its clock, its memory and what the cartridge slot holds.", {} };
-		s.rows.push_back(choose("emulation.overclock", "Overclock N64 CPU (may cause bugs)", "When enabled, runs the emulated CPU at 125 MHz instead of 93.75 MHz. Can reduce slowdowns in heavy games, but may cause issues in some games.",
+		s.rows.push_back(choose("emulation.overclock", "Overclock N64 CPU (may cause bugs)", "When enabled, runs the emulated CPU faster than the N64's 93.75 MHz, at the Overclock Speed below. Can reduce slowdowns in heavy games, but may cause issues in some games.",
 		                        { { "Off", 0 }, { "On", 1 } }, 0));
+		s.rows.push_back(field_row("overclock_speed", "Overclock Speed",
+		                           "Selects the emulated CPU's clock when Overclock N64 CPU is on. A faster clock gives a game more time for each frame, which removes more of its slowdowns, but costs more processing on the console: the fastest may not hold full speed in demanding games. 187.5 MHz is twice the N64's clock.",
+		                           { { "125 MHz", 0 }, { "150 MHz", 1 }, { "187.5 MHz", 2 }, { "250 MHz", 3 }, { "281.25 MHz", 4 } }, 0));
 		s.rows.push_back(field_row("expansion_pak", "Expansion Pak", "Selects whether the N64 has the 8 MB it has with the Expansion Pak or its standard 4 MB. Auto turns it on, except for a game that misbehaves with it. Some games need the Expansion Pak, and a few misbehave with it.",
 		                           { { "Auto", PakAuto }, { "On", PakOn }, { "Off", PakOff } }, PakAuto));
 		{

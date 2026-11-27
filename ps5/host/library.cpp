@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <ctime>
+#include <deque>
 #include <map>
 #include <mutex>
 #include <thread>
@@ -206,7 +207,8 @@ void readFacts(Game &g)
 	const std::string l = lower(g.path);
 	/* a disk on the console's storage or a USB drive: its probes are found by the name Gopher64
 	 * gives it (a share's is not read: Gopher64's reader takes the console's files only) */
-	if (isDiskName(l) && psgopher_disk_facts && !ps5vfs_is_virtual(g.path.c_str())) {
+	if ((isDiskName(l) || (rawRom(l) && isDiskSize(g.size) && isDiskFile(g.path, g.size))) && psgopher_disk_facts &&
+		!ps5vfs_is_virtual(g.path.c_str())) {
 		char name[64] = {}, id[5] = {};
 		int region = -1;
 		if (psgopher_disk_facts(g.path.c_str(), name, sizeof(name), id, &region)) {
@@ -234,7 +236,13 @@ bool skipFolder(const std::string &full, const std::string &name)
 		if (name == n)
 			return true;
 	const std::string own = g_root + "/psgopher/";
-	return full == own + "cache" || full == own + "data" || full == own + "config";
+	if (full == own + "cache" || full == own + "data" || full == own + "config")
+		return true;
+	/* other titles' folders in /data/homebrew (their data: an Xbox emulator's patch files were taken for
+	 * romhacks, boot log 2026-11-27); PSGopher's own is searched */
+	const std::string homebrew = g_root + "/homebrew/";
+	return full.size() > homebrew.size() && full.compare(0, homebrew.size(), homebrew) == 0 &&
+		full.find('/', homebrew.size()) == std::string::npos && name != "PPSA99280";
 }
 
 std::string stem(const std::string &name)
@@ -361,11 +369,14 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<Game> &pat
 		std::string path;
 		int depth;
 	};
-	std::vector<Folder> todo{ { place.path, 0 } };
+	/* folders named for the N64 first, then the rest by depth (shallow before deep): a large drive
+	 * spends its budget where games are likely (a USB drive of 60000 entries ran out before them,
+	 * boot log 2026-11-27) */
+	std::deque<Folder> todo{ { place.path, 0 } };
 	std::vector<Entry> entries;
 	while (!todo.empty() && budget > 0) {
-		const Folder folder = todo.back();
-		todo.pop_back();
+		const Folder folder = todo.front();
+		todo.pop_front();
 		if (std::find(seen.begin(), seen.end(), folder.path) != seen.end())
 			continue;
 		seen.push_back(folder.path);
@@ -390,8 +401,16 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<Game> &pat
 			budget--;
 			const std::string full = folder.path + "/" + e.name;
 			if (e.folder) {
-				if (folder.depth < kDepth && !skipFolder(full, e.name))
-					todo.push_back({ full, folder.depth + 1 });
+				if (folder.depth < kDepth && !skipFolder(full, e.name)) {
+					const std::string n = lower(e.name);
+					const bool likely = n.find("n64") != std::string::npos || n.find("nintendo 64") != std::string::npos ||
+						n.find("nintendo_64") != std::string::npos || n.find("nintendo64") != std::string::npos ||
+						n.find("64dd") != std::string::npos;
+					if (likely)
+						todo.push_front({ full, folder.depth + 1 });
+					else
+						todo.push_back({ full, folder.depth + 1 });
+				}
 				continue;
 			}
 			const std::string l = lower(e.name);
@@ -429,8 +448,9 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<Game> &pat
 		}
 	}
 	if (budget == 0)
-		say("library: %s: searched as far as its budget goes (%u entries)", place.path.c_str(),
-			share ? kShareBudget : kLocalBudget);
+		say("library: %s: searched as far as its budget goes (%u entries; %zu folder(s) left unsearched: BENCH > Console > "
+			"Game Folders searches only the folders chosen)",
+			place.path.c_str(), share ? kShareBudget : kLocalBudget, todo.size());
 	return listed;
 }
 
@@ -556,6 +576,15 @@ void resolvePatches(std::vector<Game> &patches, std::vector<Game> &found, const 
 		if (g.base.empty() && rawRom(lower(g.path)))
 			roms.push_back(g);
 	std::sort(roms.begin(), roms.end(), [](const Game &a, const Game &b) { return a.path < b.path; });
+	/* why a patch is not listed: the first 20 a search, then only the count (a folder of another
+	 * system's patches filled the log) */
+	unsigned told = 0;
+	auto unlisted = [&told](const std::string &path, const std::string &why) {
+		if (++told <= 20)
+			say("romhack: %s is not listed: %s", path.c_str(), why.c_str());
+		else if (told == 21)
+			say("romhack: more patches are not listed; their reasons are left out of the log");
+	};
 	std::map<std::string, std::pair<uint32_t, uint32_t>> crcs;
 	/* what the ROMs are, for a failure to be remembered against */
 	std::map<std::string, uint64_t> rom_sizes;
@@ -599,7 +628,7 @@ void resolvePatches(std::vector<Game> &patches, std::vector<Game> &found, const 
 			const Failed &f = failed->second;
 			const auto b = rom_sizes.find(f.base);
 			if (f.base.empty() ? f.signature == signature : (b != rom_sizes.end() && b->second == f.base_size)) {
-				say("romhack: %s is not listed: %s", p.path.c_str(), f.why.c_str());
+				unlisted(p.path, f.why);
 				continue;
 			}
 		}
@@ -607,7 +636,7 @@ void resolvePatches(std::vector<Game> &patches, std::vector<Game> &found, const 
 		/* (a failure of the file itself, a CRC32 that does not fit, no base: remembered; a read that failed, a share
 		 * that did not answer, is tried again at the next search) */
 		auto leave = [&](const std::string &why, bool permanent = true) {
-			say("romhack: %s is not listed: %s", p.path.c_str(), why.c_str());
+			unlisted(p.path, why);
 			if (!permanent)
 				return;
 			const auto b = rom_sizes.find(base);
@@ -728,6 +757,29 @@ bool isRomName(const std::string &name)
 {
 	const std::string l = lower(name);
 	return rawRom(l) || endsWith(l, ".zip") || endsWith(l, ".7z") || isDiskName(l);
+}
+
+bool isDiskSize(uint64_t size)
+{
+	/* 64DD images by size: the retail dump (NDD) and MAME's physical layout, whatever they are named
+	 * (a share named them .n64, boot log 2026-11-27) */
+	return size == 0x3DEC800 || size == 0x435B0C0;
+}
+
+bool isDiskFile(const std::string &path, uint64_t size)
+{
+	if (isDiskName(path))
+		return true;
+	if (!rawRom(lower(path)) || !isDiskSize(size))
+		return false;
+	/* a cartridge ROM of that size would start with an N64 header */
+	uint8_t head[4] = {};
+	FILE *f = ps5vfs_is_virtual(path.c_str()) ? ps5vfs_fopen(path.c_str(), "rb") : fopen(path.c_str(), "rb");
+	if (!f)
+		return true;
+	const size_t got = ps5vfs_is_virtual(path.c_str()) ? ps5vfs_fread(head, 1, 4, f) : fread(head, 1, 4, f);
+	ps5vfs_is_virtual(path.c_str()) ? ps5vfs_fclose(f) : fclose(f);
+	return got != 4 || romhack::byteOrder(head) < 0;
 }
 
 bool isDiskName(const std::string &name)

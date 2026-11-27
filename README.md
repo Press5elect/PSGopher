@@ -68,7 +68,14 @@ shows the one found). Disk writes are kept beside your saves; the disk image is 
   When the game starts they are applied over the global settings, and after it the global settings are
   back. ◆ marks the rows the game has set, and BENCH marks them for the chosen game. The picture rows:
   - **Final Filter**: Sharp Bilinear (crisp pixels, blended over one output pixel at their edges; the
-    default), Bilinear or Nearest. The CRT shader, when on, takes its place.
+    default), Bilinear, Nearest, Bicubic (Catmull-Rom: sharper than Bilinear) or Lanczos (3 lobes, the
+    sharpest, without halos at hard edges). Bicubic and Lanczos also filter a picture larger than the
+    screen (8x without Downsampling) instead of skipping pixels. The CRT shader, when on, takes its place.
+  - **Post Anti-Aliasing**: Off (the default) or FXAA (NVIDIA FXAA 3.11), smoothing jagged edges at the
+    screen's resolution after the Final Filter.
+  - **Sharpening**: Off (the default), Low, Medium or High (AMD FidelityFX Contrast Adaptive
+    Sharpening), at the screen's resolution after Post Anti-Aliasing; with HDR on, before the picture
+    is made into HDR10. Neither applies with the CRT shader.
   - **Downsampling**: Off, 1/2, 1/4 or 1/8: the upscaled picture scaled down by that much, never below
     the original size. SSAA downscaling, when on, always scales down all the way.
   - **VI Bilinear** (Auto: off at 4x and 8x, on at 1x and 2x; On; Off), **VI Anti-Aliasing**,

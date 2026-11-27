@@ -99,6 +99,11 @@ title folder's `licenses/`. This file claims none of it. Among it:
 - **libsmb2 and libnfs** (Ronnie Sahlberg, LGPL-2.1-or-later, BSD).
 - **Dear ImGui** (Omar Cornut, MIT); **stb_truetype and stb_image** (Sean Barrett, public domain or
   MIT).
+- **AMD FidelityFX CAS** (Advanced Micro Devices, MIT): the Sharpening row's algorithm, ported from
+  `ffx-cas/ffx_cas.h` 1.20190610 (GPUOpen-Effects/FidelityFX-CAS) to `ps5/shaders/psgopher_cas.frag`.
+- **NVIDIA FXAA 3.11** (Timothy Lottes, NVIDIA; BSD 3-clause as `FXAA3_11.h` carries it in NVIDIA's
+  GameWorks Graphics Samples, SDK v3.00): the Post Anti-Aliasing row's algorithm, ported to
+  `ps5/shaders/psgopher_fxaa.frag`.
 - **Fonts**: Bricolage Grotesque (Mathieu Triay) and JetBrains Mono (JetBrains), SIL Open Font
   License 1.1.
 - **Porpoise** (Dolphin for PS5, GPL-3.0-or-later): the elevation helper's connection retry, by way of

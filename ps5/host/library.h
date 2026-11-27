@@ -80,6 +80,10 @@ void addPlayed(const std::string &name, double seconds);
  * in a folder named for the N64 or in /data/psgopher/roms). */
 /* A 64DD disk image (.ndd, .d64): listed like a cartridge, started with the 64DD's IPL */
 bool isDiskName(const std::string &name);
+/* A 64DD disk by its name (.ndd, .d64) or, named as a ROM (.n64), by its size (an NDD or MAME's
+ * physical layout) and the absence of an N64 header */
+bool isDiskSize(uint64_t size);
+bool isDiskFile(const std::string &path, uint64_t size);
 bool isRomName(const std::string &name);
 /* Whether a file name is a romhack patch (.ips .bps .ups); the list shows one only with a base ROM */
 bool isPatchName(const std::string &name);

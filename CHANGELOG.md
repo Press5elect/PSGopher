@@ -4,6 +4,14 @@ Every change, the newest version first. Games are named by cartridge ID only.
 
 ## Unreleased
 
+- Added: BENCH > Video (and a game's page): **Final Filter** has **Bicubic** (Catmull-Rom) and
+  **Lanczos** (3 lobes, held to the nearest texels' range so hard edges get no halos), both widening
+  their kernel when the picture is larger than the screen; new rows **Post Anti-Aliasing** (Off, FXAA:
+  NVIDIA FXAA 3.11, quality preset 29, BSD 3-clause) and **Sharpening** (Off, Low, Medium, High: AMD
+  FidelityFX CAS, MIT, sharpness 0, 0.5 and 1), each a full-screen pass at the screen's resolution,
+  FXAA before CAS, CAS before HDR10's PQ. All new choices are off by default: the picture is unchanged
+  unless they are chosen. GPU Timing logs them (`final filter`, `fxaa`, `screen`, `hdr`). The shaders'
+  math is host-tested against CPU references on lavapipe; not run on a console.
 - Added: **Game Folders** (BENCH > Console): choose the folders searched for cartridges, on the
   console, its extended storage or a USB drive. With any chosen, a search covers only them,
   `/data/psgopher/roms` and the network shares, not all of `/data` and every drive; with none, the
@@ -42,6 +50,15 @@ Every change, the newest version first. Games are named by cartridge ID only.
   64DD file is checked by its size before it is read; a chosen folder that is gone keeps no games;
   benchmark.txt and autostart.txt can name a share's ROM or a romhack; the 64DD IPL row shows the IPL
   Gopher64 will use, and the title makes its folder.
+- Added: **Overclock Speed** (BENCH > Emulation, and a game's page): the emulated CPU's clock when
+  Overclock N64 CPU is on: 125 MHz (Gopher64's, the default), 150, 187.5 (twice the N64's), 250 or
+  281.25 MHz (three times). A faster clock costs more of the console's processing; the boot log's
+  `settings:` line names the clock. Not run on a console.
+- Fixed: 64DD disk images named like ROMs (`.n64`, as some sets name them) are recognised by their
+  size and the absence of a cartridge header, and start as disks (they ended with "Could not read
+  ROM file"); other titles' folders in `/data/homebrew` are not searched (an Xbox emulator's patch
+  files were taken for romhacks); a large drive is searched N64-named folders first, then shallow
+  before deep, and the log says how much its budget left out; at most 20 "not listed" lines a search.
 - Fixed: a change to Game Folders or the shares made while a search was running was dropped: the
   search now runs again when that one ends.
 - Fixed: a chosen game folder on a USB drive that is unplugged no longer keeps its games in the

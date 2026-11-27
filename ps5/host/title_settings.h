@@ -37,7 +37,10 @@ struct TitleSettings {
 	bool rdpThreaded{ false };   // parallel-rdp's command processing on a thread of its own (PSGOPHER_RDP_THREADED;
 	                             // vendor/gopher64/parallel-rdp/interface.cpp: rdp_threaded); off: on the emulation thread
 	/* the picture (BENCH > Video; vendor/gopher64/parallel-rdp/interface.cpp reads them once a game) */
-	int finalFilter{ 0 };        // the final blit's filter (PSGOPHER_FINAL_FILTER): 0 sharp bilinear, 1 bilinear, 2 nearest
+	int finalFilter{ 0 };        // the final blit's filter (PSGOPHER_FINAL_FILTER): 0 sharp bilinear, 1 bilinear, 2 nearest,
+	                             // 3 bicubic (Catmull-Rom), 4 lanczos (3 lobes, anti-ringing)
+	int postAa{ 0 };             // post anti-aliasing at the screen's resolution (PSGOPHER_POST_AA): 0 off, 1 FXAA
+	int sharpening{ 0 };         // sharpening, FidelityFX CAS (PSGOPHER_SHARPENING): 0 off, 1 low, 2 medium, 3 high
 	int viBilinear{ 0 };         // the video interface's bilinear scaling (PSGOPHER_VI_BILINEAR): 0 auto (off from 4x up), 1 on, 2 off
 	bool viAa{ true };           // the video interface's anti-aliasing (PSGOPHER_VI_AA)
 	bool ditherFilter{ true };   // its dither filter (PSGOPHER_DITHER_FILTER)
@@ -45,6 +48,7 @@ struct TitleSettings {
 	bool gammaDither{ false };   // its gamma dither (PSGOPHER_GAMMA_DITHER)
 	bool nativeTexRect{ true }; // texture rectangles drawn at the N64's resolution (PSGOPHER_NATIVE_TEXRECT)
 	int cropOverscan{ 0 };       // pixels cropped at each edge: 0, 8 or 16 (PSGOPHER_CROP_OVERSCAN)
+	int overclockSpeed{ 0 };     // the clock with Overclock N64 CPU on: 0 125 MHz (Gopher64's), 1 150, 2 187.5, 3 250, 4 281.25 (PSGOPHER_OVERCLOCK_HZ)
 	int downsample{ 0 };         // steps the upscaled picture is scaled down by, 0..3 (PSGOPHER_DOWNSAMPLE); SSAA
 	                             // downscaling takes it all the way, whatever this says
 	int deinterlace{ 1 };        // 0 bob, 1 blend (the default)

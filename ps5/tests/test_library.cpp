@@ -603,6 +603,9 @@ int main(int argc, char **argv)
 	write(data + "/games/eboot.bin", "b");            /* .bin is never listed */
 	write(data + "/games/n64/Disk Game.ndd", std::string(0x100000, 'd')); /* a 64DD disk */
 	write(data + "/games/c64.d64", std::string(174848, 'c'));              /* a small .d64: a C64 disk */
+	write(data + "/games/n64/Disk Named As Rom.n64", std::string(0x435B0C0, '\xE8')); /* a 64DD disk named .n64 */
+	folders(data + "/homebrew/PPSA99251/gamedata");
+	write(data + "/homebrew/PPSA99251/gamedata/other.z64", romImage("OTHER TITLE", "NOTE", "z64", 0x2000)); /* another title's */
 	write(data + "/other/a/b/c/d/e/f/g/toodeep.z64", "x");
 	write(data + "/psgopher/cache/cached.z64", "x");   /* the title's own cache is skipped */
 	write(data + "/psgopher/roms/.hidden.z64", "x");
@@ -639,6 +642,9 @@ int main(int argc, char **argv)
 	CHECK(!find(games, "eboot"));
 	CHECK(find(games, "Disk Game") && !find(games, "Disk Game")->facts);
 	CHECK(!find(games, "c64"));
+	CHECK(find(games, "Disk Named As Rom") && psgopher::isDiskFile(find(games, "Disk Named As Rom")->path, 0x435B0C0));
+	CHECK(!psgopher::isDiskFile(find(games, "Alpha (U)")->path, 4096));
+	CHECK(!find(games, "other"));
 	CHECK(psgopher::isDiskName("x.NDD") && psgopher::isDiskName("x.d64") && psgopher::isRomName("x.ndd"));
 	CHECK(!find(games, "toodeep"));
 	CHECK(!find(games, "cached"));

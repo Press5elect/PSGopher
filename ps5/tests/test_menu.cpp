@@ -631,6 +631,29 @@ int main(int argc, char **argv)
 		CHECK(g_settings["video.upscale"] == global_upscale);
 		title.applyHdr();
 		CHECK(!strcmp(getenv("PSGOPHER_FINAL_FILTER"), "sharp"));
+		/* Post Anti-Aliasing and Sharpening: off by default; their values, the file's words and the variables
+		   interface.cpp reads; Bicubic and Lanczos the same way */
+		CHECK(!strcmp(getenv("PSGOPHER_POST_AA"), "off") && !strcmp(getenv("PSGOPHER_SHARPENING"), "off"));
+		{
+			psgopher::TitleSettings t;
+			t.file = work + "/picture-rows.ini";
+			CHECK(t.assign("post_aa", 1) && t.assign("sharpening", 2) && t.assign("final_filter", 4));
+			CHECK(t.save());
+			psgopher::TitleSettings back;
+			back.file = t.file;
+			back.load();
+			CHECK(back.postAa == 1 && back.sharpening == 2 && back.finalFilter == 4);
+			back.applyHdr();
+			CHECK(!strcmp(getenv("PSGOPHER_POST_AA"), "fxaa") && !strcmp(getenv("PSGOPHER_SHARPENING"), "medium") &&
+			      !strcmp(getenv("PSGOPHER_FINAL_FILTER"), "lanczos"));
+			back.assign("sharpening", 3), back.assign("final_filter", 3), back.assign("post_aa", 0);
+			back.applyHdr();
+			CHECK(!strcmp(getenv("PSGOPHER_POST_AA"), "off") && !strcmp(getenv("PSGOPHER_SHARPENING"), "high") &&
+			      !strcmp(getenv("PSGOPHER_FINAL_FILTER"), "bicubic"));
+			CHECK(back.value("sharpening") == 3 && back.value("post_aa") == 0 && psgopher::gameSettingEligible("sharpening") &&
+			      psgopher::gameSettingEligible("post_aa"));
+			title.applyHdr();
+		}
 		/* the next game has none */
 		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
 		g_script = { { none, nullptr, 6 }, { PAD_RIGHT, nullptr, 2 }, { PAD_CROSS, nullptr, 2 } };
@@ -674,7 +697,7 @@ int main(int argc, char **argv)
 		/* the game's page: the row, Auto first and marked */
 		g_step = 0, g_frame_in_step = 0, g_held = 0, g_script_done = false;
 		g_script = { { none, nullptr, 6 }, { PAD_TRIANGLE, nullptr, 2 }, { none, nullptr, 6 }, { R2, nullptr, 2 }, { R2, nullptr, 2 }, { R2, nullptr, 2 },
-		             { none, "34-game-page-emulation", 3 }, { PAD_DOWN, nullptr, 2 }, { PAD_CROSS, nullptr, 2 }, { none, "35-game-page-pak-set", 3 },
+		             { none, "34-game-page-emulation", 3 }, { PAD_DOWN, nullptr, 2 }, { PAD_DOWN, nullptr, 2 }, /* (past Overclock Speed) */ { PAD_CROSS, nullptr, 2 }, { none, "35-game-page-pak-set", 3 },
 		             { PAD_CIRCLE, nullptr, 2 }, { none, nullptr, 6 }, { PAD_CROSS, nullptr, 2 } };
 		const psgopher::MenuResult rq = psgopher::runMenu("");
 		CHECK(rq.play && rq.key == "NKAE-00");
