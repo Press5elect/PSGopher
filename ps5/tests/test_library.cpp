@@ -555,15 +555,19 @@ int main(int argc, char **argv)
 	t.rdpLayout = 0;
 	CHECK(t.keepGpuMemory); /* on by default */
 	t.keepGpuMemory = false;
-	CHECK(t.rdpThreaded); /* on by default */
-	t.rdpThreaded = false;
+	CHECK(!t.rdpThreaded); /* taken out: always off */
 	CHECK(t.save());
 	psgopher::TitleSettings u;
 	u.file = t.file;
 	u.load();
-	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0 && !u.keepGpuMemory && !u.rdpThreaded);
-	CHECK(slurp(t.file).find("rdp_threaded = off") != std::string::npos);
-	CHECK(u.isField("rdp_threaded") && u.value("rdp_threaded") == 0 && u.assign("rdp_threaded", 1) && u.rdpThreaded);
+	CHECK(u.display == "vrr" && u.hdr && u.hdrWhite == 250 && u.hdrPeak == 1500 && u.audioBuffer == 8 && u.shaderCompile == "4" && u.driverThread && u.wave32 && u.smallTypes && u.rdpLayout == 0 && !u.keepGpuMemory);
+	CHECK(slurp(t.file).find("rdp_threaded") == std::string::npos && !u.isField("rdp_threaded"));
+	write(t.file, "rdp_threaded = on\n"); /* a file from the build that had it */
+	psgopher::TitleSettings old_threaded;
+	old_threaded.file = t.file;
+	old_threaded.load();
+	old_threaded.applyHdr();
+	CHECK(!old_threaded.rdpThreaded && !strcmp(getenv("PSGOPHER_RDP_THREADED"), "0"));
 	write(t.file, "shader_compile = now\ndisplay = 50\nhdr = yes\nhdr_white = 9000\nhdr_peak = -5\nrdp_layout = 3\n");
 	psgopher::TitleSettings v;
 	v.file = t.file;
@@ -577,7 +581,7 @@ int main(int argc, char **argv)
 	CHECK(!w.writeHelper && !psgopher::helperEnabled() && access(t.file.c_str(), F_OK) == 0 && slurp(t.file).find("write_helper = off") != std::string::npos);
 	t.writeHelper = true;
 	CHECK(t.save() && psgopher::helperEnabled());
-	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1" && v.keepGpuMemory && v.rdpThreaded);
+	CHECK(v.display == "60" && !v.hdr && v.hdrWhite == 400 && v.hdrPeak == 0 && v.rdpLayout == 2 && v.shaderCompile == "1" && v.keepGpuMemory);
 
 	/* the picture rows: their defaults, the file's words, values held in range, and the table a game's settings go through */
 	{

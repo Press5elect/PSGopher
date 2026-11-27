@@ -80,7 +80,8 @@ void TitleSettings::load()
 		else if (!strcmp(key, "rdp_layout"))
 			rdpLayout = !strcmp(value, "0") ? 0 : 2;
 		else if (!strcmp(key, "rdp_threaded"))
-			rdpThreaded = strcmp(value, "off") != 0;
+			rdpThreaded = false; /* taken out: on the console it made the RDP's commands about 20 times costlier
+			                        on the emulation thread (40-52% against 100% single-threaded, 2026-11-27) */
 		else if (!strcmp(key, "final_filter"))
 			finalFilter = !strcmp(value, "bilinear") ? 1 : !strcmp(value, "nearest") ? 2 : 0;
 		else if (!strcmp(key, "vi_bilinear"))
@@ -182,9 +183,6 @@ bool TitleSettings::save() const
 		"# rdp_layout: how the upscaled copy of RDRAM is laid out: 2 a pixel's samples together (the default),\n"
 		"# 0 parallel-rdp's own (a copy of RDRAM per sample, 8 MiB apart)\n"
 		"rdp_layout = %d\n"
-		"# rdp_threaded: on runs parallel-rdp's command processing on a thread of its own (off: on the emulation\n"
-		"# thread, Gopher64's way); a game's own setting wins. Read when a game starts\n"
-		"rdp_threaded = %s\n"
 		"# keep_gpu_memory: on keeps the GPU's large memory blocks (the upscaled picture's) for reuse instead of\n"
 		"# giving each back and asking the console for it again (which stalled games for seconds); off gives them back\n"
 		"keep_gpu_memory = %s\n"
@@ -228,7 +226,7 @@ bool TitleSettings::save() const
 		"# downloaded without asking: BENCH, Console, Check for Updates)\n"
 		"update_check = %s\n",
 		display.c_str(), hdr ? "on" : "off", hdrWhite, hdrPeak, stats ? "on" : "off", expansionPak == 1 ? "on" : expansionPak == 2 ? "off" : "auto", audioBuffer,
-		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, rdpThreaded ? "on" : "off", keepGpuMemory ? "on" : "off",
+		shaderCompile.c_str(), driverThread ? "on" : "off", gpuTiming ? "on" : "off", slowCapture ? "on" : "off", wave32 ? "on" : "off", smallTypes ? "on" : "off", rdpLayout, keepGpuMemory ? "on" : "off",
 		finalFilter == 1 ? "bilinear" : finalFilter == 2 ? "nearest" : "sharp", viBilinear == 1 ? "on" : viBilinear == 2 ? "off" : "auto",
 		viAa ? "on" : "off", ditherFilter ? "on" : "off", divotFilter ? "on" : "off", gammaDither ? "on" : "off", nativeTexRect ? "on" : "off",
 		cropOverscan, downsample, deinterlace == 1 ? "blend" : "bob", pictureDefaults, hotkeys ? "on" : "off", quickmenuTap ? "on" : "off", writeHelper ? "on" : "off", updateCheck ? "on" : "off");
@@ -272,7 +270,6 @@ const Field kFields[] = {
 	{ "wave32", [](const TitleSettings &t) -> int64_t { return t.wave32; }, [](TitleSettings &t, int64_t v) { t.wave32 = v != 0; } },
 	{ "small_types", [](const TitleSettings &t) -> int64_t { return t.smallTypes; }, [](TitleSettings &t, int64_t v) { t.smallTypes = v != 0; } },
 	{ "rdp_layout", [](const TitleSettings &t) -> int64_t { return t.rdpLayout; }, [](TitleSettings &t, int64_t v) { t.rdpLayout = v == 0 ? 0 : 2; } },
-	{ "rdp_threaded", [](const TitleSettings &t) -> int64_t { return t.rdpThreaded; }, [](TitleSettings &t, int64_t v) { t.rdpThreaded = v != 0; } },
 	{ "keep_gpu_memory", [](const TitleSettings &t) -> int64_t { return t.keepGpuMemory; }, [](TitleSettings &t, int64_t v) { t.keepGpuMemory = v != 0; } },
 	{ "audio_buffer", [](const TitleSettings &t) -> int64_t { return t.audioBuffer; },
 	  [](TitleSettings &t, int64_t v) { t.audioBuffer = (int)std::clamp<int64_t>(v, 2, 8) / 2 * 2; } },
@@ -352,7 +349,7 @@ void TitleSettings::applyHdr() const
 	/* the upscaled RDRAM's layout: read when the game's renderer makes its buffers (rdp_init logs it) */
 	setenv("PSGOPHER_RDP_LAYOUT", rdpLayout == 0 ? "0" : "2", 1);
 	/* parallel-rdp's command processing: read when the game's video starts (src/ui/video.rs; rdp_init logs which) */
-	setenv("PSGOPHER_RDP_THREADED", rdpThreaded ? "1" : "0", 1);
+	setenv("PSGOPHER_RDP_THREADED", "0", 1); /* (the threaded path stays in the core, unused) */
 	/* read when the game's device starts (vulkan/memory_allocator.cpp logs what it does) */
 	setenv("PSGOPHER_KEEP_GPU_MEMORY", keepGpuMemory ? "1" : "0", 1);
 	/* the picture: read when the game's renderer starts (rdp_init logs them) */

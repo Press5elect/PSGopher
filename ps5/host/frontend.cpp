@@ -1781,9 +1781,6 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(title_row("keep_gpu_memory", "Keep GPU Memory", "When enabled, keeps large blocks of graphics memory for reuse instead of returning them to the console, which can freeze a game for seconds when it switches picture modes at high resolutions. Uses up to 768 MB more memory.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.keepGpuMemory; },
 		                           [](TitleSettings &t, int64_t v) { t.keepGpuMemory = v != 0; }, 1));
-		s.rows.push_back(title_row("rdp_threaded", "Threaded RDP", "When enabled, processes the graphics commands on a separate thread, which leaves more time for the N64's processors. When disabled, they are processed between the processors' work, which can fix wrong textures in some games.",
-		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.rdpThreaded; },
-		                           [](TitleSettings &t, int64_t v) { t.rdpThreaded = v != 0; }, 1));
 		s.rows.push_back(title_row("slow_capture", "Slow Moments", "When enabled, a game that runs below 95% speed for 3 seconds has the next 10 seconds recorded in the log, up to three times per game. Used to find what slows a game down.",
 		                           { { "Off", 0 }, { "On", 1 } }, [](TitleSettings &t) -> int64_t { return t.slowCapture; },
 		                           [](TitleSettings &t, int64_t v) { t.slowCapture = v != 0; }, 1));

@@ -169,10 +169,6 @@
   "label": "written",
   "choices": "written"
  },
- "rdp_threaded": {
-  "label": "written",
-  "choices": "written"
- },
  "downsample": {
   "label": "written",
   "choices": "written"

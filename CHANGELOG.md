@@ -149,8 +149,10 @@ console: the cheats, variable refresh, HDR10.
   about a fifth less work per instruction (instruction fetch within a cache line, cached RAM loads
   and stores, cache-line fills, FPU dispatch) and the RSP interpreter is 1.25-1.75 times as fast
   (a straight-line loop, SIMD loads and stores); both still interpreters, their results identical to
-  Gopher64's in the lockstep harness. The RDP's command processing runs on a thread of its own
-  (BENCH > Video > Threaded RDP, on; per game too), with texture loads tracked as Gopher64 needs.
+  Gopher64's in the lockstep harness: a game's menu that ran at 68% runs at 100% and 60 fps at 8x.
+  Threaded RDP (the RDP's command processing on a thread of its own)
+  was tried and taken out again: on the console it made the commands about 20 times costlier on the
+  emulation thread (40-52% in a game's menu, against 100% at 60 fps without it).
 - Fixed: lines across the picture in games that draw their backgrounds as strips: Native-Resolution
   Texture Rectangles is On again by default (upscaled, the strips' edges did not meet), and
   Deinterlacing is Blend again by default; a settings file from the build that changed them takes

@@ -33,7 +33,7 @@ struct TitleSettings {
 	                            // (PSGOPHER_KEEP_GPU_MEMORY: its allocations stalled the game for seconds)
 	int rdpLayout{ 2 };          // the upscaled RDRAM's layout (PSGOPHER_RDP_LAYOUT): 2 per pixel (measured at
 	                             // 8x: depth blending ~15 times faster), 0 parallel-rdp's own
-	bool rdpThreaded{ true };    // parallel-rdp's command processing on a thread of its own (PSGOPHER_RDP_THREADED;
+	bool rdpThreaded{ false };   // parallel-rdp's command processing on a thread of its own (PSGOPHER_RDP_THREADED;
 	                             // vendor/gopher64/parallel-rdp/interface.cpp: rdp_threaded); off: on the emulation thread
 	/* the picture (BENCH > Video; vendor/gopher64/parallel-rdp/interface.cpp reads them once a game) */
 	int finalFilter{ 0 };        // the final blit's filter (PSGOPHER_FINAL_FILTER): 0 sharp bilinear, 1 bilinear, 2 nearest
