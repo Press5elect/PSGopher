@@ -2,6 +2,16 @@
 
 Every change, the newest version first. Games are named by cartridge ID only.
 
+## Unreleased
+
+- Fixed: a 64DD disk inside a `.zip` or `.7z` starts (it ended with "Could not read ROM file"): the
+  archive's first N64 entry is looked at by its size, and a disk image is written to the play cache
+  and started with `--disk`; a ROM in an archive is started as before.
+- Fixed: the 64DD's IPL files (No-Intro's `[BIOS] ...` names, or a header ID of NDDJ, NDDE or
+  NDXJ) are no longer listed as games: BENCH > Emulation > 64DD IPL chooses one.
+- Changed: a variant libretro has no cover for (a kiosk demo, a hotel system's, a beta, a re-release,
+  a revision) shows the same game's retail cover.
+
 ## v0.0.2 (2026-11-28)
 
 - Added: BENCH > Video (and a game's page): **Final Filter** has **Bicubic** (Catmull-Rom) and

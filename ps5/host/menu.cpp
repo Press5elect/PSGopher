@@ -100,6 +100,43 @@ std::string lookupName(const Game &g)
 	return g.name;
 }
 
+/* The retail release's name for a variant's: by the game ID (No-Intro's retail release of revision 0),
+ * else the name without its variant tags ("(LodgeNet)", "(Demo)", "(Kiosk)", "(Beta)", "(Proto)", a
+ * re-release's, a revision's, a date) */
+std::string retailCoverName(const Game &g, const std::string &name)
+{
+	if (g.base.empty() && g.facts && g.id.size() == 4) {
+		const std::string retail = noIntroName(g.id, 0);
+		if (!retail.empty())
+			return retail;
+	}
+	static const char *const variants[] = { "LodgeNet", "Kiosk", "Demo", "Beta", "Proto", "GameCube", "Virtual Console",
+		                                     "Switch Online", "Debug", "Sample", "Collection", "Rev " };
+	std::string out;
+	size_t at = 0;
+	while (at < name.size()) {
+		const size_t open = name.find(" (", at);
+		if (open == std::string::npos) {
+			out += name.substr(at);
+			break;
+		}
+		const size_t close = name.find(')', open);
+		if (close == std::string::npos) {
+			out += name.substr(at);
+			break;
+		}
+		const std::string tag = name.substr(open + 2, close - open - 2);
+		bool variant = tag.size() == 10 && tag[4] == '-' && tag[7] == '-'; /* a date: 1998-08-05 */
+		for (const char *v : variants)
+			variant = variant || tag.find(v) != std::string::npos;
+		out += name.substr(at, open - at);
+		if (!variant)
+			out += name.substr(open, close + 1 - open);
+		at = close + 1;
+	}
+	return out;
+}
+
 const char kNetworkFile[] = "/data/psgopher/config/network.cfg";
 std::string g_titleDir = "/app0";
 
@@ -1496,7 +1533,23 @@ MenuResult runMenu(const std::string &notice)
 			if (!make_room(false))
 				return { ImTextureID_Invalid, 0.0f }; /* (nothing is taken: it stays with the web thread for later) */
 			Image picture;
-			if (webCover(name, &picture) != WebState::Ready)
+			std::string key = name;
+			WebState state = webCover(name, &picture);
+			/* a variant libretro has no cover for (a kiosk demo, a hotel system's, a beta, a re-release, a
+			 * revision): the same game's retail cover */
+			if (state == WebState::None) {
+				const std::string retail = retailCoverName(g, name);
+				if (!retail.empty() && retail != name) {
+					auto other = m->covers.find(retail);
+					if (other != m->covers.end()) {
+						other->second.shown = m->frames;
+						return { other->second.id, other->second.aspect };
+					}
+					key = retail;
+					state = webCover(retail, &picture);
+				}
+			}
+			if (state != WebState::Ready)
 				return { ImTextureID_Invalid, 0.0f };
 			make_room(true);
 			m->uploaded_at = m->frames;
@@ -1506,7 +1559,7 @@ MenuResult runMenu(const std::string &notice)
 			c.id = uploadTexture(*dp, picture);
 			c.aspect = picture.height ? (float)picture.width / (float)picture.height : 0;
 			c.shown = m->frames;
-			m->covers[name] = c;
+			m->covers[key] = c;
 			return { c.id, c.aspect };
 		};
 		/* a probe's picture (the state file's path and ".png": probe_picture.h): the same textures and

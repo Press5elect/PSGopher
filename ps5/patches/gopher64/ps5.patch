@@ -9186,10 +9186,10 @@ index 4e51a1b..281736b 100644
                  disable_expansion_pak,
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..ca40914
+index 0000000..9371274
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,1331 @@
+@@ -0,0 +1,1439 @@
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
@@ -10520,6 +10520,114 @@ index 0000000..ca40914
 +        }
 +    })
 +    .unwrap_or(-1)
++}
++
++/// A 64DD disk image inside a .zip or .7z (the first entry with an N64 or disk extension), written
++/// out to `out` so a disk can be started from it (--disk takes a file): 1 written, 0 the archive
++/// holds no disk (a cartridge ROM, or nothing known), -1 an error. A disk is a .ndd or .d64 entry,
++/// or a .n64/.z64/.v64/.bin entry of a disk image's size that starts with no cartridge header; an
++/// entry's size is looked at before it is read, so a ROM is never read here.
++///
++/// # Safety
++/// `archive` and `out` are NUL-terminated strings.
++#[unsafe(no_mangle)]
++pub unsafe extern "C" fn psgopher_archive_disk(archive: *const std::ffi::c_char, out: *const std::ffi::c_char) -> i32 {
++    let archive = std::path::PathBuf::from(c_text(archive));
++    let out = std::path::PathBuf::from(c_text(out));
++    std::panic::catch_unwind(move || archive_disk(&archive, &out)).unwrap_or(-1)
++}
++
++fn archive_disk(archive: &std::path::Path, out: &std::path::Path) -> i32 {
++    use std::io::Read;
++    const ROM: [&str; 4] = ["n64", "v64", "z64", "bin"];
++    const DISK: [&str; 2] = ["ndd", "d64"];
++    let lower = |name: &str| {
++        std::path::Path::new(name)
++            .extension()
++            .and_then(|e| e.to_str())
++            .map(|e| e.to_ascii_lowercase())
++            .unwrap_or_default()
++    };
++    // a disk by its name, or one named as a ROM by its size (then its first bytes are checked)
++    let candidate = |extension: &str, size: u64| -> bool {
++        let size_ok = crate::device::dd::disk::size_accepted(size);
++        if DISK.contains(&extension) {
++            return size_ok;
++        }
++        ROM.contains(&extension)
++            && (size == crate::device::dd::disk::NDD_SIZE as u64 || size == crate::device::dd::disk::PHYSICAL_SIZE as u64)
++    };
++    let is_rom = |data: &[u8]| {
++        data.len() >= 4
++            && matches!(
++                [data[0], data[1], data[2], data[3]],
++                [0x80, 0x37, 0x12, 0x40] | [0x37, 0x80, 0x40, 0x12] | [0x40, 0x12, 0x37, 0x80]
++            )
++    };
++    let extension = lower(&archive.to_string_lossy());
++    let mut data: Option<(Vec<u8>, bool)> = None; // (contents, named as a disk)
++    if extension == "zip" {
++        let Ok(file) = std::fs::File::open(archive) else { return -1 };
++        let Ok(mut zip) = zip::ZipArchive::new(file) else { return -1 };
++        for i in 0..zip.len() {
++            let Ok(mut entry) = zip.by_index(i) else { return -1 };
++            let entry_extension = lower(&entry.name().map(|n| n.to_string()).unwrap_or_default());
++            if !ROM.contains(&entry_extension.as_str()) && !DISK.contains(&entry_extension.as_str()) {
++                continue;
++            }
++            if !candidate(&entry_extension, entry.size()) {
++                return 0; // (the first N64 entry decides, as Gopher64's reader takes it)
++            }
++            let mut contents = Vec::with_capacity(entry.size() as usize);
++            if entry.read_to_end(&mut contents).is_err() {
++                return -1;
++            }
++            data = Some((contents, DISK.contains(&entry_extension.as_str())));
++            break;
++        }
++    } else if extension == "7z" {
++        let Ok(file) = std::fs::File::open(archive) else { return -1 };
++        let Ok(mut reader) = sevenz_rust2::ArchiveReader::new(file, sevenz_rust2::Password::empty()) else {
++            return -1;
++        };
++        let mut decided = false;
++        let result = reader.for_each_entries(&mut |entry: &sevenz_rust2::ArchiveEntry, read: &mut dyn std::io::Read| {
++            let entry_extension = lower(entry.name());
++            if decided || (!ROM.contains(&entry_extension.as_str()) && !DISK.contains(&entry_extension.as_str())) {
++                std::io::copy(read, &mut std::io::sink())?;
++                return Ok(true);
++            }
++            decided = true;
++            if !candidate(&entry_extension, entry.size()) {
++                return Ok(false); // a ROM: stop, nothing read
++            }
++            let mut contents = Vec::with_capacity(entry.size() as usize);
++            read.read_to_end(&mut contents)?;
++            data = Some((contents, DISK.contains(&entry_extension.as_str())));
++            Ok(false)
++        });
++        if result.is_err() && data.is_none() {
++            return -1;
++        }
++    } else {
++        return 0;
++    }
++    let Some((contents, named_disk)) = data else { return 0 };
++    if !named_disk && is_rom(&contents) {
++        return 0;
++    }
++    let part = out.with_extension("part");
++    if std::fs::write(&part, &contents).is_err() || std::fs::rename(&part, out).is_err() {
++        let _ = std::fs::remove_file(&part);
++        return -1;
++    }
++    log_line(&format!(
++        "64dd: {} holds a disk image ({} bytes): {} made of it",
++        archive.display(),
++        contents.len(),
++        out.display()
++    ));
++    1
 +}
 diff --git a/src/psgopher_http.rs b/src/psgopher_http.rs
 new file mode 100644

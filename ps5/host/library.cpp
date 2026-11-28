@@ -424,6 +424,10 @@ bool search(const Place &place, std::vector<Game> &found, std::vector<Game> &pat
 				patches.push_back(g);
 				continue;
 			}
+			/* a BIOS (No-Intro's "[BIOS] ..." names: the 64DD's IPL, the PIF) is no game: the 64DD IPL is
+			 * chosen in BENCH > Emulation instead */
+			if (l.rfind("[bios]", 0) == 0)
+				continue;
 			bool rom = rawRom(l);
 			/* a raw file too small for a ROM's header and boot code is no game: the console's
 			 * PIF (BIOS) image, 2 KiB as a .v64, was listed and failed to start (boot log
@@ -960,6 +964,13 @@ void Library::rescan()
 				read++;
 			}
 			say("library: %u ROM header(s) read", read);
+			/* the 64DD's IPL under another name: its header's ID */
+			const size_t before = found.size();
+			found.erase(std::remove_if(found.begin(), found.end(),
+			                           [](const Game &g) { return g.facts && (g.id == "NDDJ" || g.id == "NDDE" || g.id == "NDXJ"); }),
+			            found.end());
+			if (found.size() != before)
+				say("library: %zu 64DD IPL file(s) left out of the list (BENCH > Emulation > 64DD IPL chooses one)", before - found.size());
 			/* the romhack patches, each with its base ROM (they need the ROMs' sizes, so after the search) */
 			resolvePatches(patches, found, known);
 		}

@@ -45,6 +45,8 @@ extern "C" {
 #include "platform.h"
 #include "psgopher_sdl3.h"
 int psgopher_main(int argc, const char *const *argv);
+/* a 64DD disk inside a .zip or .7z written out (psgopher.rs): 1 made, 0 not a disk, -1 an error */
+int psgopher_archive_disk(const char *archive, const char *out) __attribute__((weak));
 void psgopher_probe(void);
 size_t psgopher_last_error(char *buffer, size_t size);
 bool psgopher_setting_set(const char *name, int64_t value);
@@ -347,19 +349,38 @@ static int play(const std::string &chosen_rom, int load_state = -1)
       play_error = patch_error;
       return 1;
    }
+   /* a 64DD disk inside a .zip or .7z: written out to the play cache (Gopher64 takes a disk as a file) */
+   std::string played = rom;
+   {
+      std::string l = rom;
+      for (char &c : l)
+         c = (char)tolower((unsigned char)c);
+      const bool archive = l.size() > 4 && (l.compare(l.size() - 4, 4, ".zip") == 0 || l.compare(l.size() - 3, 3, ".7z") == 0);
+      if (archive && psgopher_archive_disk) {
+         const size_t slash = rom.rfind('/'), dot = rom.rfind('.');
+         const std::string stem = rom.substr(slash + 1, dot == std::string::npos || dot < slash ? std::string::npos : dot - slash - 1);
+         mkdir((std::string(ROOT) + "/cache/play").c_str(), 0777);
+         const std::string disk_file = std::string(ROOT) + "/cache/play/" + stem + ".ndd";
+         const int made = psgopher_archive_disk(rom.c_str(), disk_file.c_str());
+         if (made == 1)
+            played = disk_file;
+         else if (made < 0)
+            say("64dd: %s could not be read as an archive; given to Gopher64 as it is", rom.c_str());
+      }
+   }
    const std::string slot = std::to_string(load_state);
    /* a 64DD disk is given with --disk: Gopher64 boots it with the IPL it finds in data/64dd */
    struct stat rom_stat;
-   const bool disk = psgopher::isDiskFile(rom, stat(rom.c_str(), &rom_stat) == 0 ? (uint64_t)rom_stat.st_size : 0);
+   const bool disk = psgopher::isDiskFile(played, stat(played.c_str(), &rom_stat) == 0 ? (uint64_t)rom_stat.st_size : 0);
    std::vector<const char *> args = {"psgopher", "--fullscreen"};
    if (load_state >= 0)
       args.insert(args.end(), {"--load-state", slot.c_str()});
    if (disk)
       args.push_back("--disk");
-   args.push_back(rom.c_str());
+   args.push_back(played.c_str());
    const char *const *argv = args.data();
    const int argc = (int)args.size();
-   say("starting Gopher64 with %s%s%s", disk ? "the 64DD disk " : "", rom.c_str(), load_state >= 0 ? (" from probe " + slot).c_str() : "");
+   say("starting Gopher64 with %s%s%s", disk ? "the 64DD disk " : "", played.c_str(), load_state >= 0 ? (" from probe " + slot).c_str() : "");
    /* what costs speed, beside the video line (Gopher64's config.json) */
    say("settings: upscale %lldx%s, overclock %s, rewind %s, expansion pak %s",
        (long long)psgopher_setting_get("video.upscale"), psgopher_setting_get("video.ssaa") == 1 ? " supersampled" : "",
