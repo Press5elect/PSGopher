@@ -8,6 +8,7 @@
  */
 #pragma once
 
+#include <cstdint>
 #include <string>
 
 namespace psgopher {
@@ -19,5 +20,9 @@ void noIntroUseFile(const std::string &path);
  * (-1: unknown): a retail release first, the one of that revision ("(Rev 1)"; none for 0), the
  * shortest of equals. "" when the ID is not in the table. */
 std::string noIntroName(const std::string &id, int revision);
+
+/* The No-Intro name of the .z64 dump with this CRC32 (gamedata/nointro-crc.tsv, beside the IDs' table):
+ * a BPS or UPS patch names its base by CRC32, and a No-Intro-named .zip or .7z holds it. "" when unknown. */
+std::string noIntroNameOfCrc(uint32_t crc);
 
 } // namespace psgopher

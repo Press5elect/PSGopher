@@ -2232,6 +2232,23 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 				                        else
 					                        cheats_open_ = 0;
 			                        }));
+			c.rows.push_back(action("page.patch", "Start With a Patch", [] { return std::string("Choose"); },
+			                        "Selects a romhack patch (.bps, .ips or .ups) on the console, a USB drive or a network share, and starts this game with it. The patch is listed with this game from the next search.",
+			                        [this] {
+				                        picker_mode_ = 0, picker_kind_ = 3, picker_rom_ = true, picker_sel_ = 0;
+				                        picker_folder_ = page_game_.path.substr(0, page_game_.path.rfind('/'));
+				                        const Game game = page_game_;
+				                        picker_done_ = [this, game](const std::string &patch) {
+					                        if (!setPatchBase(patch, game.path) && host_.tell)
+						                        host_.tell("The patch could not be remembered with this game");
+					                        Game hack = game;
+					                        hack.path = patch, hack.base = game.path, hack.size = 0, hack.facts = false;
+					                        const size_t slash = patch.rfind('/'), dot = patch.rfind('.');
+					                        hack.name = patch.substr(slash + 1, dot > slash ? dot - slash - 1 : std::string::npos);
+					                        library().rescan(); /* (listed with this game from now) */
+					                        startGame(hack, -1);
+				                        };
+			                        }));
 			page.push_back(std::move(c));
 		}
 		for (Section &sc : sections) {
@@ -2577,6 +2594,29 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 			if (stat(usb.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
 				entries.push_back({ usb, usb, true });
 		}
+		if (picker_kind_ == 3) /* a patch: the network shares too (it is read through them) */
+			for (const std::string &share : shareMounts())
+				entries.push_back({ share, share, true });
+	} else if (picker_kind_ == 3) {
+		/* a romhack patch (.bps .ips .ups), on the console, a USB drive or a share */
+		entries.push_back({ "\xE2\x86\x90 up", picker_folder_.substr(0, picker_folder_.rfind('/')), true });
+		std::vector<Entry> folders, files;
+		std::vector<std::pair<std::string, bool>> listed;
+		listEntries(picker_folder_, listed);
+		for (const auto &e : listed) {
+			if (e.first.empty() || e.first[0] == '.')
+				continue;
+			const std::string path = picker_folder_ + "/" + e.first;
+			if (e.second)
+				folders.push_back({ e.first + "/", path, true });
+			else if (isPatchName(e.first))
+				files.push_back({ e.first, path, false });
+		}
+		auto by_name = [](const Entry &a, const Entry &b) { return a.label < b.label; };
+		std::sort(folders.begin(), folders.end(), by_name);
+		std::sort(files.begin(), files.end(), by_name);
+		entries.insert(entries.end(), folders.begin(), folders.end());
+		entries.insert(entries.end(), files.begin(), files.end());
 	} else {
 		entries.push_back({ "\xE2\x86\x90 up", picker_folder_.substr(0, picker_folder_.rfind('/')), true });
 		std::vector<Entry> folders, files;
@@ -2627,7 +2667,7 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 	if ((pad.pressed & PAD_CROSS) && n) {
 		const Entry &e = entries[picker_sel_];
 		if (e.folder) {
-			picker_folder_ = (e.path == "/mnt" || e.path.empty()) ? "" : e.path;
+			picker_folder_ = (e.path == "/mnt" || e.path == "/smb" || e.path.empty()) ? "" : e.path;
 			if (picker_folder_ == "/" )
 				picker_folder_.clear();
 			picker_sel_ = 0;
@@ -2644,8 +2684,8 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 	dl->AddRectFilled(S(0, 0), S(1920, 1080), IM_COL32(0, 0, 0, 150));
 	ink.rect(x, y, w, h, IM_COL32(7, 17, 21, 250), 16);
 	ink.frame(x, y, w, h, kAmber, 16, 2);
-	ink.text(f.display, 26, x + 28, y + 18, kText, picker_kind_ == 2 ? "64DD IPL" : picker_rom_ ? "Game Boy ROM" : "Game Boy save");
-	ink.text(f.mono, 14, x + 28, y + 56, kDim, picker_folder_.empty() ? "the console and its USB drives" : picker_folder_);
+	ink.text(f.display, 26, x + 28, y + 18, kText, picker_kind_ == 3 ? "Start with a patch" : picker_kind_ == 2 ? "64DD IPL" : picker_rom_ ? "Game Boy ROM" : "Game Boy save");
+	ink.text(f.mono, 14, x + 28, y + 56, kDim, picker_folder_.empty() ? (picker_kind_ == 3 ? "the console, its USB drives and the network shares" : "the console and its USB drives") : picker_folder_);
 	const int visible = (int)((h - 140) / rh);
 	const int first = std::clamp(picker_sel_ - visible / 2, 0, std::max(0, n - visible));
 	for (int i = first; i < std::min(n, first + visible); i++) {
@@ -2656,7 +2696,7 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 		ink.text(f.mono_bold, 16, x + 28, ry + 9, here ? kInk : (entries[i].folder ? kText : kDim), entries[i].label);
 	}
 	if (n == 1 && !picker_folder_.empty())
-		ink.text(f.mono, 14, x + 28, y + 140, kDim, picker_kind_ == 2 ? "No 4 MB files here" : picker_rom_ ? "No .gb or .gbc files here" : "No .sav files here");
+		ink.text(f.mono, 14, x + 28, y + 140, kDim, picker_kind_ == 3 ? "No .bps, .ips or .ups files here" : picker_kind_ == 2 ? "No 4 MB files here" : picker_rom_ ? "No .gb or .gbc files here" : "No .sav files here");
 	ink.text(f.mono, 14, x + 28, y + h - 34, kDim, "\xE2\x96\xB2 \xE2\x96\xBC  MOVE      \xE2\x9C\x95  OPEN \xC2\xB7 CHOOSE      \xE2\x97\x8B  CLOSE", .08f);
 }
 

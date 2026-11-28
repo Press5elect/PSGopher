@@ -12,6 +12,7 @@
 
 #include <cstdint>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace psgopher {
@@ -87,6 +88,13 @@ bool isDiskFile(const std::string &path, uint64_t size);
 bool isRomName(const std::string &name);
 /* Whether a file name is a romhack patch (.ips .bps .ups); the list shows one only with a base ROM */
 bool isPatchName(const std::string &name);
+/* A patch started with a game of the owner's choosing (a game's page, Start With a Patch): remembered in
+ * config/patches.cfg, so it is played with that game's ROM and listed with it from the next search */
+bool setPatchBase(const std::string &patch, const std::string &base);
+/* A folder's entries (name, is a folder), a share's through ps5vfs; false when it cannot be listed */
+bool listEntries(const std::string &path, std::vector<std::pair<std::string, bool>> &out);
+/* The network shares' mount points (/smb/<name>) */
+std::vector<std::string> shareMounts();
 
 class Library {
 public:

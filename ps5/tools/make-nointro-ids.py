@@ -48,6 +48,22 @@ def main():
             f.write("%s\t%d\t%s\n" % (serial, retail, name))
     os.replace(out + ".new", out)
     print("make-nointro-ids.py: %d names of %d IDs -> %s" % (len(rows), len({r[0] for r in rows}), out))
+    # beside it: each .z64 dump's CRC32 and its name, so a BPS or UPS patch (which names its base by CRC32)
+    # finds its base inside a No-Intro-named .zip or .7z (library.cpp)
+    crc_out = os.path.join(os.path.dirname(os.path.abspath(out)), "nointro-crc.tsv")
+    crcs = {}
+    for name, body in re.findall(r'<game name="([^"]*)">(.*?)</game>', text, re.S):
+        name = html.unescape(name)
+        if "\t" in name or "\n" in name:
+            continue
+        for crc in re.findall(r'<file [^>]*extension="z64"[^>]*crc32="([0-9a-fA-F]{8})"', body):
+            crcs.setdefault(crc.lower(), name)
+    with open(crc_out + ".new", "w", encoding="utf-8") as f:
+        f.write("# PSGopher: N64 .z64 dumps' CRC32 and No-Intro names, from %s (No-Intro, no-intro.org)\n" % os.path.basename(db))
+        for crc, name in sorted(crcs.items()):
+            f.write("%s\t%s\n" % (crc, name))
+    os.replace(crc_out + ".new", crc_out)
+    print("make-nointro-ids.py: %d CRC32s -> %s" % (len(crcs), crc_out))
     return 0
 
 

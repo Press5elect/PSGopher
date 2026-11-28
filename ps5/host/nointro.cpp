@@ -28,6 +28,8 @@ std::mutex g_mutex;
 std::string g_path;
 bool g_loaded = false;
 std::map<std::string, std::vector<Name>> g_names;
+bool g_crcs_loaded = false;
+std::map<uint32_t, std::string> g_crcs;
 
 /* "(Rev 1)" -> 1, "(Rev A)" -> 1; none 0 */
 int revisionOf(const std::string &name)
@@ -80,6 +82,32 @@ void noIntroUseFile(const std::string &path)
 	g_path = path;
 	g_names.clear();
 	g_loaded = false;
+	g_crcs.clear();
+	g_crcs_loaded = false;
+}
+
+std::string noIntroNameOfCrc(uint32_t crc)
+{
+	std::lock_guard lock(g_mutex);
+	if (!g_crcs_loaded) {
+		g_crcs_loaded = true;
+		const size_t slash = g_path.rfind('/');
+		const std::string file = (slash == std::string::npos ? std::string(".") : g_path.substr(0, slash)) + "/nointro-crc.tsv";
+		if (FILE *f = fopen(file.c_str(), "r")) {
+			char line[1024];
+			while (fgets(line, sizeof(line), f)) {
+				if (line[0] == '#' || strlen(line) < 10 || line[8] != '\t')
+					continue;
+				std::string name = line + 9;
+				while (!name.empty() && (name.back() == '\n' || name.back() == '\r'))
+					name.pop_back();
+				g_crcs[(uint32_t)strtoul(std::string(line, 8).c_str(), nullptr, 16)] = name;
+			}
+			fclose(f);
+		}
+	}
+	const auto it = g_crcs.find(crc);
+	return it == g_crcs.end() ? "" : it->second;
 }
 
 std::string noIntroName(const std::string &id, int revision)

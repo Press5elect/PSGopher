@@ -4,6 +4,11 @@ Every change, the newest version first. Games are named by cartridge ID only.
 
 ## v0.0.2 (2026-11-28)
 
+- Added: **Start With a Patch** on a game's page (Triangle): choose a `.bps`, `.ips` or `.ups` on the
+  console, a USB drive or a network share, and the game starts with it; the pairing is kept
+  (`config/patches.cfg`), so the hack is listed with that game from the next search.
+- Added: a BPS or UPS patch whose ROM is inside a No-Intro-named `.zip` or `.7z` is listed and played
+  (its base found by the CRC32 the patch names, through No-Intro's list: `gamedata/nointro-crc.tsv`).
 - Fixed: a 64DD disk inside a `.zip` or `.7z` starts (it ended with "Could not read ROM file"): the
   archive's first N64 entry is looked at by its size, and a disk image is written to the play cache
   and started with `--disk`; a ROM in an archive is started as before.
