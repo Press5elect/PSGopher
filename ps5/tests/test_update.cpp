@@ -679,6 +679,7 @@ static void TestHelpers()
 	CHECK(IsManaged("art/logo.png") && IsManaged("art/board.png"));
 	CHECK(IsManaged("licenses/OFL-JetBrainsMono.txt") && IsManaged("NOTICE.txt") && IsManaged("write-broker.elf"));
 	CHECK(IsManaged("CHANGELOG.md") && IsManaged("README.md"));
+	CHECK(IsManaged("gamedata/nointro-ids.tsv") && IsManaged("gamedata/expansion-pak.tsv"));
 	// What is the user's, in the title folder or beside it.
 	CHECK(!IsManaged("psgopher-boot.log") && !IsManaged("psgopher-boot.previous.log") && !IsManaged("probe.txt"));
 	CHECK(!IsManaged("config/psgopher.ini") && !IsManaged("roms/game.z64") && !IsManaged("data/saves/x.sra"));

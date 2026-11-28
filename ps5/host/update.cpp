@@ -136,7 +136,8 @@ size_t MaxEntries()
 // folder) are none of these, and a file the release does not have is left where it is. The
 // user's settings, games, saves, states, covers and caches are in /data/psgopher, which is not
 // the title folder at all.
-constexpr const char* MANAGED_FOLDERS[] = {"sce_sys/", "sce_module/", "art/", "licenses/"};
+// gamedata/: the title's own tables (the Expansion Pak's, the game IDs' No-Intro names), made by the build
+constexpr const char* MANAGED_FOLDERS[] = {"sce_sys/", "sce_module/", "art/", "licenses/", "gamedata/"};
 constexpr const char* MANAGED_FILES[] = {"eboot.bin", "sandbox-elevator.elf", "write-broker.elf", "NOTICE.txt",
 	"README.md", "README.txt", "CHANGELOG.md", "CHANGELOG.txt", "LICENSE.txt"};
 // Inside those folders, but the user's (none in PSGopher yet; the list ends with nullptr). Compared

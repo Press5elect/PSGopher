@@ -2,7 +2,7 @@
 
 Every change, the newest version first. Games are named by cartridge ID only.
 
-## Unreleased
+## v0.0.2 (2026-11-28)
 
 - Added: BENCH > Video (and a game's page): **Final Filter** has **Bicubic** (Catmull-Rom) and
   **Lanczos** (3 lobes, held to the nearest texels' range so hard edges get no halos), both widening

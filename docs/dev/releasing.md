@@ -21,7 +21,7 @@ here is published without the owner's word, each time ([`workflow.md`](workflow.
 
 Only the program's own files (`IsManaged` in `update.cpp`): `eboot.bin`, `sandbox-elevator.elf`,
 `write-broker.elf`, `NOTICE.txt`, `README.md`, `CHANGELOG.md` (and `.txt` / `LICENSE.txt` forms),
-and the folders `sce_sys/`, `sce_module/`, `art/`, `licenses/`. Everything else in the ZIP is passed
+and the folders `sce_sys/`, `sce_module/`, `art/`, `licenses/`, `gamedata/` (from v0.0.2). Everything else in the ZIP is passed
 over, and a file the release does not have is left where it is. The user's files (settings, games,
 saves, states, covers, caches: all in `/data/psgopher`; the boot logs and anything else in the title
 folder) are never in the set. A file added to the title folder by `link-title.sh` that is to be
