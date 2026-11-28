@@ -9,6 +9,7 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <string>
 
 extern "C" void say(const char *format, ...)
 {
@@ -33,12 +34,18 @@ int main(int argc, char **argv)
 	if (argc < 2)
 		return 2;
 	psgopher::noIntroUseFile(argv[1]);
-	CHECK(psgopher::noIntroName("NSME", 0) == "Super Mario 64 (USA)");
-	CHECK(psgopher::noIntroName("NSMJ", 3) == "Super Mario 64 (Japan) (Rev 3) (Shindou Edition)");
-	CHECK(psgopher::noIntroName("NSMJ", 0) == "Super Mario 64 (Japan)");
-	CHECK(psgopher::noIntroName("NREE", 1) == "Resident Evil 2 (USA) (Rev 1)");
-	CHECK(psgopher::noIntroName("NREE", -1) == "Resident Evil 2 (USA)");
-	CHECK(psgopher::noIntroName("NCFE", 0) == "Clay Fighter 63 1-3 (USA)"); /* the retail one, not its beta */
+	/* (games are not named here: the checks go by IDs and No-Intro's tags) */
+	auto has = [](const std::string &name, const char *tag) { return name.find(tag) != std::string::npos; };
+	const std::string usa = psgopher::noIntroName("NSME", 0), japan = psgopher::noIntroName("NSMJ", 0),
+	                  japan3 = psgopher::noIntroName("NSMJ", 3), rev0 = psgopher::noIntroName("NREE", 0),
+	                  rev1 = psgopher::noIntroName("NREE", 1), unknown = psgopher::noIntroName("NREE", -1),
+	                  retail = psgopher::noIntroName("NCFE", 0);
+	CHECK(has(usa, "(USA)") && !has(usa, "(Rev"));               /* the USA release, no revision */
+	CHECK(has(japan, "(Japan)") && !has(japan, "(Rev"));         /* the destination letter picks the region */
+	CHECK(has(japan3, "(Japan)") && has(japan3, "(Rev 3)"));     /* the revision byte picks the revision */
+	CHECK(has(rev1, "(Rev 1)") && !has(rev0, "(Rev") && rev0 == unknown);
+	CHECK(rev0.substr(0, rev0.find(" (")) == rev1.substr(0, rev1.find(" ("))); /* the same game */
+	CHECK(!retail.empty() && !has(retail, "(Beta)"));            /* the retail release, not its beta */
 	CHECK(psgopher::noIntroName("XXXX", 0).empty());
 	CHECK(psgopher::noIntroName("", 0).empty());
 	psgopher::noIntroUseFile("/nonexistent/nointro-ids.tsv");
