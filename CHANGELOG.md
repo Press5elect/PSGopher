@@ -7,6 +7,10 @@ Every change, the newest version first. Games are named by cartridge ID only.
 - Added: **RDP Timing** (BENCH > Emulation, and per game): Accurate (Gopher64's model of the RDP's
   drawing time: heavy scenes slow down as on an N64) or Instant (drawing takes no emulated time, as in
   most emulators). A 96 MB romhack ran at 15-17 fps at 468.75 MHz with the console mostly idle.
+- Added: **CPU Timing** (BENCH > Emulation, and per game): Accurate (the emulated CPU waits for memory
+  as an N64's does: cache fills, uncached RDRAM, its cartridge reads) or Fast (those waits left out, as
+  in most emulators; instructions keep their cost). The same romhack's CPU was busy about 95% of its
+  emulated time while the console spent about 2 ms a frame on it: its time went to these waits.
 - Added: the boot log's `video: emulated time:` line every 10 s: how much of the emulated N64's time
   the CPU spent waiting and the RSP, the RDP (its timing model) and cartridge DMA were busy, so a game
   that runs below its frame rate at full speed shows what it waits for.

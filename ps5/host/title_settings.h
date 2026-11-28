@@ -50,7 +50,8 @@ struct TitleSettings {
 	int cropOverscan{ 0 };       // pixels cropped at each edge: 0, 8 or 16 (PSGOPHER_CROP_OVERSCAN)
 	std::string ddIpl;           // the 64DD IPL chosen in BENCH (a file of 4 MB); "" Gopher64 looks in data/64dd (PSGOPHER_DD_IPL)
 	int overclockSpeed{ 0 };
-	int rdpTiming{ 0 };          // 0 accurate (Gopher64's model of the RDP's speed), 1 instant (PSGOPHER_RDP_TIMING)     // the clock with Overclock N64 CPU on: 0 125 MHz (Gopher64's), 1 150, 2 187.5, 3 250, 4 281.25, 5 375, 6 468.75 (PSGOPHER_OVERCLOCK_HZ)
+	int rdpTiming{ 0 };
+	int cpuTiming{ 0 };          // 0 accurate (the CPU's memory stalls charged), 1 fast (left out) (PSGOPHER_CPU_TIMING)          // 0 accurate (Gopher64's model of the RDP's speed), 1 instant (PSGOPHER_RDP_TIMING)     // the clock with Overclock N64 CPU on: 0 125 MHz (Gopher64's), 1 150, 2 187.5, 3 250, 4 281.25, 5 375, 6 468.75 (PSGOPHER_OVERCLOCK_HZ)
 	int downsample{ 0 };         // steps the upscaled picture is scaled down by, 0..3 (PSGOPHER_DOWNSAMPLE); SSAA
 	                             // downscaling takes it all the way, whatever this says
 	int deinterlace{ 1 };        // 0 bob, 1 blend (the default)

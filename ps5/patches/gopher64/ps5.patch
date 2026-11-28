@@ -2991,7 +2991,7 @@ index ced2472..0f3281e 100644
      }
  }
 diff --git a/src/device/cache.rs b/src/device/cache.rs
-index f2ae41e..d176f97 100644
+index f2ae41e..1c009c5 100644
 --- a/src/device/cache.rs
 +++ b/src/device/cache.rs
 @@ -1,6 +1,9 @@
@@ -3004,7 +3004,7 @@ index f2ae41e..d176f97 100644
  pub struct ICache {
      pub valid: bool,
      pub tag: u32,
-@@ -19,6 +22,27 @@ pub struct DCache {
+@@ -19,17 +22,42 @@ pub struct DCache {
      pub words: [u32; 4],
  }
  
@@ -3032,7 +3032,12 @@ index f2ae41e..d176f97 100644
  pub fn icache_hit(device: &device::Device, line_index: usize, phys_address: u64) -> bool {
      device.memory.icache[line_index].valid
          && (device.memory.icache[line_index].tag & 0x1ffffffc) == (phys_address & !0xFFF) as u32
-@@ -30,6 +54,10 @@ pub fn icache_writeback(device: &mut device::Device, line_index: usize) {
+ }
+ 
+ pub fn icache_writeback(device: &mut device::Device, line_index: usize) {
+-    device::cop0::add_cycles(device, device::rdram::rdram_calculate_cycles(32));
++    device::cop0::add_stall(device, device::rdram::rdram_calculate_cycles(32), 5);
+ 
      let cache_address = ((device.memory.icache[line_index].tag
          | (device.memory.icache[line_index].index) as u32)
          & 0x1ffffffc) as u64;
@@ -3043,15 +3048,16 @@ index f2ae41e..d176f97 100644
      for i in 0..8 {
          device.memory.memory_map_write[(cache_address >> 16) as usize](
              device,
-@@ -41,6 +69,7 @@ pub fn icache_writeback(device: &mut device::Device, line_index: usize) {
+@@ -41,13 +69,24 @@ pub fn icache_writeback(device: &mut device::Device, line_index: usize) {
  }
  
  pub fn icache_fill(device: &mut device::Device, line_index: usize, phys_address: u64) {
+-    device::cop0::add_cycles(device, 8);
 +    device.cpu.icache_fetch_tag = 0; // the line changes (PSGopher: cpu.rs's fetch fast path)
-     device::cop0::add_cycles(device, 8);
++    device::cop0::add_stall(device, 8, 5);
  
      device.memory.icache[line_index].valid = true;
-@@ -48,6 +77,16 @@ pub fn icache_fill(device: &mut device::Device, line_index: usize, phys_address:
+     device.memory.icache[line_index].tag = (phys_address & !0xFFF) as u32;
      let cache_address = ((device.memory.icache[line_index].tag
          | (device.memory.icache[line_index].index) as u32)
          & 0x1ffffffc) as u64;
@@ -3089,7 +3095,7 @@ index f2ae41e..d176f97 100644
      let item = ((phys_address >> 2) & 7) as usize;
      device.memory.icache[line_index].instruction[item](
          device,
-@@ -81,6 +128,7 @@ pub fn icache_fetch(device: &mut device::Device, virt_address: u64, phys_address
+@@ -81,18 +128,23 @@ pub fn icache_fetch(device: &mut device::Device, virt_address: u64, phys_address
      );
  }
  
@@ -3097,7 +3103,13 @@ index f2ae41e..d176f97 100644
  pub fn dcache_hit(device: &device::Device, line_index: usize, phys_address: u64) -> bool {
      device.memory.dcache[line_index].valid
          && (device.memory.dcache[line_index].tag & 0x1ffffffc) == (phys_address & !0xFFF) as u32
-@@ -93,6 +141,10 @@ pub fn dcache_writeback(device: &mut device::Device, line_index: usize) {
+ }
+ 
+ pub fn dcache_writeback(device: &mut device::Device, line_index: usize) {
+-    device::cop0::add_cycles(device, device::rdram::rdram_calculate_cycles(16));
++    device::cop0::add_stall(device, device::rdram::rdram_calculate_cycles(16), 6);
+ 
+     let cache_address = ((device.memory.dcache[line_index].tag
          | (device.memory.dcache[line_index].index) as u32)
          & 0x1ffffffc) as u64;
  
@@ -3167,9 +3179,18 @@ index f2ae41e..d176f97 100644
      device::memory::masked_write_32(
          &mut device.memory.dcache[line_index].words[((phys_address >> 2) & 3) as usize],
 diff --git a/src/device/cart/rom.rs b/src/device/cart/rom.rs
-index 3994201..ccce248 100644
+index 3994201..4a52c14 100644
 --- a/src/device/cart/rom.rs
 +++ b/src/device/cart/rom.rs
+@@ -37,7 +37,7 @@ pub fn read_mem(
+     _access_size: device::memory::AccessSize,
+ ) -> u32 {
+     let cycles = device::pi::calculate_cycles(device, 1, 4);
+-    device::cop0::add_cycles(device, cycles);
++    device::cop0::add_stall(device, cycles, 8);
+ 
+     // well known cart ROM oddity, if a read is performed while PI_STATUS_IO_BUSY is set, the latched value is returned rather than the data at the specified address
+     if device.pi.regs[device::pi::PI_STATUS_REG] & device::pi::PI_STATUS_IO_BUSY != 0 {
 @@ -127,16 +127,30 @@ pub fn dma_write(
      device::pi::calculate_cycles(device, 1, length)
  }
@@ -3299,6 +3320,33 @@ index 714ed70..72331ec 100644
                  ui::input::get(&mut device.ui, channel)
              };
  
+diff --git a/src/device/cop0.rs b/src/device/cop0.rs
+index 749a6c1..8ec9e55 100644
+--- a/src/device/cop0.rs
++++ b/src/device/cop0.rs
+@@ -267,6 +267,22 @@ fn set_random_register(device: &device::Device) -> u64 {
+     }
+ }
+ 
++// PSGopher: CPU Timing (BENCH > Emulation, PSGOPHER_CPU_TIMING): fast leaves out the CPU's memory stalls
++// (cache fills and write-backs, uncached RDRAM, its cartridge reads), as most N64 emulators do; accurate
++// (the default) charges them. `kind` names the stall for the video line (bench.c: 5 instruction cache, 6
++// data cache, 7 uncached RDRAM, 8 cartridge reads).
++pub static FAST_MEMORY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
++
++#[inline(always)]
++pub fn add_stall(device: &mut device::Device, cycles: u64, _kind: i32) {
++    if FAST_MEMORY.load(std::sync::atomic::Ordering::Relaxed) {
++        return;
++    }
++    #[cfg(target_vendor = "sie")]
++    crate::psgopher::emu_add(_kind, cycles);
++    add_cycles(device, cycles)
++}
++
+ pub fn add_cycles(device: &mut device::Device, cycles: u64) {
+     device.cpu.cop0.regs[COP0_COUNT_REG] += cycles // COUNT_REG is shifted right 1 bit when read by MFC0
+ }
 diff --git a/src/device/cop1.rs b/src/device/cop1.rs
 index 1fe4cbb..b8a2b7c 100644
 --- a/src/device/cop1.rs
@@ -4047,7 +4095,7 @@ index 1fe4cbb..b8a2b7c 100644
      device.cpu.cop1.instrs = [
          device::cop1::mfc1,           // 0
 diff --git a/src/device/cpu.rs b/src/device/cpu.rs
-index 07aedb0..a0cc410 100644
+index 07aedb0..e1b4762 100644
 --- a/src/device/cpu.rs
 +++ b/src/device/cpu.rs
 @@ -41,23 +41,40 @@ pub struct Cpu {
@@ -4092,7 +4140,7 @@ index 07aedb0..a0cc410 100644
      device.cpu.instrs = [
          device::cop0::reserved,           // SPECIAL
          device::cop0::reserved,           // REGIMM
-@@ -227,14 +244,26 @@ pub fn map_instructions(device: &mut device::Device) {
+@@ -227,14 +244,32 @@ pub fn map_instructions(device: &mut device::Device) {
  }
  
  pub fn init(device: &mut device::Device) {
@@ -4105,6 +4153,12 @@ index 07aedb0..a0cc410 100644
 +        .unwrap_or(125_000_000);
 +    #[cfg(not(psgopher))]
 +    let overclock_hz: u64 = 125_000_000;
++    // PSGopher: CPU Timing (PSGOPHER_CPU_TIMING): fast leaves the memory stalls out (cop0.rs add_stall)
++    #[cfg(psgopher)]
++    device::cop0::FAST_MEMORY.store(
++        std::env::var("PSGOPHER_CPU_TIMING").is_ok_and(|v| v == "fast"),
++        std::sync::atomic::Ordering::Relaxed,
++    );
      device.cpu.clock_rate = if !device.cpu.overclock {
          93750000
      } else {
@@ -4121,7 +4175,7 @@ index 07aedb0..a0cc410 100644
      };
  
      map_instructions(device);
-@@ -262,59 +291,23 @@ pub fn run(device: &mut device::Device) {
+@@ -262,59 +297,23 @@ pub fn run(device: &mut device::Device) {
      device.cpu.running = true;
      while device.cpu.running {
          device.cpu.gpr[0] = 0; // gpr 0 is read only
@@ -4194,7 +4248,7 @@ index 07aedb0..a0cc410 100644
          }
          device::cop0::add_cycles(device, 1);
          if device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG] > device.cpu.next_event_count {
-@@ -322,3 +315,74 @@ pub fn run(device: &mut device::Device) {
+@@ -322,3 +321,74 @@ pub fn run(device: &mut device::Device) {
          }
      }
  }
@@ -8301,10 +8355,31 @@ index e4da5cf..911c4cf 100644
      let cic = u32::from(device.cart.cic_seed);
      let word = (rom_type << 19) | (s7 << 18) | (reset_type << 17) | (cic << 8) | 0x3f;
 diff --git a/src/device/rdram.rs b/src/device/rdram.rs
-index e8f6740..47c513d 100644
+index e8f6740..7578876 100644
 --- a/src/device/rdram.rs
 +++ b/src/device/rdram.rs
-@@ -106,6 +106,56 @@ pub fn write_mem(device: &mut device::Device, address: u64, value: u32, mask: u3
+@@ -58,7 +58,7 @@ pub fn read_mem(
+     address: u64,
+     access_size: device::memory::AccessSize,
+ ) -> u32 {
+-    device::cop0::add_cycles(
++    device::cop0::add_stall(
+         device,
+         match access_size {
+             device::memory::AccessSize::Word => const { rdram_cycles_per_word(4) },
+@@ -67,6 +67,11 @@ pub fn read_mem(
+             device::memory::AccessSize::Icache => const { rdram_cycles_per_word(32) },
+             device::memory::AccessSize::None => unreachable!(),
+         },
++        match access_size {
++            device::memory::AccessSize::Icache => 5,
++            device::memory::AccessSize::Dcache => 6,
++            _ => 7,
++        },
+     );
+     let masked_address = address as usize & RDRAM_MASK;
+ 
+@@ -106,6 +111,58 @@ pub fn write_mem(device: &mut device::Device, address: u64, value: u32, mask: u3
          .copy_from_slice(&data.to_ne_bytes());
  }
  
@@ -8324,7 +8399,9 @@ index e8f6740..47c513d 100644
 +        device::memory::AccessSize::Icache => const { rdram_cycles_per_word(32) },
 +        _ => unreachable!(),
 +    };
-+    device::cop0::add_cycles(device, cycles * N as u64);
++    // (a cache line's fill: the instruction cache's 32 bytes, the data cache's 16)
++    let kind = if matches!(access_size, device::memory::AccessSize::Icache) { 5 } else { 6 };
++    device::cop0::add_stall(device, cycles * N as u64, kind);
 +    let masked_address = address as usize & RDRAM_MASK;
 +
 +    ui::video::check_rdram_read(masked_address as u32, 4 * N as u32);

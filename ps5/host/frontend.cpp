@@ -1935,6 +1935,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(field_row("rdp_timing", "RDP Timing",
 		                           "Selects how long the emulated RDP takes to draw. Accurate gives drawing the time the N64 would take, so heavy scenes slow down as on the console. Instant finishes drawing at once, as most emulators do, which can raise the frame rate of heavy games and romhacks.",
 		                           { { "Accurate", 0 }, { "Instant", 1 } }, 0));
+		s.rows.push_back(field_row("cpu_timing", "CPU Timing",
+		                           "Selects whether the emulated CPU waits for memory as the N64's does. Accurate charges its cache fills, uncached memory and cartridge reads, so heavy code runs at the N64's speed. Fast leaves those waits out, as most emulators do, which can raise the frame rate of romhacks made on them.",
+		                           { { "Accurate", 0 }, { "Fast", 1 } }, 0));
 		{
 			/* the 64DD's IPL: Gopher64 takes the first 4 MB file in data/64dd whose region suits the disk */
 			Row r;
