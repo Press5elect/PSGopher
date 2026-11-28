@@ -120,6 +120,8 @@ void TitleSettings::load()
 			cropOverscan = atoi(value) >= 16 ? 16 : atoi(value) >= 8 ? 8 : 0;
 		else if (!strcmp(key, "downsample"))
 			downsample = std::clamp(atoi(value), 0, 3);
+		else if (!strcmp(key, "vi_timing"))
+			viTiming = !strcmp(value, "compatible") ? 1 : 0;
 		else if (!strcmp(key, "cpu_timing"))
 			cpuTiming = !strcmp(value, "fast") ? 1 : 0;
 		else if (!strcmp(key, "rdp_timing"))
@@ -282,8 +284,11 @@ bool TitleSettings::save() const
 		         "rdp_timing = %s\n"
 		         "# cpu_timing: accurate (the CPU waits for memory as an N64's does: cache fills, uncached memory, cartridge\n"
 		         "# reads) or fast (those waits left out, as in most emulators)\n"
-		         "cpu_timing = %s\n",
-		         overclockSpeed, ddIpl.c_str(), rdpTiming ? "instant" : "accurate", cpuTiming ? "fast" : "accurate");
+		         "cpu_timing = %s\n"
+		         "# vi_timing: accurate (a picture's field lasts what the video registers give it) or compatible (a field\n"
+		         "# shorter than any television's lasts 1/60 s, as in Mupen64Plus: romhacks made on it set such fields)\n"
+		         "vi_timing = %s\n",
+		         overclockSpeed, ddIpl.c_str(), rdpTiming ? "instant" : "accurate", cpuTiming ? "fast" : "accurate", viTiming ? "compatible" : "accurate");
 	}
 	{
 		static const char *const kSharpeningWords[] = { "off", "low", "medium", "high" };
@@ -343,6 +348,7 @@ const Field kFields[] = {
 	{ "crop_overscan", [](const TitleSettings &t) -> int64_t { return t.cropOverscan; },
 	  [](TitleSettings &t, int64_t v) { t.cropOverscan = v >= 16 ? 16 : v >= 8 ? 8 : 0; } },
 	{ "downsample", [](const TitleSettings &t) -> int64_t { return t.downsample; }, [](TitleSettings &t, int64_t v) { t.downsample = (int)std::clamp<int64_t>(v, 0, 3); } },
+	{ "vi_timing", [](const TitleSettings &t) -> int64_t { return t.viTiming; }, [](TitleSettings &t, int64_t v) { t.viTiming = v ? 1 : 0; } },
 	{ "cpu_timing", [](const TitleSettings &t) -> int64_t { return t.cpuTiming; }, [](TitleSettings &t, int64_t v) { t.cpuTiming = v ? 1 : 0; } },
 	{ "rdp_timing", [](const TitleSettings &t) -> int64_t { return t.rdpTiming; }, [](TitleSettings &t, int64_t v) { t.rdpTiming = v ? 1 : 0; } },
 	{ "overclock_speed", [](const TitleSettings &t) -> int64_t { return t.overclockSpeed; },
@@ -440,6 +446,8 @@ void TitleSettings::applyHdr() const
 	setenv("PSGOPHER_RDP_TIMING", rdpTiming ? "instant" : "accurate", 1);
 	/* the CPU's memory stalls: read when the game's CPU starts (cpu.rs) */
 	setenv("PSGOPHER_CPU_TIMING", cpuTiming ? "fast" : "accurate", 1);
+	/* the VI's field length: read when the game's VI starts (vi.rs) */
+	setenv("PSGOPHER_VI_TIMING", viTiming ? "compatible" : "accurate", 1);
 	setenv("PSGOPHER_DEINTERLACE", deinterlace == 1 ? "blend" : "bob", 1);
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");

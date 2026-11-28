@@ -9168,10 +9168,40 @@ index bd57b7f..bdb4f1b 100644
      device.cpu.cop0.tlb_cache_w = TlbCache::default();
  }
 diff --git a/src/device/vi.rs b/src/device/vi.rs
-index 593659b..675c0d1 100644
+index 593659b..e87bfdc 100644
 --- a/src/device/vi.rs
 +++ b/src/device/vi.rs
-@@ -199,7 +199,11 @@ pub fn update_screen(device: &mut device::Device) {
+@@ -18,6 +18,14 @@ const VI_REGS_COUNT: usize = 14;
+ const VI_V_MASK: u32 = 0x3ff;
+ const VI_TYPE_MASK: u32 = 3;
+ const MAX_LIMIT_FREQ: u64 = 3;
++// PSGopher: VI Timing (PSGOPHER_VI_TIMING=compatible; default off, accurate). A field shorter than
++// this many half-lines is no picture a television locks to (NTSC/MPAL fields are 524-525 half-lines,
++// PAL 624-625); only ROMs made for emulators that ignore V_SYNC for the field's length (Mupen64Plus:
++// a field is always clock/60, vi_controller.c) program one. With the setting on, such a field lasts
++// the nominal 1/60 s (1/50 PAL) as there; its half-line count still divides the field for
++// VI_CURRENT and the V_INTR line, as Mupen64Plus's count_per_scanline does.
++const VI_MIN_TV_HALF_LINES: u64 = 400;
++pub static VI_COMPATIBLE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+ 
+ #[derive(Clone, Default, serde::Serialize, serde::Deserialize)]
+ pub struct Vi {
+@@ -66,8 +74,12 @@ fn schedule_field(device: &mut device::Device, start: u64) {
+     } else {
+         0
+     };
+-    vi.field_cycles = if vi.half_lines == 0 {
+-        // Keep screen updates and host callbacks running with the VI off.
++    vi.field_cycles = if vi.half_lines == 0
++        || (vi.half_lines < VI_MIN_TV_HALF_LINES
++            && VI_COMPATIBLE.load(std::sync::atomic::Ordering::Relaxed))
++    {
++        // Keep screen updates and host callbacks running with the VI off (and, with VI Timing
++        // compatible, through a field no television could show: VI_MIN_TV_HALF_LINES).
+         device.cpu.clock_rate / if device.cart.pal { 50 } else { 60 }
+     } else {
+         let h_total = u64::from((vi.regs[VI_H_SYNC_REG] & 0xfff) + 1);
+@@ -199,7 +211,11 @@ pub fn update_screen(device: &mut device::Device) {
              .is_multiple_of(device.ui.speed_limiter.limit_freq)
          && device.ui.speed_limiter.enabled
      {
@@ -9183,18 +9213,25 @@ index 593659b..675c0d1 100644
      }
  
      if !in_rollback {
-@@ -260,6 +264,11 @@ pub fn field_event(device: &mut device::Device) {
+@@ -260,11 +276,18 @@ pub fn field_event(device: &mut device::Device) {
  }
  
  pub fn vertical_interrupt_event(device: &mut device::Device) {
 +    #[cfg(target_vendor = "sie")]
-+    crate::psgopher::emu_add(
-+        4,
-+        device.cpu.clock_rate / if device.cart.pal { 50 } else { 60 },
-+    );
++    crate::psgopher::emu_add(4, device.vi.field_cycles); // the field's own length (PSGopher)
      device::mi::set_rcp_interrupt(device, device::mi::MI_INTR_VI);
  }
  
+ pub fn init(device: &mut device::Device) {
+     device.vi.clock = if device.cart.pal { 49656530 } else { 48681812 };
++    #[cfg(psgopher)]
++    VI_COMPATIBLE.store(
++        std::env::var("PSGOPHER_VI_TIMING").is_ok_and(|v| v == "compatible"),
++        std::sync::atomic::Ordering::Relaxed,
++    );
+     device.vi.regs[VI_V_INTR_REG] = VI_V_MASK;
+     device.vi.regs[VI_H_SYNC_REG] = 0x7ff;
+     schedule_field(device, device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG]);
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..281736b 100644
 --- a/src/lib.rs

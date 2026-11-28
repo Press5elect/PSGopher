@@ -7,6 +7,13 @@ Every change, the newest version first. Games are named by cartridge ID only.
 - Added: **RDP Timing** (BENCH > Emulation, and per game): Accurate (Gopher64's model of the RDP's
   drawing time: heavy scenes slow down as on an N64) or Instant (drawing takes no emulated time, as in
   most emulators). A 96 MB romhack ran at 15-17 fps at 468.75 MHz with the console mostly idle.
+- Added: **VI Timing** (BENCH > Emulation, and per game): Accurate, or Compatible: a video field shorter
+  than any television's (under 400 half-lines) lasts 1/60 s (1/50 PAL), as in Mupen64Plus. A 96 MB
+  romhack sets V_SYNC 0x834 (53 half-lines after the register's 10 bits): each field was 1.68 ms of
+  emulated time, about 593 a second, shown at 60 a second, so the emulated N64, its sound too, ran at
+  about a tenth of real time while the log said 100%. With Compatible it reaches 30 fps with full sound
+  at the N64's own 93.75 MHz in the lockstep harness; normal games' traces are identical with it on or
+  off. The emulated-time line now measures against each field's own length.
 - Added: **CPU Timing** (BENCH > Emulation, and per game): Accurate (the emulated CPU waits for memory
   as an N64's does: cache fills, uncached RDRAM, its cartridge reads) or Fast (those waits left out, as
   in most emulators; instructions keep their cost). The same romhack's CPU was busy about 95% of its

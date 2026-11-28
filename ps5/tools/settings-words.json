@@ -42,6 +42,10 @@
   "choices": "written",
   "default_field": "overclock"
  },
+ "vi_timing": {
+  "label": "written",
+  "choices": "written"
+ },
  "cpu_timing": {
   "label": "written",
   "choices": "written"

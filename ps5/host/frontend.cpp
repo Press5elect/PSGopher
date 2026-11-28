@@ -1938,6 +1938,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(field_row("cpu_timing", "CPU Timing",
 		                           "Selects whether the emulated CPU waits for memory as the N64's does. Accurate charges its cache fills, uncached memory and cartridge reads, so heavy code runs at the N64's speed. Fast leaves those waits out, as most emulators do, which can raise the frame rate of romhacks made on them.",
 		                           { { "Accurate", 0 }, { "Fast", 1 } }, 0));
+		s.rows.push_back(field_row("vi_timing", "VI Timing",
+		                           "Selects how long a picture lasts when a game sets a video mode no television could show. Accurate keeps the N64's timing, which runs such a game many times too fast and shows it slowed down. Compatible gives it the 60 pictures a second most emulators do, which some romhacks are made for.",
+		                           { { "Accurate", 0 }, { "Compatible", 1 } }, 0));
 		{
 			/* the 64DD's IPL: Gopher64 takes the first 4 MB file in data/64dd whose region suits the disk */
 			Row r;

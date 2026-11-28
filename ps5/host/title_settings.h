@@ -51,7 +51,8 @@ struct TitleSettings {
 	std::string ddIpl;           // the 64DD IPL chosen in BENCH (a file of 4 MB); "" Gopher64 looks in data/64dd (PSGOPHER_DD_IPL)
 	int overclockSpeed{ 0 };
 	int rdpTiming{ 0 };
-	int cpuTiming{ 0 };          // 0 accurate (the CPU's memory stalls charged), 1 fast (left out) (PSGOPHER_CPU_TIMING)          // 0 accurate (Gopher64's model of the RDP's speed), 1 instant (PSGOPHER_RDP_TIMING)     // the clock with Overclock N64 CPU on: 0 125 MHz (Gopher64's), 1 150, 2 187.5, 3 250, 4 281.25, 5 375, 6 468.75 (PSGOPHER_OVERCLOCK_HZ)
+	int cpuTiming{ 0 };
+	int viTiming{ 0 };           // 0 accurate (the field as the VI's registers give it), 1 compatible (a field shorter than a TV's lasts 1/60 s) (PSGOPHER_VI_TIMING)          // 0 accurate (the CPU's memory stalls charged), 1 fast (left out) (PSGOPHER_CPU_TIMING)          // 0 accurate (Gopher64's model of the RDP's speed), 1 instant (PSGOPHER_RDP_TIMING)     // the clock with Overclock N64 CPU on: 0 125 MHz (Gopher64's), 1 150, 2 187.5, 3 250, 4 281.25, 5 375, 6 468.75 (PSGOPHER_OVERCLOCK_HZ)
 	int downsample{ 0 };         // steps the upscaled picture is scaled down by, 0..3 (PSGOPHER_DOWNSAMPLE); SSAA
 	                             // downscaling takes it all the way, whatever this says
 	int deinterlace{ 1 };        // 0 bob, 1 blend (the default)
