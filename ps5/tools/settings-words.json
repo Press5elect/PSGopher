@@ -42,6 +42,10 @@
   "choices": "written",
   "default_field": "overclock"
  },
+ "rdp_timing": {
+  "label": "written",
+  "choices": "written"
+ },
  "overclock_speed": {
   "label": "written",
   "choices": "written"

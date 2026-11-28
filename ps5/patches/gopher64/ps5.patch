@@ -113,10 +113,10 @@ index d4bd4a1..4b19cd4 100644
          .allowlist_function("rdp_idle")
          .allowlist_function("rdp_set_fps")
 diff --git a/parallel-rdp/interface.cpp b/parallel-rdp/interface.cpp
-index b741e0d..b8b6918 100644
+index b741e0d..a7d5a90 100644
 --- a/parallel-rdp/interface.cpp
 +++ b/parallel-rdp/interface.cpp
-@@ -20,6 +20,112 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
+@@ -20,6 +20,118 @@ __declspec(dllexport) int AmdPowerXpressRequestHighPerformance = 1;
  
  using namespace Vulkan;
  
@@ -225,11 +225,17 @@ index b741e0d..b8b6918 100644
 +  }
 +};
 +#endif
++// PSGopher (PS5): the emulated N64's time for the video line (ps5/host/bench.c; weak: the lockstep harness has none)
++extern "C" void psgopher_emu_add(int what, uint64_t cycles) __attribute__((weak));
++// PSGopher: RDP Timing (BENCH > Emulation, PSGOPHER_RDP_TIMING): accurate (Gopher64's timing model, below) or
++// instant (drawing takes no emulated time, as in most N64 emulators; only the syncs keep their short cost, so
++// the DP interrupt still comes)
++static bool psg_rdp_instant = false;
 +
  #define DP_STATUS_XBUS_DMA 0x01
  #define DP_STATUS_FREEZE 0x02
  #define DP_STATUS_FLUSH 0x04
-@@ -243,6 +349,77 @@ static bool texture_load_snapshot_filter(uint32_t address, uint32_t length) {
+@@ -243,6 +355,77 @@ static bool texture_load_snapshot_filter(uint32_t address, uint32_t length) {
    return false;
  }
  
@@ -307,7 +313,7 @@ index b741e0d..b8b6918 100644
  static TTF_Font *message_font;
  static std::queue<Message> messages;
  
-@@ -427,6 +604,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
+@@ -427,6 +610,36 @@ bool sdl_event_filter(void *userdata, SDL_Event *event) {
      case USER_EVENT_FAST_FORWARD:
        callback.enable_speedlimiter = !callback.enable_speedlimiter;
        break;
@@ -344,7 +350,7 @@ index b741e0d..b8b6918 100644
      default:
        break;
      }
-@@ -459,6 +666,60 @@ JoystickEvent get_joystick_event() {
+@@ -459,6 +672,62 @@ JoystickEvent get_joystick_event() {
  
  void rdp_idle() { processor->idle(); }
  
@@ -359,6 +365,8 @@ index b741e0d..b8b6918 100644
 +    const char *v = word(name, fallback ? "1" : "0");
 +    return v[0] == '1';
 +  };
++  psg_rdp_instant = !strcmp(word("PSGOPHER_RDP_TIMING", "accurate"), "instant");
++  psgopher_say("rdp: timing %s", psg_rdp_instant ? "instant (drawing takes no emulated time)" : "accurate (Gopher64's model of the RDP's speed)");
 +  const char *filter = word("PSGOPHER_FINAL_FILTER", "sharp");
 +  psg_picture.final_filter = !strcmp(filter, "bilinear") ? 1 : !strcmp(filter, "nearest") ? 2 : !strcmp(filter, "bicubic") ? 3
 +                            : !strcmp(filter, "lanczos") ? 4 : 0;
@@ -405,7 +413,7 @@ index b741e0d..b8b6918 100644
  static void rdp_new_processor() {
    RDP::CommandProcessorFlags flags =
        RDP::COMMAND_PROCESSOR_FLAG_HOST_VISIBLE_HIDDEN_RDRAM_BIT |
-@@ -480,6 +741,14 @@ static void rdp_new_processor() {
+@@ -480,6 +749,14 @@ static void rdp_new_processor() {
    processor = new RDP::CommandProcessor(wsi->get_device(), gfx_info.RDRAM, 0,
                                          gfx_info.RDRAM_SIZE,
                                          gfx_info.RDRAM_SIZE / 2, flags);
@@ -420,7 +428,7 @@ index b741e0d..b8b6918 100644
    g_tmem = processor->get_tmem();
    if (!g_tmem) {
      LOGE("Failed to get tmem\n");
-@@ -496,6 +765,28 @@ static void rdp_new_processor() {
+@@ -496,6 +773,28 @@ static void rdp_new_processor() {
  
    synchronous_rdram_uploads =
        single_threaded && !processor->is_rdram_host_coherent();
@@ -449,7 +457,7 @@ index b741e0d..b8b6918 100644
    // Staging uploads that run on this thread cannot race CPU writes, so track
    // the blocks the GPU may write within each readback page in that mode.
    rdram_tracker.reset(gfx_info.RDRAM_SIZE,
-@@ -547,10 +838,24 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -547,10 +846,24 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
    }
  
    gfx_info = _gfx_info;
@@ -474,7 +482,7 @@ index b741e0d..b8b6918 100644
    } else {
      fragment_spirv = plain_fragment_spirv;
      fragment_size = sizeof(plain_fragment_spirv);
-@@ -575,13 +880,29 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -575,13 +888,29 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
      rdp_close();
      return false;
    }
@@ -504,7 +512,7 @@ index b741e0d..b8b6918 100644
  
    if (!processor->device_is_supported()) {
      LOGE("Failed to init parallel-rdp processor.\n");
-@@ -606,6 +927,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
+@@ -606,6 +935,16 @@ bool rdp_init(void *_window, GFX_INFO _gfx_info, const void *font,
  
    callback.emu_running = true;
    callback.enable_speedlimiter = true;
@@ -521,7 +529,7 @@ index b741e0d..b8b6918 100644
    callback.paused = false;
    callback.save_state_slot = save_state_slot;
    crop_letterbox = false;
-@@ -642,6 +973,11 @@ void rdp_close() {
+@@ -642,6 +981,11 @@ void rdp_close() {
      TTF_CloseFont(achievement_challenge_indicator_font);
      achievement_challenge_indicator_font = nullptr;
    }
@@ -533,7 +541,7 @@ index b741e0d..b8b6918 100644
    if (processor) {
      delete processor;
      processor = nullptr;
-@@ -733,9 +1069,392 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
+@@ -733,9 +1077,392 @@ static uint32_t pop_message_callback(void *userdata, SDL_TimerID timerID,
    return 0;
  }
  
@@ -926,7 +934,7 @@ index b741e0d..b8b6918 100644
    options.blend_previous_frame = !gfx_info.ssaa;
    options.upscale_deinterlacing = gfx_info.ssaa;
    if (gfx_info.ssaa) {
-@@ -754,6 +1473,7 @@ static void render_frame(Vulkan::Device &device) {
+@@ -754,6 +1481,7 @@ static void render_frame(Vulkan::Device &device) {
        break;
      }
    }
@@ -934,7 +942,7 @@ index b741e0d..b8b6918 100644
  
    if (crop_letterbox && gfx_info.widescreen) {
      options.crop_rect.enable = true;
-@@ -765,8 +1485,25 @@ static void render_frame(Vulkan::Device &device) {
+@@ -765,8 +1493,25 @@ static void render_frame(Vulkan::Device &device) {
        options.crop_rect.bottom = 30;
      }
    }
@@ -960,7 +968,7 @@ index b741e0d..b8b6918 100644
  
    Vulkan::ResourceLayout vertex_layout = {};
    Vulkan::ResourceLayout fragment_layout = {};
-@@ -776,16 +1513,107 @@ static void render_frame(Vulkan::Device &device) {
+@@ -776,16 +1521,107 @@ static void render_frame(Vulkan::Device &device) {
      fragment_layout.push_constant_size = sizeof(Push);
  
    // This request is cached.
@@ -1068,7 +1076,7 @@ index b741e0d..b8b6918 100644
  
      cmd->set_program(program);
  
-@@ -800,7 +1628,11 @@ static void render_frame(Vulkan::Device &device) {
+@@ -800,7 +1636,11 @@ static void render_frame(Vulkan::Device &device) {
      if (image) {
        calculate_viewport(&vp.x, &vp.y, &vp.width, &vp.height,
                           image->get_height() /
@@ -1080,7 +1088,7 @@ index b741e0d..b8b6918 100644
  
        if (gfx_info.crt) {
          // Set shader parameters
-@@ -813,13 +1645,39 @@ static void render_frame(Vulkan::Device &device) {
+@@ -813,13 +1653,39 @@ static void render_frame(Vulkan::Device &device) {
          cmd->push_constants(&push, 0, sizeof(push));
        }
  
@@ -1120,7 +1128,7 @@ index b741e0d..b8b6918 100644
      if (!messages.empty()) {
        Message *message = &messages.front();
        if (!message->image) {
-@@ -846,17 +1704,48 @@ static void render_frame(Vulkan::Device &device) {
+@@ -846,17 +1712,48 @@ static void render_frame(Vulkan::Device &device) {
      if (messages.empty() && display_fps && fps_image) {
        draw_fps(cmd, vp);
      }
@@ -1169,7 +1177,7 @@ index b741e0d..b8b6918 100644
    auto &device = wsi->get_device();
    render_frame(device);
  }
-@@ -870,9 +1759,53 @@ void rdp_update_screen() {
+@@ -870,9 +1767,53 @@ void rdp_update_screen() {
    void *android_pointer = SDL_GetPointerProperty(
        props, SDL_PROP_WINDOW_ANDROID_WINDOW_POINTER, nullptr);
    if (android_pointer && wsi_platform->is_surface_valid()) {
@@ -1223,7 +1231,7 @@ index b741e0d..b8b6918 100644
  #ifdef __ANDROID__
    } else {
      SDL_PumpEvents();
-@@ -904,9 +1837,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
+@@ -904,9 +1845,15 @@ void rdp_check_rdram(uint32_t address, uint32_t length, bool write) {
    if (stamp <= completed)
      return;
    // Signal the queued commands if they haven't been submitted yet.
@@ -1239,7 +1247,7 @@ index b741e0d..b8b6918 100644
  }
  
  size_t rdp_state_size() {
-@@ -933,6 +1872,56 @@ void rdp_save_state(uint8_t *state) {
+@@ -933,6 +1880,56 @@ void rdp_save_state(uint8_t *state) {
           &snapshot, sizeof(snapshot));
  }
  
@@ -1296,7 +1304,7 @@ index b741e0d..b8b6918 100644
  void rdp_load_state(GFX_INFO _gfx_info, const uint8_t *state,
                      size_t state_size) {
    gfx_info = _gfx_info;
-@@ -956,6 +1945,11 @@ void rdp_load_state(GFX_INFO _gfx_info, const uint8_t *state,
+@@ -956,6 +1953,11 @@ void rdp_load_state(GFX_INFO _gfx_info, const uint8_t *state,
               processor->get_hidden_rdram_size(),
           sizeof(snapshot));
    processor->load_render_state(snapshot);
@@ -1308,7 +1316,21 @@ index b741e0d..b8b6918 100644
  }
  
  static void push_onscreen_message(void *data) {
-@@ -1076,6 +2070,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
+@@ -987,8 +1989,12 @@ static const uint64_t RDP_SCANLINE_CLOCKS = 16;
+ static const uint64_t RDP_SYNC_CLOCKS = 50;
+ 
+ // RDP clocks (62.5 MHz) to CPU cycles (93.75 MHz)
+-static void rdp_add_busy(uint64_t clocks) {
++static void rdp_add_busy(uint64_t clocks, bool sync = false) {
++  if (psg_rdp_instant && !sync)
++    return;
+   rdp_device.busy_until += clocks * 3 / 2;
++  if (psgopher_emu_add)
++    psgopher_emu_add(0, clocks * 3 / 2);
+ }
+ 
+ static uint64_t rdp_pixel_clocks(uint64_t pixels) {
+@@ -1076,6 +2082,12 @@ void rdp_translate_busy_until(uint64_t old_count, uint64_t new_count) {
  }
  
  uint64_t rdp_process_commands(uint64_t now) {
@@ -1321,7 +1343,16 @@ index b741e0d..b8b6918 100644
    uint64_t interrupt_timer = 0;
  
    // the RDP starts on this batch once it has finished any earlier work
-@@ -1205,7 +2205,19 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1137,7 +2149,7 @@ uint64_t rdp_process_commands(uint64_t now) {
+                                  &rdp_device.cmd_data[2 * rdp_device.cmd_cur]);
+ 
+     if (command >= 0x26 && command <= 0x29) { // Sync{Load,Pipe,Tile,Full}
+-      rdp_add_busy(RDP_SYNC_CLOCKS);
++      rdp_add_busy(RDP_SYNC_CLOCKS, true);
+     } else if (command >= 0x08 && command <= 0x0F) {
+       rdp_add_busy(RDP_PRIMITIVE_SETUP_CLOCKS +
+                    rdp_pixel_clocks(rdp_triangle_pixels(
+@@ -1205,7 +2217,19 @@ uint64_t rdp_process_commands(uint64_t now) {
        break;
      case RDP::Op::SetTextureImage:
        rdp_device.frame_buffer_info.texture_pixel_size = (w1 >> 19) & 0x3;
@@ -1341,7 +1372,7 @@ index b741e0d..b8b6918 100644
      case RDP::Op::SetScissor: {
        uint32_t upper_left_x = ((w1 >> 12) & 0xFFF) >> 2;
        uint32_t upper_left_y = (w1 & 0xFFF) >> 2;
-@@ -1233,8 +2245,12 @@ uint64_t rdp_process_commands(uint64_t now) {
+@@ -1233,8 +2257,12 @@ uint64_t rdp_process_commands(uint64_t now) {
        rdp_device.frame_buffer_info.depth_update =
            depth_allowed && (w2 & (1u << 5));
      } break;
@@ -1355,7 +1386,7 @@ index b741e0d..b8b6918 100644
        // SyncFull itself adds RDP_SYNC_CLOCKS, so busy_until > now here
        interrupt_timer = rdp_device.busy_until - now;
        break;
-@@ -1264,7 +2280,21 @@ static void rdp_set_fps_callback(void *userdata) {
+@@ -1264,7 +2292,21 @@ static void rdp_set_fps_callback(void *userdata) {
    delete data;
  }
  
@@ -4239,10 +4270,40 @@ index 07aedb0..a0cc410 100644
 +    }
 +}
 diff --git a/src/device/cpu_instructions.rs b/src/device/cpu_instructions.rs
-index 6496c9b..0c45875 100644
+index 6496c9b..332d1f2 100644
 --- a/src/device/cpu_instructions.rs
 +++ b/src/device/cpu_instructions.rs
-@@ -295,6 +295,16 @@ pub fn ldr(device: &mut device::Device, opcode: u32) {
+@@ -56,6 +56,14 @@ pub fn check_relative_idle_loop(device: &mut device::Device, opcode: u32) {
+             device::memory::AccessSize::Word,
+         ) == 0
+     {
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::emu_add(
++            2,
++            device
++                .cpu
++                .next_event_count
++                .saturating_sub(device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG]),
++        );
+         device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG] = device.cpu.next_event_count
+     }
+ }
+@@ -68,6 +76,14 @@ fn check_absolute_idle_loop(device: &mut device::Device, target: u64) {
+             device::memory::AccessSize::Word,
+         ) == 0
+     {
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::emu_add(
++            2,
++            device
++                .cpu
++                .next_event_count
++                .saturating_sub(device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG]),
++        );
+         device.cpu.cop0.regs[device::cop0::COP0_COUNT_REG] = device.cpu.next_event_count
+     }
+ }
+@@ -295,6 +311,16 @@ pub fn ldr(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn lb(device: &mut device::Device, opcode: u32) {
@@ -4259,7 +4320,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -314,6 +324,16 @@ pub fn lb(device: &mut device::Device, opcode: u32) {
+@@ -314,6 +340,16 @@ pub fn lb(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn lh(device: &mut device::Device, opcode: u32) {
@@ -4276,7 +4337,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -360,6 +380,16 @@ pub fn lwl(device: &mut device::Device, opcode: u32) {
+@@ -360,6 +396,16 @@ pub fn lwl(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn lw(device: &mut device::Device, opcode: u32) {
@@ -4293,7 +4354,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -378,6 +408,16 @@ pub fn lw(device: &mut device::Device, opcode: u32) {
+@@ -378,6 +424,16 @@ pub fn lw(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn lbu(device: &mut device::Device, opcode: u32) {
@@ -4310,7 +4371,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -397,6 +437,16 @@ pub fn lbu(device: &mut device::Device, opcode: u32) {
+@@ -397,6 +453,16 @@ pub fn lbu(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn lhu(device: &mut device::Device, opcode: u32) {
@@ -4327,7 +4388,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -445,6 +495,16 @@ pub fn lwr(device: &mut device::Device, opcode: u32) {
+@@ -445,6 +511,16 @@ pub fn lwr(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn lwu(device: &mut device::Device, opcode: u32) {
@@ -4344,7 +4405,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -463,6 +523,20 @@ pub fn lwu(device: &mut device::Device, opcode: u32) {
+@@ -463,6 +539,20 @@ pub fn lwu(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn sb(device: &mut device::Device, opcode: u32) {
@@ -4365,7 +4426,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -484,6 +558,20 @@ pub fn sb(device: &mut device::Device, opcode: u32) {
+@@ -484,6 +574,20 @@ pub fn sb(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn sh(device: &mut device::Device, opcode: u32) {
@@ -4386,7 +4447,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -532,6 +620,20 @@ pub fn swl(device: &mut device::Device, opcode: u32) {
+@@ -532,6 +636,20 @@ pub fn swl(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn sw(device: &mut device::Device, opcode: u32) {
@@ -4407,7 +4468,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -628,6 +730,8 @@ pub fn swr(device: &mut device::Device, opcode: u32) {
+@@ -628,6 +746,8 @@ pub fn swr(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn cache(device: &mut device::Device, opcode: u32) {
@@ -4416,7 +4477,7 @@ index 6496c9b..0c45875 100644
      let virt_address = device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16));
      let (phys_address, _, err) =
          device::memory::translate_address(device, virt_address, device::memory::AccessType::Read);
-@@ -794,6 +898,16 @@ pub fn lld(device: &mut device::Device, opcode: u32) {
+@@ -794,6 +914,16 @@ pub fn lld(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn ld(device: &mut device::Device, opcode: u32) {
@@ -4433,7 +4494,7 @@ index 6496c9b..0c45875 100644
      let (phys_address, cached, err) = device::memory::translate_address(
          device,
          device.cpu.gpr[rs(opcode) as usize].wrapping_add(se16(imm(opcode) as i16)),
-@@ -875,6 +989,15 @@ pub fn scd(device: &mut device::Device, opcode: u32) {
+@@ -875,6 +1005,15 @@ pub fn scd(device: &mut device::Device, opcode: u32) {
  }
  
  pub fn sd(device: &mut device::Device, opcode: u32) {
@@ -8132,7 +8193,7 @@ index 7e6498a..f213401 100644
 +    device::dd::map(device);
  }
 diff --git a/src/device/pi.rs b/src/device/pi.rs
-index dea4bf3..cc783e1 100644
+index dea4bf3..cc766a9 100644
 --- a/src/device/pi.rs
 +++ b/src/device/pi.rs
 @@ -54,7 +54,7 @@ pub fn read_regs(
@@ -8144,19 +8205,21 @@ index dea4bf3..cc783e1 100644
  
      let cart_addr = device.pi.regs[PI_CART_ADDR_REG] & !1;
      let dram_addr = device.pi.regs[PI_DRAM_ADDR_REG] & 0xFFFFFE;
-@@ -68,7 +68,11 @@ fn dma_read(device: &mut device::Device) {
+@@ -68,7 +68,13 @@ fn dma_read(device: &mut device::Device) {
      // check RDP before PI reads from RDRAM
      ui::video::check_rdram_read(dram_addr, length);
  
 +    #[cfg(psgopher)]
 +    let place = crate::psgopher::where_in(crate::psgopher::place::PI_DMA);
      let cycles = (handler.read)(device, cart_addr, dram_addr, length);
++    #[cfg(target_vendor = "sie")]
++    crate::psgopher::emu_add(3, cycles);
 +    #[cfg(psgopher)]
 +    drop(place);
  
      device::events::create_event(device, device::events::EVENT_TYPE_PI, cycles);
  
-@@ -80,7 +84,7 @@ fn dma_read(device: &mut device::Device) {
+@@ -80,7 +86,7 @@ fn dma_read(device: &mut device::Device) {
  }
  
  fn dma_write(device: &mut device::Device) {
@@ -8165,19 +8228,21 @@ index dea4bf3..cc783e1 100644
  
      let cart_addr = device.pi.regs[PI_CART_ADDR_REG] & !1;
      let dram_addr = device.pi.regs[PI_DRAM_ADDR_REG] & 0xFFFFFE;
-@@ -97,7 +101,11 @@ fn dma_write(device: &mut device::Device) {
+@@ -97,7 +103,13 @@ fn dma_write(device: &mut device::Device) {
      // check RDP before PI writes to RDRAM
      ui::video::check_rdram_write(dram_addr, length);
  
 +    #[cfg(psgopher)]
 +    let place = crate::psgopher::where_in(crate::psgopher::place::PI_DMA);
      let cycles = (handler.write)(device, cart_addr, dram_addr, length);
++    #[cfg(target_vendor = "sie")]
++    crate::psgopher::emu_add(3, cycles);
 +    #[cfg(psgopher)]
 +    drop(place);
  
      device::events::create_event(device, device::events::EVENT_TYPE_PI, cycles);
  
-@@ -108,7 +116,11 @@ fn dma_write(device: &mut device::Device) {
+@@ -108,7 +120,11 @@ fn dma_write(device: &mut device::Device) {
      device.pi.regs[PI_STATUS_REG] |= PI_STATUS_DMA_BUSY
  }
  
@@ -8190,7 +8255,7 @@ index dea4bf3..cc783e1 100644
      let mut handler = PiHandler {
          read: device::cart::rom::dma_read,
          write: device::cart::rom::dma_write,
-@@ -206,7 +218,7 @@ pub fn dma_event(device: &mut device::Device) {
+@@ -206,7 +222,7 @@ pub fn dma_event(device: &mut device::Device) {
      device::mi::set_rcp_interrupt(device, device::mi::MI_INTR_PI)
  }
  
@@ -8199,7 +8264,7 @@ index dea4bf3..cc783e1 100644
      device: &mut device::Device,
      mut _cart_addr: u32,
      mut _dram_addr: u32,
-@@ -215,7 +227,7 @@ fn unknown_dma_read(
+@@ -215,7 +231,7 @@ fn unknown_dma_read(
      device::pi::calculate_cycles(device, 1, length)
  }
  
@@ -8443,10 +8508,10 @@ index 7581053..d33f3f6 100644
  }
  
 diff --git a/src/device/rsp_interface.rs b/src/device/rsp_interface.rs
-index 2823aef..9a81814 100644
+index 2823aef..f1efe13 100644
 --- a/src/device/rsp_interface.rs
 +++ b/src/device/rsp_interface.rs
-@@ -509,7 +509,11 @@ fn do_task(device: &mut device::Device) {
+@@ -509,7 +509,13 @@ fn do_task(device: &mut device::Device) {
      if device.rsp.regs[SP_DMA_BUSY_REG] == 1 {
          device.rsp.run_after_dma = true
      } else {
@@ -8455,6 +8520,8 @@ index 2823aef..9a81814 100644
          let timer = device::rsp_cpu::run(device);
 +        #[cfg(target_vendor = "sie")]
 +        crate::psgopher::rsp_end(timer);
++        #[cfg(target_vendor = "sie")]
++        crate::psgopher::emu_add(1, timer);
  
          device::events::create_event(device, device::events::EVENT_TYPE_SP, timer)
      }
@@ -9024,7 +9091,7 @@ index bd57b7f..bdb4f1b 100644
      device.cpu.cop0.tlb_cache_w = TlbCache::default();
  }
 diff --git a/src/device/vi.rs b/src/device/vi.rs
-index 593659b..3c0c51f 100644
+index 593659b..675c0d1 100644
 --- a/src/device/vi.rs
 +++ b/src/device/vi.rs
 @@ -199,7 +199,11 @@ pub fn update_screen(device: &mut device::Device) {
@@ -9039,6 +9106,18 @@ index 593659b..3c0c51f 100644
      }
  
      if !in_rollback {
+@@ -260,6 +264,11 @@ pub fn field_event(device: &mut device::Device) {
+ }
+ 
+ pub fn vertical_interrupt_event(device: &mut device::Device) {
++    #[cfg(target_vendor = "sie")]
++    crate::psgopher::emu_add(
++        4,
++        device.cpu.clock_rate / if device.cart.pal { 50 } else { 60 },
++    );
+     device::mi::set_rcp_interrupt(device, device::mi::MI_INTR_VI);
+ }
+ 
 diff --git a/src/lib.rs b/src/lib.rs
 index 4e51a1b..281736b 100644
 --- a/src/lib.rs
@@ -9186,10 +9265,10 @@ index 4e51a1b..281736b 100644
                  disable_expansion_pak,
 diff --git a/src/psgopher.rs b/src/psgopher.rs
 new file mode 100644
-index 0000000..6a4d992
+index 0000000..26f6e77
 --- /dev/null
 +++ b/src/psgopher.rs
-@@ -0,0 +1,1536 @@
+@@ -0,0 +1,1543 @@
 +// SPDX-License-Identifier: GPL-3.0-or-later
 +// Additional term (GPL-3.0 section 7(b)): keep the attribution "PSGopher by Press5elect"; see PSGopher's NOTICE.
 +//! PSGopher (PS5): the entry point the title's `main` calls, and the PS5's folders.
@@ -9399,6 +9478,7 @@ index 0000000..6a4d992
 +    /// The boot log's video line: the RSP's time on the emulation thread (ps5/host/bench.c)
 +    fn psgopher_bench_rsp_begin();
 +    fn psgopher_bench_rsp_end(cycles: u64);
++    fn psgopher_emu_add(what: i32, cycles: u64);
 +    fn psgopher_bench_limiter_begin();
 +    fn psgopher_bench_limiter_end();
 +    /// Where the emulation thread is, for the freeze watchdog (bench.c): the place entered returns
@@ -9451,6 +9531,12 @@ index 0000000..6a4d992
 +pub fn rsp_end(cycles: u64) {
 +    unsafe { psgopher_bench_rsp_end(cycles) };
 +    unsafe { psgopher_where_restore(RSP_RETURN.load(std::sync::atomic::Ordering::Relaxed)) }
++}
++
++/// The emulated N64's time for the video line (bench.c): 0 RDP model, 1 RSP, 2 CPU idle skipped, 3 cart DMA, 4 a VI
++#[inline]
++pub fn emu_add(what: i32, cycles: u64) {
++    unsafe { psgopher_emu_add(what, cycles) }
 +}
 +
 +/// The speed limiter's sleep (benchmark analysis B1: kept apart from the emulation's work).

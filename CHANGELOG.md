@@ -4,6 +4,12 @@ Every change, the newest version first. Games are named by cartridge ID only.
 
 ## v0.0.2 (2026-11-28)
 
+- Added: **RDP Timing** (BENCH > Emulation, and per game): Accurate (Gopher64's model of the RDP's
+  drawing time: heavy scenes slow down as on an N64) or Instant (drawing takes no emulated time, as in
+  most emulators). A 96 MB romhack ran at 15-17 fps at 468.75 MHz with the console mostly idle.
+- Added: the boot log's `video: emulated time:` line every 10 s: how much of the emulated N64's time
+  the CPU spent waiting and the RSP, the RDP (its timing model) and cartridge DMA were busy, so a game
+  that runs below its frame rate at full speed shows what it waits for.
 - Added: **Start With a Patch** on a game's page (Triangle): choose a `.bps`, `.ips` or `.ups` on the
   console, a USB drive or a network share, and the game starts with it; the pairing is kept
   (`config/patches.cfg`), so the hack is listed with that game from the next search.

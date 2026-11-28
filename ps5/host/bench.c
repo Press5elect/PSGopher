@@ -269,6 +269,17 @@ void psgopher_bench_rsp_begin(void)
    rsp_begin_tsc = __rdtsc();
 }
 
+/* Emulated time, in the N64 CPU's cycles, for the video line: what keeps the emulated N64 busy or waiting
+ * (0 the RDP's timing model, 1 RSP tasks, 2 the CPU's idle loops skipped, 3 cartridge DMA, 4 VI periods: the
+ * whole). Added on the emulation thread, read on the video line's. */
+static _Atomic uint64_t emu_cycles[5];
+
+void psgopher_emu_add(int what, uint64_t cycles)
+{
+   if (what >= 0 && what < 5)
+      atomic_fetch_add_explicit(&emu_cycles[what], cycles, memory_order_relaxed);
+}
+
 void psgopher_bench_rsp_end(uint64_t cycles)
 {
    const uint64_t t = __rdtsc() - rsp_begin_tsc;
@@ -741,6 +752,16 @@ static void video_heartbeat(uint64_t end_ns)
           l.general_share < 0 ? 0.0 : l.general_share * 100.0, l.compiles_done, l.compile_ms, l.compiles_waiting, (unsigned long long)audio.queued_frames,
           (unsigned long long)(audio.underrun_grains - video_underruns_at), longest_frame, hitches);
       video_underruns_at = audio.underrun_grains;
+      {
+         /* the emulated N64's own time: where a game that runs below its frame rate at full speed waits */
+         uint64_t e[5];
+         for (int i = 0; i < 5; i++)
+            e[i] = atomic_exchange(&emu_cycles[i], 0);
+         if (e[4])
+            say("video: emulated time: CPU waiting %.0f%%, RSP busy %.0f%%, RDP busy %.0f%% (its timing model), cartridge DMA %.0f%%",
+                (double)e[2] * 100.0 / (double)e[4], (double)e[1] * 100.0 / (double)e[4], (double)e[0] * 100.0 / (double)e[4],
+                (double)e[3] * 100.0 / (double)e[4]);
+      }
       video_since_ns = end_ns;
       video_count = 0;
    }

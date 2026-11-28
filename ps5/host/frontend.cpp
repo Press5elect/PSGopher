@@ -1932,6 +1932,9 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		                           { { "125 MHz", 0 }, { "150 MHz", 1 }, { "187.5 MHz", 2 }, { "250 MHz", 3 }, { "281.25 MHz", 4 }, { "375 MHz", 5 }, { "468.75 MHz", 6 } }, 0));
 		s.rows.push_back(field_row("expansion_pak", "Expansion Pak", "Selects whether the N64 has the 8 MB it has with the Expansion Pak or its standard 4 MB. Auto turns it on, except for a game that misbehaves with it. Some games need the Expansion Pak, and a few misbehave with it.",
 		                           { { "Auto", PakAuto }, { "On", PakOn }, { "Off", PakOff } }, PakAuto));
+		s.rows.push_back(field_row("rdp_timing", "RDP Timing",
+		                           "Selects how long the emulated RDP takes to draw. Accurate gives drawing the time the N64 would take, so heavy scenes slow down as on the console. Instant finishes drawing at once, as most emulators do, which can raise the frame rate of heavy games and romhacks.",
+		                           { { "Accurate", 0 }, { "Instant", 1 } }, 0));
 		{
 			/* the 64DD's IPL: Gopher64 takes the first 4 MB file in data/64dd whose region suits the disk */
 			Row r;
