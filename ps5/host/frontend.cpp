@@ -1220,6 +1220,32 @@ void Frontend::cheatPicker(ImDrawList *dl, const PadInput &pad, const FrontendFo
 
 /* ---------------------------------------------------------------- RACK */
 
+/* A cartridge's region for the rack's filter: 1 USA (and Canada), 2 Europe and the PAL countries
+ * (Australia too), 3 Japan, 4 other (Asia, Brazil, China, Korea) or unknown. By the header's
+ * destination letter; a .zip or .7z (no header read) by the file name's tags. */
+static int regionGroupOf(const Game &g)
+{
+	if (g.facts && g.id.size() == 4) {
+		switch (g.id[3]) {
+		case 'E': case 'N': return 1;
+		case 'J': return 3;
+		case 'P': case 'X': case 'Y': case 'D': case 'F': case 'I': case 'S': case 'U': case 'H': case 'W': case 'L': return 2;
+		default: return 4;
+		}
+	}
+	const std::string &n = g.name;
+	auto has = [&n](const char *tag) { return n.find(tag) != std::string::npos; };
+	if (has("(USA") || has("(U)") || has("(Canada"))
+		return 1;
+	if (has("(Japan") || has("(J)"))
+		return 3;
+	if (has("(Europe") || has("(E)") || has("(Germany") || has("(France") || has("(Italy") || has("(Spain") || has("(Australia") ||
+	    has("(Netherlands") || has("(Sweden") || has("(Scandinavia") || has("(UK") || has("(G)") || has("(F)") || has("(I)") ||
+	    has("(S)") || has("(A)"))
+		return 2;
+	return 4;
+}
+
 void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 {
 	Ink ink{ dl, u_ };
@@ -1227,6 +1253,7 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	constexpr int COLS = 52, ROWS_SHOWN = 5;
 	static const char *const sorts[4] = { "A-Z", "Recently played", "Most played", "Size" };
 	static const char *const shows[7] = { "All", "Played", "Never played", "Has probes", "Internal", "USB", "Network" };
+	static const char *const regions[5] = { "All regions", "USA", "Europe (PAL)", "Japan", "Other regions" };
 	const int n = (int)rack_.size();
 
 	/* what the filter shows */
@@ -1250,6 +1277,8 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	auto visible = [&](int k) {
 		const int i = rack_[k];
 		const Game &g = games_[i];
+		if (region_ != 0 && regionGroupOf(g) != region_)
+			return false;
 		switch (show_) {
 		case 1: return played_[i].last > 0;
 		case 2: return played_[i].last == 0;
@@ -1344,6 +1373,8 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	}
 	if (pad.pressed & PAD_OPTIONS)
 		show_ = (show_ + 1) % 7;
+	if (pad.pressed & PAD_R3)
+		region_ = (region_ + 1) % 5;
 	if (pad.pressed & PAD_CIRCLE)
 		setView(board::View::Home);
 	const Game *g = n ? &games_[rack_[rack_sel_]] : nullptr;
@@ -1480,12 +1511,16 @@ void Frontend::rack(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f)
 	ink.text(f.mono, 13, bx, by + 10, kDim, "OPTIONS SHOW", .16f);
 	bx += ink.width(f.mono, 13, "OPTIONS SHOW", .16f) + 16;
 	chip(shows[show_], true);
+	bx += 18;
+	ink.text(f.mono, 13, bx, by + 10, kDim, "R3 REGION", .16f);
+	bx += ink.width(f.mono, 13, "R3 REGION", .16f) + 16;
+	chip(regions[region_], true);
 	int shown = 0;
 	for (int k = 0; k < n; k++)
 		shown += visible(k);
 	char count[40];
 	snprintf(count, sizeof(count), "%d cartridges", shown);
-	ink.text(f.mono, 15, 1300 - ink.width(f.mono, 15, count), by + 9, kDim, count);
+	ink.text(f.mono, 15, std::max(bx + 24, 1300 - ink.width(f.mono, 15, count)), by + 9, kDim, count);
 	ink.text(f.mono, 14, 64, 1046, kDim,
 	         "\xE2\x97\x84 \xE2\x96\xBA \xE2\x96\xB2 \xE2\x96\xBC  CARTRIDGE      L2 \xC2\xB7 R2  LETTER      \xE2\x9C\x95  POWER ON      \xE2\x96\xB3  SEAT IT      \xE2\x97\x8B  HOME",
 	         .08f);
@@ -1893,16 +1928,36 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 		s.rows.push_back(choose("emulation.overclock", "Overclock N64 CPU (may cause bugs)", "When enabled, runs the emulated CPU faster than the N64's 93.75 MHz, at the Overclock Speed below. Can reduce slowdowns in heavy games, but may cause issues in some games.",
 		                        { { "Off", 0 }, { "On", 1 } }, 0));
 		s.rows.push_back(field_row("overclock_speed", "Overclock Speed",
-		                           "Selects the emulated CPU's clock when Overclock N64 CPU is on. A faster clock gives a game more time for each frame, which removes more of its slowdowns, but costs more processing on the console: the fastest may not hold full speed in demanding games. 187.5 MHz is twice the N64's clock.",
-		                           { { "125 MHz", 0 }, { "150 MHz", 1 }, { "187.5 MHz", 2 }, { "250 MHz", 3 }, { "281.25 MHz", 4 } }, 0));
+		                           "Selects the emulated CPU's clock when Overclock N64 CPU is on. A faster clock gives a game more time for each frame, which removes more of its slowdowns, but costs more processing on the console: the fastest suit only the heaviest romhacks. 187.5 MHz is twice the N64's clock.",
+		                           { { "125 MHz", 0 }, { "150 MHz", 1 }, { "187.5 MHz", 2 }, { "250 MHz", 3 }, { "281.25 MHz", 4 }, { "375 MHz", 5 }, { "468.75 MHz", 6 } }, 0));
 		s.rows.push_back(field_row("expansion_pak", "Expansion Pak", "Selects whether the N64 has the 8 MB it has with the Expansion Pak or its standard 4 MB. Auto turns it on, except for a game that misbehaves with it. Some games need the Expansion Pak, and a few misbehave with it.",
 		                           { { "Auto", PakAuto }, { "On", PakOn }, { "Off", PakOff } }, PakAuto));
 		{
 			/* the 64DD's IPL: Gopher64 takes the first 4 MB file in data/64dd whose region suits the disk */
 			Row r;
-			r.kind = Row::Info, r.key = "dd_ipl", r.label = "64DD IPL";
-			r.help = "Shows the 64DD IPL that starts 64DD disks: a 4 MB dump of the IPL, placed in \"/data/psgopher/data/64dd\". Disks are listed with the cartridges.";
-			r.value = [] {
+			r.kind = Row::File, r.key = "dd_ipl", r.label = "64DD IPL";
+			r.help = "Selects the 64DD IPL that starts 64DD disks, a 4 MB dump, from the console or a USB drive. When none is selected, the first in \"/data/psgopher/data/64dd\" is used. Press \xE2\x97\x84 to clear it.";
+			r.run = [this, ts] {
+				picker_mode_ = 0, picker_kind_ = 2, picker_rom_ = true, picker_sel_ = 0;
+				picker_folder_ = ts && !ts->ddIpl.empty() ? ts->ddIpl.substr(0, ts->ddIpl.rfind('/')) : "";
+				picker_done_ = [ts](const std::string &path) {
+					if (ts) {
+						ts->ddIpl = path;
+						ts->save();
+					}
+				};
+			};
+			r.clear = [ts] {
+				if (ts) {
+					ts->ddIpl.clear();
+					ts->save();
+				}
+			};
+			r.value = [ts] {
+				if (ts && !ts->ddIpl.empty()) {
+					const size_t slash = ts->ddIpl.rfind('/');
+					return slash == std::string::npos ? ts->ddIpl : ts->ddIpl.substr(slash + 1);
+				}
 				/* the one Gopher64 would take (a known IPL ID), when the core is linked in */
 				if (psgopher_dd_ipl) {
 					char path[512] = {};
@@ -1982,7 +2037,7 @@ void Frontend::bench(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f
 					return v.empty() ? std::string("\xE2\x80\x94 None") : baseName(v);
 				};
 				file.run = [this, key, which] {
-					picker_mode_ = 0;
+					picker_mode_ = 0, picker_kind_ = 0, picker_done_ = nullptr;
 					picker_key_ = key, picker_rom_ = which == 0, picker_sel_ = 0;
 					const std::string v = host_.text ? host_.text(key) : "";
 					picker_folder_ = v.empty() ? "" : v.substr(0, v.rfind('/'));
@@ -2539,7 +2594,8 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 				auto ends = [&](const char *t) { return lower.size() >= strlen(t) && lower.compare(lower.size() - strlen(t), strlen(t), t) == 0; };
 				if (S_ISDIR(st.st_mode))
 					folders.push_back({ std::string(e->d_name) + "/", path, true });
-				else if (picker_rom_ ? (ends(".gb") || ends(".gbc")) : (ends(".sav") || ends(".srm") || ends(".ram")))
+				else if (picker_kind_ == 2 ? (S_ISREG(st.st_mode) && st.st_size == 4 * 1024 * 1024)
+				                           : picker_rom_ ? (ends(".gb") || ends(".gbc")) : (ends(".sav") || ends(".srm") || ends(".ram")))
 					files.push_back({ e->d_name, path, false });
 			}
 			closedir(d);
@@ -2549,7 +2605,7 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 		std::sort(files.begin(), files.end(), by_name);
 		entries.insert(entries.end(), folders.begin(), folders.end());
 		entries.insert(entries.end(), files.begin(), files.end());
-		if (!picker_rom_) {
+		if (picker_kind_ == 0 && !picker_rom_) {
 			/* a save beside the ROM, made by Gopher64 when it is not there */
 			std::string rom = host_.text ? host_.text(("input.gb_rom_path." + picker_key_.substr(picker_key_.size() - 1)).c_str()) : "";
 			if (!rom.empty()) {
@@ -2576,7 +2632,9 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 				picker_folder_.clear();
 			picker_sel_ = 0;
 		} else {
-			if (host_.set_text)
+			if (picker_done_)
+				picker_done_(e.path);
+			else if (host_.set_text)
 				host_.set_text(picker_key_.c_str(), e.path);
 			picker_sel_ = -1;
 			return;
@@ -2586,7 +2644,7 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 	dl->AddRectFilled(S(0, 0), S(1920, 1080), IM_COL32(0, 0, 0, 150));
 	ink.rect(x, y, w, h, IM_COL32(7, 17, 21, 250), 16);
 	ink.frame(x, y, w, h, kAmber, 16, 2);
-	ink.text(f.display, 26, x + 28, y + 18, kText, picker_rom_ ? "Game Boy ROM" : "Game Boy save");
+	ink.text(f.display, 26, x + 28, y + 18, kText, picker_kind_ == 2 ? "64DD IPL" : picker_rom_ ? "Game Boy ROM" : "Game Boy save");
 	ink.text(f.mono, 14, x + 28, y + 56, kDim, picker_folder_.empty() ? "the console and its USB drives" : picker_folder_);
 	const int visible = (int)((h - 140) / rh);
 	const int first = std::clamp(picker_sel_ - visible / 2, 0, std::max(0, n - visible));
@@ -2598,7 +2656,7 @@ void Frontend::filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFon
 		ink.text(f.mono_bold, 16, x + 28, ry + 9, here ? kInk : (entries[i].folder ? kText : kDim), entries[i].label);
 	}
 	if (n == 1 && !picker_folder_.empty())
-		ink.text(f.mono, 14, x + 28, y + 140, kDim, picker_rom_ ? "No .gb or .gbc files here" : "No .sav files here");
+		ink.text(f.mono, 14, x + 28, y + 140, kDim, picker_kind_ == 2 ? "No 4 MB files here" : picker_rom_ ? "No .gb or .gbc files here" : "No .sav files here");
 	ink.text(f.mono, 14, x + 28, y + h - 34, kDim, "\xE2\x96\xB2 \xE2\x96\xBC  MOVE      \xE2\x9C\x95  OPEN \xC2\xB7 CHOOSE      \xE2\x97\x8B  CLOSE", .08f);
 }
 

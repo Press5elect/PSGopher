@@ -4016,7 +4016,7 @@ index 1fe4cbb..b8a2b7c 100644
      device.cpu.cop1.instrs = [
          device::cop1::mfc1,           // 0
 diff --git a/src/device/cpu.rs b/src/device/cpu.rs
-index 07aedb0..c8933ea 100644
+index 07aedb0..a0cc410 100644
 --- a/src/device/cpu.rs
 +++ b/src/device/cpu.rs
 @@ -41,23 +41,40 @@ pub struct Cpu {
@@ -4065,12 +4065,12 @@ index 07aedb0..c8933ea 100644
  }
  
  pub fn init(device: &mut device::Device) {
-+    // PSGopher: the overclocked rate is the one chosen in BENCH (PSGOPHER_OVERCLOCK_HZ: 125 to 281.25 MHz)
++    // PSGopher: the overclocked rate is the one chosen in BENCH (PSGOPHER_OVERCLOCK_HZ: 125 to 468.75 MHz)
 +    #[cfg(psgopher)]
 +    let overclock_hz: u64 = std::env::var("PSGOPHER_OVERCLOCK_HZ")
 +        .ok()
 +        .and_then(|v| v.parse::<u64>().ok())
-+        .filter(|hz| (93_750_000..=281_250_000).contains(hz))
++        .filter(|hz| (93_750_000..=468_750_000).contains(hz))
 +        .unwrap_or(125_000_000);
 +    #[cfg(not(psgopher))]
 +    let overclock_hz: u64 = 125_000_000;
@@ -9040,7 +9040,7 @@ index 593659b..3c0c51f 100644
  
      if !in_rollback {
 diff --git a/src/lib.rs b/src/lib.rs
-index 4e51a1b..292e88a 100644
+index 4e51a1b..281736b 100644
 --- a/src/lib.rs
 +++ b/src/lib.rs
 @@ -3,6 +3,12 @@
@@ -9087,7 +9087,7 @@ index 4e51a1b..292e88a 100644
          let rt = tokio::runtime::Runtime::new().expect("Failed to build runtime");
          tx.send(rt.handle().clone()).unwrap();
          rt.block_on(close_rx).unwrap();
-@@ -145,14 +168,34 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+@@ -145,14 +168,46 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
  
      ui::sdl_hints();
  
@@ -9098,7 +9098,6 @@ index 4e51a1b..292e88a 100644
 -                "Could not read ROM file: {}",
 -                file_path.display()
 -            )));
--        };
 +    if args.game.is_some() || args.disk.is_some() || args.dd_ipl.is_some() {
 +        let game = args.game;
 +        let mut rom_contents = Vec::new();
@@ -9114,8 +9113,20 @@ index 4e51a1b..292e88a 100644
 +        }
 +        // the 64DD (an IPL and/or a disk); with no game the IPL boots, and the run is named by
 +        // the disk (device/dd.rs placeholder_rom)
++        // PSGopher: the IPL chosen in BENCH (PSGOPHER_DD_IPL) when a disk is given without --dd-ipl
++        #[cfg(psgopher)]
++        let chosen_ipl = if args.dd_ipl.is_none() && args.disk.is_some() {
++            std::env::var("PSGOPHER_DD_IPL")
++                .ok()
++                .filter(|path| !path.is_empty())
++        } else {
++            None
+         };
++        #[cfg(not(psgopher))]
++        let chosen_ipl: Option<String> = None;
++        let dd_ipl = args.dd_ipl.clone().or(chosen_ipl);
 +        let dd = device::dd::attach(
-+            args.dd_ipl.as_deref().map(std::path::Path::new),
++            dd_ipl.as_deref().map(std::path::Path::new),
 +            args.disk.as_deref().map(std::path::Path::new),
 +            &dirs.data_dir.join("64dd"),
 +            &dirs.data_dir.join("saves"),
@@ -9130,7 +9141,7 @@ index 4e51a1b..292e88a 100644
  
          let cheats = if let Some(cheats_file) = args.cheats {
              if let Ok(data) = std::fs::read(cheats_file)
-@@ -184,10 +227,13 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+@@ -184,10 +239,13 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
              .transpose()?;
          let mut device = device::Device::new(true);
          device.bk2_playback = playback;
@@ -9147,7 +9158,7 @@ index 4e51a1b..292e88a 100644
  
          if args.fullscreen {
              device.ui.video.fullscreen = true;
-@@ -227,7 +273,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+@@ -227,7 +285,12 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
                  }
              }
  
@@ -9161,7 +9172,7 @@ index 4e51a1b..292e88a 100644
                  (shutdown_tx, usb_handle, device.ui.usb) = ui::usb::init();
              }
          }
-@@ -283,9 +334,9 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
+@@ -283,9 +346,9 @@ pub fn run(args: Args, arg_count: usize) -> std::io::Result<()> {
              None
          };
  

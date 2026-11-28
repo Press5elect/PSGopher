@@ -135,7 +135,7 @@ private:
 	int strip_sel_ = 0, rack_sel_ = 0;
 	float strip_x_ = 0; // the strip's scroll (eased)
 	float rack_scroll_ = 0;
-	int sort_ = 0, show_ = 0;
+	int sort_ = 0, show_ = 0, region_ = 0; // region_: 0 all, 1 USA, 2 Europe (PAL), 3 Japan, 4 other (R3)
 	int bench_section_ = 0, bench_sel_ = 0;
 	float bench_scroll_ = 0;
 	/* a game's page (Triangle on HOME): BENCH's Video, Screen & Sound, Emulation and Controllers rows for one
@@ -177,6 +177,8 @@ private:
 	int picker_sel_ = -1;
 	std::string picker_folder_, picker_key_;
 	bool picker_rom_ = true;
+	int picker_kind_ = 0; // 0 a Game Boy ROM or save (picker_rom_), 2 the 64DD IPL (files of 4 MB)
+	std::function<void(const std::string &)> picker_done_; // set: the chosen file goes to it (else to picker_key_)
 	void filePicker(ImDrawList *dl, const PadInput &pad, const FrontendFonts &f);
 	/* the game folders (BENCH > Console): 0 the Game Boy picker above, 1 the list of chosen folders,
 	 * 2 choosing one to add (picker_folder_ is where it is); a change searches again when it closes */

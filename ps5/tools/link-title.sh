@@ -142,6 +142,9 @@ cp "$root/ps5/art/board.png" "$root/ps5/art/logo.png" "$app/art/"
 # which games use the Expansion Pak (ps5/host/expansion_pak.h)
 mkdir -p "$app/gamedata"
 cp "$root/ps5/gamedata/expansion-pak.tsv" "$app/gamedata/"
+# the game IDs' No-Intro names (covers and descriptions by the cartridge's ID), from the No-Intro
+# database Gopher64 carries at its pin
+python3 "$root/ps5/tools/make-nointro-ids.py" "$app/gamedata/nointro-ids.tsv"
 # the attributions kept and the other authors' parts (NOTICE), and the fonts' licence
 cp "$root/NOTICE" "$app/NOTICE.txt"
 # the licence the program is under (GPL-3.0: it goes with every copy of the binary), the user's guide

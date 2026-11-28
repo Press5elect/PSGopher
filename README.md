@@ -32,8 +32,8 @@ by size and checksum. The patch is listed as its own cartridge and applied when 
 ROM is not changed.
 
 **64DD disks** (`.ndd`, `.d64`) are listed with the cartridges. They need the 64DD's IPL, which is
-not included: put your 4 MB dump of it in `/data/psgopher/data/64dd` (BENCH > Emulation > 64DD IPL
-shows the one found). Disk writes are kept beside your saves; the disk image is never changed.
+not included: choose your 4 MB dump of it in BENCH > Emulation > 64DD IPL (✕), or put it in
+`/data/psgopher/data/64dd`. Disk writes are kept beside your saves; the disk image is never changed.
 
 - **HOME**: the board and the cartridge strip (recently played first). ◄ ► cartridge, ✕ power on,
   □ power on from a probe, △ the game's page (its cheats and its own settings, below). ○ asks to close PSGopher (✕ closes, ○ stays). Each cartridge shows its box art (libretro's thumbnails) and

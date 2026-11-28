@@ -39,6 +39,12 @@ ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=add
     "$root/ps5/broker/server.cpp" -o "$out/test_library" -lpthread
 "$out/test_library" "$out/library"
 
+# covers and descriptions by the game ID: the No-Intro table made from Gopher64's database, and the lookup
+python3 "$root/ps5/tools/make-nointro-ids.py" "$out/nointro-ids.tsv"
+${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -fsanitize=address,undefined -I"$root/ps5/host" \
+    "$root/ps5/tests/test_nointro.cpp" "$root/ps5/host/nointro.cpp" -o "$out/test_nointro"
+"$out/test_nointro" "$out/nointro-ids.tsv"
+
 # romhack patches (romhack.cpp): IPS, BPS and UPS, byte orders, malformed patches
 ${CXX:-g++} -std=c++20 -O1 -g -Wall -Wextra -Wno-unused-parameter -fsanitize=address,undefined -I"$root/ps5/host" \
     "$root/ps5/tests/test_romhack.cpp" "$root/ps5/host/romhack.cpp" -o "$out/test_romhack"
@@ -85,7 +91,7 @@ if [[ -f $imgui/imgui.cpp && -f $rdp/volk/volk.c && -f $root/build/ps5/gen/font_
     done
     ${CXX:-g++} "${menu_flags[@]}" -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers -Wno-unused-function \
         -Wno-unused-variable \
-        "$root/ps5/tests/test_menu.cpp" "$root/ps5/host/menu.cpp" "$root/ps5/host/library.cpp" "$root/ps5/host/romhack.cpp" \
+        "$root/ps5/tests/test_menu.cpp" "$root/ps5/host/menu.cpp" "$root/ps5/host/library.cpp" "$root/ps5/host/romhack.cpp" "$root/ps5/host/nointro.cpp" \
         "$root/ps5/host/frontend.cpp" "$root/ps5/host/board.cpp" "$root/ps5/host/image.cpp" "$root/ps5/host/web.cpp" \
         "$root/ps5/host/title_settings.cpp" "$root/ps5/host/game_settings.cpp" "$root/ps5/host/expansion_pak.cpp" "$root/ps5/host/shares.cpp" "$root/ps5/host/sandbox.cpp" \
         "$root/ps5/host/write_broker.cpp" \

@@ -61,6 +61,7 @@ extern "C" const char *psgopher_menu_host_shot;
 #include "title_settings.h"
 #include "update.h"
 #include "web.h"
+#include "nointro.h"
 
 extern "C" {
 #include "platform.h"
@@ -84,6 +85,20 @@ int wsi_videoout_hdr10(void) __attribute__((weak));
 namespace psgopher {
 
 namespace {
+
+/* The name a cartridge's cover and description are looked up by: its No-Intro name by the header's game
+ * ID and revision (libretro's box art is named by it), so the ROM file's own name does not matter; the
+ * file's name for a romhack (its header is often the base game's), a disk, a .zip or .7z (no header
+ * read) or an ID No-Intro does not list */
+std::string lookupName(const Game &g)
+{
+	if (g.base.empty() && g.facts && g.id.size() == 4) {
+		const std::string name = noIntroName(g.id, g.revision);
+		if (!name.empty())
+			return name;
+	}
+	return g.name;
+}
 
 const char kNetworkFile[] = "/data/psgopher/config/network.cfg";
 std::string g_titleDir = "/app0";
@@ -1268,6 +1283,7 @@ void startShares(const std::string &titleDir)
 {
 	g_titleDir = titleDir;
 	pakUseFile(titleDir + "/gamedata/expansion-pak.tsv");
+	noIntroUseFile(titleDir + "/gamedata/nointro-ids.tsv");
 	static std::string shadow;
 	shadow = titleDir + "/sce_sys/param.json";
 	ps5vfs_set_shadow_path(shadow.c_str());
@@ -1468,7 +1484,8 @@ MenuResult runMenu(const std::string &notice)
 			return true;
 		};
 		host.cover = [m, dp, make_room](const Game &g) -> std::pair<ImTextureID, float> {
-			auto it = m->covers.find(g.name);
+			const std::string name = lookupName(g);
+			auto it = m->covers.find(name);
 			if (it != m->covers.end()) {
 				it->second.shown = m->frames;
 				return { it->second.id, it->second.aspect };
@@ -1479,7 +1496,7 @@ MenuResult runMenu(const std::string &notice)
 			if (!make_room(false))
 				return { ImTextureID_Invalid, 0.0f }; /* (nothing is taken: it stays with the web thread for later) */
 			Image picture;
-			if (webCover(g.name, &picture) != WebState::Ready)
+			if (webCover(name, &picture) != WebState::Ready)
 				return { ImTextureID_Invalid, 0.0f };
 			make_room(true);
 			m->uploaded_at = m->frames;
@@ -1489,7 +1506,7 @@ MenuResult runMenu(const std::string &notice)
 			c.id = uploadTexture(*dp, picture);
 			c.aspect = picture.height ? (float)picture.width / (float)picture.height : 0;
 			c.shown = m->frames;
-			m->covers[g.name] = c;
+			m->covers[name] = c;
 			return { c.id, c.aspect };
 		};
 		/* a probe's picture (the state file's path and ".png": probe_picture.h): the same textures and
@@ -1517,7 +1534,7 @@ MenuResult runMenu(const std::string &notice)
 			m->covers[key] = c;
 			return { c.id, c.aspect };
 		};
-		host.about = [](const Game &g) { return webAbout(g.name); };
+		host.about = [](const Game &g) { return webAbout(lookupName(g)); };
 		host.text = [m](const char *key) { return m->text(key); };
 		host.set_text = [m](const char *key, const std::string &value) { return m->setText(key, value); };
 		host.profiles = [m] { return m->profiles(); };

@@ -52,13 +52,26 @@ Every change, the newest version first. Games are named by cartridge ID only.
   Gopher64 will use, and the title makes its folder.
 - Added: **Overclock Speed** (BENCH > Emulation, and a game's page): the emulated CPU's clock when
   Overclock N64 CPU is on: 125 MHz (Gopher64's, the default), 150, 187.5 (twice the N64's), 250 or
-  281.25 MHz (three times). A faster clock costs more of the console's processing; the boot log's
+  281.25 MHz (three times), 375 or 468.75 MHz (five times: for the heaviest romhacks; one ran at
+  about 10 fps at 281.25 MHz with the console idle most of each frame). The RSP and RDP are timed in
+  the CPU's cycles, so they speed up with it. A faster clock costs more of the console's processing; the boot log's
   `settings:` line names the clock. Not run on a console.
 - Fixed: 64DD disk images named like ROMs (`.n64`, as some sets name them) are recognised by their
   size and the absence of a cartridge header, and start as disks (they ended with "Could not read
   ROM file"); other titles' folders in `/data/homebrew` are not searched (an Xbox emulator's patch
   files were taken for romhacks); a large drive is searched N64-named folders first, then shallow
   before deep, and the log says how much its budget left out; at most 20 "not listed" lines a search.
+- Changed: covers and descriptions are looked up by the cartridge's game ID and revision (its
+  No-Intro name, from the No-Intro database Gopher64 carries: `gamedata/nointro-ids.tsv`, made by
+  `ps5/tools/make-nointro-ids.py` at build), not by the ROM file's name: a ROM named anything gets
+  its own cover, revisions their own. Romhacks, disks, `.zip`/`.7z` files and IDs No-Intro does not
+  list still go by the file's name.
+- Added: **a region filter** in RACK (R3): All regions, USA, Europe (PAL), Japan, Other regions, by
+  the header's destination letter (by the file name's tags for a `.zip` or `.7z`); it combines with
+  OPTIONS' filter.
+- Added: **the 64DD IPL can be chosen** (BENCH > Emulation > 64DD IPL, ✕): any 4 MB file on the
+  console or a USB drive; ◄ clears it, and with none the first known IPL in `data/64dd` is used.
+- Changed: libnfs moved to `7306d5f9b8d3` (absolute symlinks on an NFS export followed from its root).
 - Fixed: a change to Game Folders or the shares made while a search was running was dropped: the
   search now runs again when that one ends.
 - Fixed: a chosen game folder on a USB drive that is unplugged no longer keeps its games in the

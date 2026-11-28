@@ -43,8 +43,19 @@ void TitleSettings::load()
 		return;
 	}
 	pictureDefaults = 0; /* (a file from before picture_defaults: see below) */
-	char line[256];
+	char line[1024];
 	while (fgets(line, sizeof(line), f)) {
+		/* a path (dd_ipl) may hold spaces: the rest of its line, trimmed */
+		if (!strncmp(line, "dd_ipl", 6)) {
+			const char *eq = strchr(line, '=');
+			std::string path = eq ? eq + 1 : "";
+			while (!path.empty() && strchr(" \t\r\n", path.front()))
+				path.erase(0, 1);
+			while (!path.empty() && strchr(" \t\r\n", path.back()))
+				path.pop_back();
+			ddIpl = path;
+			continue;
+		}
 		char key[64] = {}, value[128] = {};
 		if (line[0] == '#' || sscanf(line, " %63[a-z_0-9] = %127s", key, value) != 2)
 			continue;
@@ -110,7 +121,7 @@ void TitleSettings::load()
 		else if (!strcmp(key, "downsample"))
 			downsample = std::clamp(atoi(value), 0, 3);
 		else if (!strcmp(key, "overclock_speed"))
-			overclockSpeed = std::clamp(atoi(value), 0, 4);
+			overclockSpeed = std::clamp(atoi(value), 0, 6);
 		else if (!strcmp(key, "deinterlace"))
 			deinterlace = !strcmp(value, "bob") ? 0 : 1;
 		else if (!strcmp(key, "hotkeys"))
@@ -257,9 +268,12 @@ bool TitleSettings::save() const
 		const size_t used = strlen(text);
 		snprintf(text + used, sizeof(text) - used,
 		         "\n# overclock_speed: the N64 CPU's clock when Overclock N64 CPU (Gopher64's switch, in its config.json) is on:\n"
-		         "# 0 125 MHz (Gopher64's), 1 150 MHz, 2 187.5 MHz (twice the N64's), 3 250 MHz, 4 281.25 MHz (three times)\n"
-		         "overclock_speed = %d\n",
-		         overclockSpeed);
+		         "# 0 125 MHz (Gopher64's), 1 150 MHz, 2 187.5 MHz (twice the N64's), 3 250 MHz, 4 281.25 MHz (three times), 5 375 MHz, 6 468.75 MHz (five times)\n"
+		         "overclock_speed = %d\n"
+		         "# dd_ipl: the 64DD IPL (the drive's BIOS, a 4 MB dump) a disk starts with; empty: the first known IPL in\n"
+		         "# /data/psgopher/data/64dd\n"
+		         "dd_ipl = %s\n",
+		         overclockSpeed, ddIpl.c_str());
 	}
 	{
 		static const char *const kSharpeningWords[] = { "off", "low", "medium", "high" };
@@ -320,7 +334,7 @@ const Field kFields[] = {
 	  [](TitleSettings &t, int64_t v) { t.cropOverscan = v >= 16 ? 16 : v >= 8 ? 8 : 0; } },
 	{ "downsample", [](const TitleSettings &t) -> int64_t { return t.downsample; }, [](TitleSettings &t, int64_t v) { t.downsample = (int)std::clamp<int64_t>(v, 0, 3); } },
 	{ "overclock_speed", [](const TitleSettings &t) -> int64_t { return t.overclockSpeed; },
-	  [](TitleSettings &t, int64_t v) { t.overclockSpeed = (int)std::clamp<int64_t>(v, 0, 4); } },
+	  [](TitleSettings &t, int64_t v) { t.overclockSpeed = (int)std::clamp<int64_t>(v, 0, 6); } },
 	{ "deinterlace", [](const TitleSettings &t) -> int64_t { return t.deinterlace; }, [](TitleSettings &t, int64_t v) { t.deinterlace = v == 1 ? 1 : 0; } },
 };
 const Field *fieldOf(const std::string &key)
@@ -406,8 +420,10 @@ void TitleSettings::applyHdr() const
 	setenv("PSGOPHER_CROP_OVERSCAN", std::to_string(cropOverscan).c_str(), 1);
 	setenv("PSGOPHER_DOWNSAMPLE", std::to_string(downsample).c_str(), 1);
 	/* the CPU's clock with Overclock on: read when the game's CPU starts (cpu.rs) */
-	static const char *const kOverclockHz[] = { "125000000", "150000000", "187500000", "250000000", "281250000" };
-	setenv("PSGOPHER_OVERCLOCK_HZ", kOverclockHz[std::clamp(overclockSpeed, 0, 4)], 1);
+	static const char *const kOverclockHz[] = { "125000000", "150000000", "187500000", "250000000", "281250000", "375000000", "468750000" };
+	setenv("PSGOPHER_OVERCLOCK_HZ", kOverclockHz[std::clamp(overclockSpeed, 0, 6)], 1);
+	/* the 64DD IPL chosen in BENCH: read when a disk starts (lib.rs) */
+	setenv("PSGOPHER_DD_IPL", ddIpl.c_str(), 1);
 	setenv("PSGOPHER_DEINTERLACE", deinterlace == 1 ? "blend" : "bob", 1);
 	say("rdp: compute waves %d wide, 8/16-bit arithmetic %s%s", wave32 ? 32 : 64, smallTypes ? "on" : "off (parallel-rdp's choice on RADV)",
 	    gpuTiming ? ", GPU timing on" : "");

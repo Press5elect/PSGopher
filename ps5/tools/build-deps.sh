@@ -26,7 +26,7 @@ bld="$deps/build"
 mkdir -p "$src" "$sys/include" "$sys/lib" "$bld"
 
 libsmb2_revision=5fdd128012b384ed2a79293611d7f7dbaaa84cc7   # master, 2026-11-25
-libnfs_revision=3fb4f2a299cef533115d1658fe8261144b2f3e18    # master, 2026-11-25
+libnfs_revision=7306d5f9b8d3f3e7841628453132386812ca0ef3    # master, 2026-11-28 (absolute symlinks followed from the export root)
 imgui_revision=0baafdcd3870bcdf5714a81ee2e4b1cc90ed134c     # master, 2026-11-26 (after v1.93.1)
 bricolage_revision=84745e5b96261ae5f8c6c856e262fe78d1d6efdd # HEAD, 2026-11-25
 jetbrains_mono_revision=19371302b95d218af43299bce79ddbddd0bc364d # HEAD, 2026-11-25
